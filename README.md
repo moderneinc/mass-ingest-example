@@ -1,34 +1,36 @@
 # Mass Ingest
 
-This example demonstrates how to use the `mod` CLI to ingest a large number of repositories into a Moderne platform.
+This example demonstrates how to use the [Moderne CLI](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro) to ingest a large number of repositories into a Moderne platform.
 
-See also:
-https://docs.moderne.io/administrator-documentation/moderne-platform/how-to-guides/integrating-private-code
+You can find a [detailed step-by-step guide for how to set up ingestion](https://docs.moderne.io/administrator-documentation/moderne-platform/how-to-guides/integrating-private-code) in the Moderne docs. You can also follow along with this README.
 
-## Creating `repos.csv`
+## Step 1: Create a `repos.csv` file
 
-The input for the ingestion process is a CSV file of repositories to ingest, one per line.
+The first step needed to integrate private code is to come up with a list of repositories that should be ingested (`repos.csv`). This list should be in a CSV format with the first row composed of headers for the columns.
 
-If you're using GitHub the `gh` CLI is a convenient way to generate this list of repositories.
+At the very least, you must include two columns: `cloneUrl` and `branch`. However, you can also include additional optional columns if additional information is needed to build your repositories. These optional columns are: `changeset`, `java`, `jvmOpts`, `mavenArgs`, `gradleArgs`, and `bazelRule` (see the [mod git clone csv documentation](https://docs.moderne.io/user-documentation/moderne-cli/cli-reference#mod-git-clone-csv) for more information).
+
+If you use GitHub, you may find it useful to use the GitHub CLI to generate a list of repositories for your organization. For instance, the following command would generate a `repos.csv` file for the `spring-projects` GitHub organization:
+
 ```bash
 echo "cloneUrl,branch" > repos.csv
-gh repo list openrewrite --source --no-archived --limit 1000 --json sshUrl,defaultBranchRef --template "{{range .}}{{.sshUrl}},{{.defaultBranchRef.name}}{{\"\n\"}}{{end}}" >> repos.csv
+gh repo list spring-projects --source --no-archived --limit 1000 --json sshUrl,defaultBranchRef --template "{{range .}}{{.sshUrl}},{{.defaultBranchRef.name}}{{\"\n\"}}{{end}}" >> repos.csv
 ```
 
-Additional columns can be provided as necessary, but the `cloneUrl` and `branch` columns are required.
-Also see [`mod git clone csv` documentation](https://docs.moderne.io/user-documentation/moderne-cli/cli-reference#mod-git-clone-csv).
+## Step 2: Customize the Docker image
 
-## Customizing the Docker image
+Begin by copying the [provided Dockerfile](/Dockerfile) to your ingestion repository.
 
-The ingest process requires access to several of your internal systems to function correctly. 
-This includes your source control system, artifact repository, and Moderne tenant or DX instance.
+From there, we will modify it depending on your organizational needs. Please note that the ingestion process requires access to several of your internal systems to function correctly. This includes your source control system, your artifact repository, and your Moderne tenant or DX instance.
 
 ### Self-Signed Certificates
 
-Some organizations configure their internal services with self-signed certificates.
-Comment out the following lines from the `Dockerfile` if your services are accessed:
-* Over https/require [SSL/TLS](https://en.wikipedia.org/wiki/Transport_Layer_Security) but have certificates signed by a trusted-by-default root Certificate Authority.
-* Over http, never requiring SSL/TLS
+If your internal services (artifact repository, source control, or the Moderne tenant) are accessed:
+
+* Over HTTPS and they require [SSL/TLS](https://en.wikipedia.org/wiki/Transport_Layer_Security), but have certificates signed by a trusted-by-default root Certificate Authority.
+* Over HTTP (never requiring SSL/TLS)
+
+Please comment out the following lines from your Dockerfile: 
 
 ```Dockerfile
 # Configure trust store if self-signed certificates are in use for artifact repository, source control, or moderne tenant
@@ -37,72 +39,66 @@ COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-11-jdk/lib/security/cacer
 COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-17-jdk/lib/security/cacerts
 ```
 
-If you access any of these services over https/SSL you will need to configure the CLI and JVMs installed within the Docker image
-to trust your organization's self-signed certificates.
+If your internal services, instead, use self-signed certs, you will need to configure the CLI and JVMs installed within the Docker image to trust your organization's self-signed certificate:
 
-When invoking docker, supply the `TRUSTED_CERTIFICATES_PATH` argument pointing to an appropriate cacerts file
+When invoking, Docker, supply the `TRUSTED_CERTIFICATES_PATH` argument pointing to an appropriate [cacerts file](https://www.ibm.com/docs/en/sdk-java-technology/8?topic=certificate-cacerts-certificates-file).
 
-If you are not sure where to get a suitable cacerts file you probably have one on your local machine.
-On JDK 8 you can find your cacerts file within its installation directory under `jre/lib/security/cacerts`.
-On newer JDK versions you can find your cacerts file within its installation directory under `lib/security/cacerts`.
+If you are not sure where to get a suitable cacerts file, you can check out your local machine as you probably have one there. On JDK 8, you can find your cacerts file within its installation directory under `jre/lib/security/cacerts`. On newer JDK versions, you can find your cacerts file within is installation directory under `lib/security/cacerts`.
 
 ### Artifact repository
 
-The CLI needs access to artifact repositories to publish the LSTs produced during ingest.
-This is configured via the `PUBLISH_URL`, `PUBLISH_USER`, and `PUBLISH_PASSWORD` arguments to the `Dockerfile`. 
+The CLI needs access to artifact repositories to publish the LSTs produced during the ingestion process. This is configured via the `PUBLISH_URL`, `PUBLISH_USER`, and `PUBLISH_PASSWORD` [arguments in the Dockerfile](/Dockerfile#L18-L20).
 
-We recommend configuring a repository specifically for LSTs.
-This avoids intermixing LSTs with other kinds of artifacts, which has several benefits. 
-Updates and improvements to Moderne's parsers can make publishing LTSs based on the same commit desirable, 
-which can cause problems with version number collisions in other arrangements.
-Keeping LSTs separate also simplifies the cleanup of old LSTs which are no longer relevant, a policy you would not wish 
-to accidentally apply to your other artifacts.
-LSTs are must be published to maven-formatted artifact repositories, but repositories with non-JVM code likely publish artifacts to repositories of other types.
+We recommend configuring a repository specifically for LSTs. This avoids intermixing LSTs with other kinds of artifacts – which has several benefits. For instance, updates and improvements to Moderne's parsers can make publishing LSTs based on the same commit desirable. However, doing so could cause problems with version number collisions if you've configured it in another way. 
+
+Keeping LSTs separate also simplifies the cleanup of old LSTs which are no longer relevant – a policy you would not wish to accidentally apply to your other artifacts. 
+
+Lastly, LSTs must be published to Maven-formatted artifact repositories, but repositories with non-JVM code likely publish artifacts to repositories of other types.
 
 ### Source Control Credentials
 
-Most source control systems require authentication to access their repositories. 
-If your source control does not require authentication to `git clone` repositories, comment out these lines:
-```dockerfile
+Most source control systems require authentication to access their repositories. If your source control **does not** require authentication to `git clone` repositories, comment out the [following lines](/Dockerfile#L35-L36):
+
+```Dockerfile
 ADD .git-credentials /root/.git-credentials
 RUN git config --global credential.helper store --file=/root/.git-credentials
 ```
 
-In the more common scenario that your source control does require authentication, you will need to create and include a `.git-credentials` file.
-You will want to supply the credentials for a service account with access to all repositories.
+In the more common scenario that your source control does require authentication, you will need to create and include a `.git-credentials` file. You will want to supply the credentials for a service account with access to all repositories.
 
-Each line of .gitcredentials specifies the `username` and plaintext `password` for a particular `host` in the format:
+Each line of the `.git-credentials` file specifies the `username` and plaintext `password` for a particular `host` in the format:
+
 ```
 https://username:password@host
 ```
+
 For example:
+
 ```
 https://sambsnyd:likescats@github.com
 ```
 
 ### Maven Settings
 
-If your organization does not use the Maven build tool comment out these lines:
-```dockerfile
+If your organization **does not** use the Maven build tool, comment out the [following lines](/Dockerfile#L30-L31):
+
+```Dockerfile
 ADD ~/.m2/settings.xml /root/.m2/settings.xml
 RUN java -jar mod.jar config build maven settings edit /root/.m2/settings.xml
 ```
-Within organizations which use Maven it is common to put shared configuration for the build in a settings.xml file.
-Often this configuration file is required to build most repositories.
 
-settings.xml is typically located at `~/.m2/settings.xml`, but your configuration may differ.
+If your organization does use Maven, you more than likely have shared configurations in a `settings.xml` file. This configuration file is usually required to build most repositories. You'll want to ensure that the Docker image points to the appropriate file. `settings.xml` is typically located at `~/.m2/settings.xml`, but your configuration may differ.
 
 ### Moderne Tenant or DX instance
 
-Connection to a Moderne tenant allows the CLI to determine when it is unnecessary to re-build an LST.
-The `MODERNE_TENANT` and `MODERNE_TOKEN` arguments are required to connect to a Moderne tenant.
+Connection to a Moderne tenant allows the CLI to determine when it is unnecessary to re-build an LST (as the LST could be downloaded instead to save time). The `MODERNE_TENANT` and `MODERNE_TOKEN` arguments are required to connect to a Moderne tenant.
 
-If you are connecting to a Moderne DX instance, you will need to provide the token it was configured to accept on startup.
-If you are connecting to a Moderne tenant, you can create an access token from `settings/access-token`.
+If you are connecting to a Moderne DX instance, you will need to provide the token it was configured to accept on startup. If you are connecting to a Moderne tenant, you will need to create and use a [Moderne personal access token](https://docs.moderne.io/user-documentation/moderne-platform/how-to-guides/create-api-access-tokens). 
 
-## Building the Docker image
+## Step 3: Build the Docker image
 
-`Dockerfile`, you can build the image with the following command, filling in your organization's specific values for the build arguments:
+Once you've customized the `Dockerfile` as needed, you can build the image with the following command, filling in your organization's specific values for the build arguments:
+
 ```bash
 docker build -t moderne-mass-ingest:latest \
     --build-arg MODERNE_TENANT=<> \
@@ -114,5 +110,6 @@ docker build -t moderne-mass-ingest:latest \
     .
 ```
 
-Also see [the complete list of configuration options](https://docs.moderne.io/user-documentation/moderne-cli/cli-reference),
+## Step 4: Deploy and run the image
 
+Now that you have a Docker image built, you will need to deploy it to the container management platform of your choice and have it run on a schedule. We will leave this as an exercise for the reader as there are many platforms and options for running this. 
