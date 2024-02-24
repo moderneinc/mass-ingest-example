@@ -12,7 +12,7 @@ COPY --from=jdk11 /opt/java/openjdk /usr/lib/jvm/temurin-11-jdk
 COPY --from=jdk17 /opt/java/openjdk /usr/lib/jvm/temurin-17-jdk
 
 FROM dependencies AS modcli
-ARG MODERNE_CLI_VERSION=2.7.0
+ARG MODERNE_CLI_VERSION=2.7.6
 ARG MODERNE_TENANT=app
 ARG MODERNE_TOKEN
 ARG PUBLISH_URL=https://artifactory.moderne.ninja/artifactory/moderne-ingest
