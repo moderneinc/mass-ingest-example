@@ -2,8 +2,6 @@
 
 This example demonstrates how to use the [Moderne CLI](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro) to ingest a large number of repositories into a Moderne platform.
 
-You can find a [detailed step-by-step guide for how to set up ingestion](https://docs.moderne.io/administrator-documentation/moderne-platform/how-to-guides/integrating-private-code) in the Moderne docs. You can also follow along with this README.
-
 ## Step 1: Create a `repos.csv` file
 
 The first step needed to integrate private code is to come up with a list of repositories that should be ingested (`repos.csv`). This list should be in a CSV format with the first row composed of headers for the columns.
