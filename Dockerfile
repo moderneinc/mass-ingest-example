@@ -1,6 +1,6 @@
-FROM eclipse-temurin:8-focal AS jdk8
-FROM eclipse-temurin:11-focal AS jdk11
-FROM eclipse-temurin:17-focal AS jdk17
+FROM eclipse-temurin:8-jammy AS jdk8
+FROM eclipse-temurin:11-jammy AS jdk11
+FROM eclipse-temurin:17-jammy AS jdk17
 
 # Install dependencies for `mod` cli
 FROM jdk17 AS dependencies
@@ -27,7 +27,7 @@ RUN java -jar mod.jar config moderne edit --token=${MODERNE_TOKEN} https://${MOD
 RUN java -jar mod.jar config lsts artifacts artifactory edit ${PUBLISH_URL} --user ${PUBLISH_USER} --password ${PUBLISH_PASSWORD}
 
 # Configure Maven Settings if they are required to build
-ADD ~/.m2/settings.xml /root/.m2/settings.xml
+ADD maven/settings.xml /root/.m2/settings.xml
 RUN java -jar mod.jar config build maven settings edit /root/.m2/settings.xml
 
 # Configure git credentials if they are required to clone
