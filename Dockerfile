@@ -27,7 +27,7 @@ RUN java -jar mod.jar config moderne edit --token=${MODERNE_TOKEN} https://${MOD
 RUN java -jar mod.jar config lsts artifacts artifactory edit ${PUBLISH_URL} --user ${PUBLISH_USER} --password ${PUBLISH_PASSWORD}
 
 # Configure Maven Settings if they are required to build
-ADD ~/.m2/settings.xml /root/.m2/settings.xml
+ADD maven/settings.xml /root/.m2/settings.xml
 RUN java -jar mod.jar config build maven settings edit /root/.m2/settings.xml
 
 # Configure git credentials if they are required to clone

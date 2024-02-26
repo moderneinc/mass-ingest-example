@@ -83,7 +83,7 @@ https://sambsnyd:likescats@github.com
 If your organization **does not** use the Maven build tool, comment out the [following lines](/Dockerfile#L30-L31):
 
 ```Dockerfile
-ADD ~/.m2/settings.xml /root/.m2/settings.xml
+ADD maven/settings.xml /root/.m2/settings.xml
 RUN java -jar mod.jar config build maven settings edit /root/.m2/settings.xml
 ```
 
