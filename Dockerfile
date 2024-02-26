@@ -1,6 +1,7 @@
 FROM eclipse-temurin:8-jammy AS jdk8
 FROM eclipse-temurin:11-jammy AS jdk11
 FROM eclipse-temurin:17-jammy AS jdk17
+FROM eclipse-temurin:21-jammy AS jdk21
 
 # Install dependencies for `mod` cli
 FROM jdk17 AS dependencies
@@ -10,6 +11,7 @@ RUN apt-get update && apt-get install -y git supervisor
 COPY --from=jdk8 /opt/java/openjdk /usr/lib/jvm/temurin-8-jdk
 COPY --from=jdk11 /opt/java/openjdk /usr/lib/jvm/temurin-11-jdk
 COPY --from=jdk17 /opt/java/openjdk /usr/lib/jvm/temurin-17-jdk
+COPY --from=jdk21 /opt/java/openjdk /usr/lib/jvm/temurin-21-jdk
 
 FROM dependencies AS modcli
 ARG MODERNE_CLI_VERSION=2.7.6
