@@ -1,6 +1,6 @@
-FROM eclipse-temurin:8-focal AS jdk8
-FROM eclipse-temurin:11-focal AS jdk11
-FROM eclipse-temurin:17-focal AS jdk17
+FROM eclipse-temurin:8-jammy AS jdk8
+FROM eclipse-temurin:11-jammy AS jdk11
+FROM eclipse-temurin:17-jammy AS jdk17
 
 # Install dependencies for `mod` cli
 FROM jdk17 AS dependencies
