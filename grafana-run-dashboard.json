@@ -47,7 +47,7 @@
       },
       "gridPos": {
         "h": 10,
-        "w": 5,
+        "w": 10,
         "x": 0,
         "y": 0
       },
@@ -55,7 +55,7 @@
       "options": {
         "legend": {
           "displayMode": "table",
-          "placement": "bottom",
+          "placement": "right",
           "showLegend": true,
           "sortBy": "Percent",
           "sortDesc": false,
@@ -93,107 +93,6 @@
       ],
       "title": "Recipe run stages",
       "type": "piechart"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "P1809F7CD0C75ACF3"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "stepBefore",
-            "lineWidth": 2,
-            "pointSize": 1,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 10,
-        "w": 5,
-        "x": 5,
-        "y": 0
-      },
-      "id": 7,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true,
-          "sortBy": "Max",
-          "sortDesc": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "P1809F7CD0C75ACF3"
-          },
-          "editorMode": "code",
-          "expr": "max(moderne_cli_run_seconds_max)",
-          "instant": false,
-          "legendFormat": "longest run",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Max run duration",
-      "type": "timeseries"
     },
     {
       "datasource": {
@@ -416,7 +315,7 @@
             "spanNulls": false,
             "stacking": {
               "group": "A",
-              "mode": "normal"
+              "mode": "none"
             },
             "thresholdsStyle": {
               "mode": "off"
@@ -436,7 +335,7 @@
               }
             ]
           },
-          "unit": "percentunit"
+          "unit": "s"
         },
         "overrides": []
       },
@@ -446,7 +345,7 @@
         "x": 10,
         "y": 10
       },
-      "id": 12,
+      "id": 7,
       "options": {
         "legend": {
           "calcs": [
@@ -471,14 +370,14 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "sum(sum_over_time(moderne_cli_run_seconds_count{outcome=\"success\"}[30m]))/sum(sum_over_time(moderne_cli_run_seconds_count[30m]))",
+          "expr": "max(moderne_cli_run_seconds_max)",
           "instant": false,
-          "legendFormat": "30 minute moving success rate",
+          "legendFormat": "longest run",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Run success rate",
+      "title": "Max run duration",
       "type": "timeseries"
     },
     {
@@ -538,8 +437,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -639,8 +537,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -1331,13 +1228,13 @@
     "list": []
   },
   "time": {
-    "from": "now-15m",
+    "from": "now-1h",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "",
   "title": "Moderne CLI - Runs",
   "uid": "ead538a8-8632-4a21-946d-c34a010208ff",
-  "version": 9,
+  "version": 10,
   "weekStart": ""
 }
