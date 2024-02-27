@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: 'mod_monitor'
+    metrics_path: '/prometheus'
+    static_configs:
+      - targets: ['localhost:8080']
+#      - targets: ['10.200.10.1:8080']
