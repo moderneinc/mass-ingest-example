@@ -2,9 +2,13 @@ FROM eclipse-temurin:8-jammy AS jdk8
 FROM eclipse-temurin:11-jammy AS jdk11
 FROM eclipse-temurin:17-jammy AS jdk17
 FROM eclipse-temurin:21-jammy AS jdk21
+# Import Grafana and Prometheus
+# Comment out the following lines if you don't need Grafana and Prometheus
+FROM grafana/grafana as grafana
+FROM prom/prometheus as prometheus
 
 # Install dependencies for `mod` cli
-FROM jdk17 AS dependencies
+FROM jdk21 AS dependencies
 RUN apt-get update && apt-get install -y git supervisor
 
 # Gather various JDK versions
@@ -12,6 +16,21 @@ COPY --from=jdk8 /opt/java/openjdk /usr/lib/jvm/temurin-8-jdk
 COPY --from=jdk11 /opt/java/openjdk /usr/lib/jvm/temurin-11-jdk
 COPY --from=jdk17 /opt/java/openjdk /usr/lib/jvm/temurin-17-jdk
 COPY --from=jdk21 /opt/java/openjdk /usr/lib/jvm/temurin-21-jdk
+
+# Import Grafana and Prometheus into mass-ingest image
+# Comment out the following lines if you don't need Grafana and Prometheus
+COPY --from=grafana /usr/share/grafana /usr/share/grafana
+COPY --from=grafana /etc/grafana /etc/grafana
+COPY --from=prometheus /bin/prometheus /bin/prometheus
+COPY --from=prometheus /etc/prometheus /etc/prometheus
+
+# Copy configs for prometheus and grafana
+# Comment out the following lines if you don't need Grafana and Prometheus
+ADD grafana-datasource.yml /etc/grafana/provisioning/datasources/grafana-datasource.yml
+ADD grafana-dashboard.yml /etc/grafana/provisioning/dashboards/grafana-dashboard.yml
+ADD grafana-build-dashboard.json /etc/grafana/dashboards/build.json
+ADD grafana-run-dashboard.json /etc/grafana/dashboards/run.json
+ADD prometheus.yml /etc/prometheus/prometheus.yml
 
 FROM dependencies AS modcli
 ARG MODERNE_CLI_VERSION=2.7.6
