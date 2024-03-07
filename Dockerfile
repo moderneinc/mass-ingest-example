@@ -33,7 +33,7 @@ ADD grafana-run-dashboard.json /etc/grafana/dashboards/run.json
 ADD prometheus.yml /etc/prometheus/prometheus.yml
 
 FROM dependencies AS modcli
-ARG MODERNE_CLI_VERSION=2.7.6
+ARG MODERNE_CLI_VERSION=2.8.6
 ARG MODERNE_TENANT=app
 ARG MODERNE_TOKEN
 ARG PUBLISH_URL=https://artifactory.moderne.ninja/artifactory/moderne-ingest
