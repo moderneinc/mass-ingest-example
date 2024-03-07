@@ -35,10 +35,13 @@ ADD prometheus.yml /etc/prometheus/prometheus.yml
 FROM dependencies AS modcli
 ARG MODERNE_CLI_VERSION=2.8.6
 ARG MODERNE_TENANT=app
+# Personal access token for Moderne; can be created through https://<tenant>.moderne.io/settings/access-token
 ARG MODERNE_TOKEN
-ARG PUBLISH_URL=https://artifactory.moderne.ninja/artifactory/moderne-ingest
+# We recommend a dedicated Artifactory Maven repository, allowing both releases & snapshots; supply the full URL here
+ARG PUBLISH_URL=https://artifactory.moderne.internal/artifactory/moderne-ingest
 ARG PUBLISH_USER
 ARG PUBLISH_PASSWORD
+# Path to the trusted certificates file, which will replace the cacerts file in the configured JDKs if necessary
 ARG TRUSTED_CERTIFICATES_PATH
 
 WORKDIR /app
@@ -51,7 +54,12 @@ RUN java -jar mod.jar config lsts artifacts artifactory edit ${PUBLISH_URL} --us
 ADD maven/settings.xml /root/.m2/settings.xml
 RUN java -jar mod.jar config build maven settings edit /root/.m2/settings.xml
 
-# Configure git credentials if they are required to clone
+# Install Maven if some projects do not use the wrapper
+# wget https://dlcdn.apache.org/maven/maven-3/3.9.6/binaries/apache-maven-3.9.6-bin.zip && unzip apache-maven-3.9.6-bin.zip
+#COPY apache-maven-3.9.6 /opt/apache-maven-3.9.6
+#RUN ln -s /opt/apache-maven-3.9.6/bin/mvn /usr/local/bin/mvn
+
+# Configure git credentials if they are required to clone; ensure this lines up with your use of https:// or ssh://
 # .git-credentials each line defines credentilas for a host in the format: https://username:password@host
 ADD .git-credentials /root/.git-credentials
 RUN git config --global credential.helper store --file=/root/.git-credentials
@@ -61,6 +69,7 @@ RUN git config --global http.sslVerify false
 COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-8-jdk/jre/lib/security/cacerts
 COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-11-jdk/lib/security/cacerts
 COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-17-jdk/lib/security/cacerts
+COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-21-jdk/lib/security/cacerts
 RUN java -jar mod.jar config http trust-store edit java-home
 
 FROM modcli AS runner
