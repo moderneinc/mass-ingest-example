@@ -57,7 +57,7 @@ while true; do
     fi
 
     printf "[%d][%s] Building LSTs\n" $index "$partition_name"
-    $mod_command build "./$partition_name" # `-name` doesn't exist: -name "$index"
+    $mod_command build "./$partition_name" --no-download # `-name` doesn't exist: -name "$index"
 
     printf "[%d][%s] Publishing LSTs\n" $index "$partition_name"
     $mod_command publish "./$partition_name"
