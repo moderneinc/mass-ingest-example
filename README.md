@@ -111,3 +111,18 @@ docker build -t moderne-mass-ingest:latest \
 ## Step 4: Deploy and run the image
 
 Now that you have a Docker image built, you will need to deploy it to the container management platform of your choice and have it run on a schedule. We will leave this as an exercise for the reader as there are many platforms and options for running this. 
+
+<!--
+## Step 5: Monitor the ingestion process
+
+TODO: Explain how to access grafana, and where the logs are published.
+
+## Step 6: Troubleshooting
+
+If you want to verify that the image works as expected locally, you can spin it up with the following command:
+```bash
+docker run -it --rm moderne-mass-ingest:latest
+```
+
+In case you wish to debug the image, you can suffix the above with `bash`, and from there run `./publish.sh` to see the ingestion process in action.
+-->
