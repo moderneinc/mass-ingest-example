@@ -121,7 +121,7 @@ TODO: Explain how to access grafana, and where the logs are published.
 
 If you want to verify that the image works as expected locally, you can spin it up with the following command:
 ```bash
-docker run -it --rm moderne-mass-ingest:latest
+docker run -it --rm moderne-mass-ingest:latest -p 3000:3000 -p 8080:8080 -p 9090:9090
 ```
 
 In case you wish to debug the image, you can suffix the above with `bash`, and from there run `./publish.sh` to see the ingestion process in action.
