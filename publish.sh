@@ -31,49 +31,65 @@ for file in repos-*
     fi
 done
 
-# for each chunk, read the contents of the csv file
-for file in repos-*
-do
-  if [ "$(head -n 1 "$file")" != "$header" ]; then
-    # prepend header to the file
-    echo $header | cat - "$file" > temp && mv temp "$file"
+# counter init to 0
+index=0
+
+function build_and_upload_repos() {
+  # for each chunk, read the contents of the csv file
+  for file in repos-*
+  do
+    if [ "$(head -n 1 "$file")" != "$header" ]; then
+      # prepend header to the file
+      echo $header | cat - "$file" > temp && mv temp "$file"
+    fi
+
+    # extract just the partition name from the file name
+    partition_name=$(echo "$file" | cut -d'-' -f2)
+    printf "[%d][%s] Processing partition\n" $index "$partition_name"
+
+    printf "[%d][%s] Cloning repositories\n" $index "$partition_name"
+    $mod_command git clone csv "$partition_name" "$file" --filter=tree:0
+
+    # if cloning failed, skip the rest of the loop
+    if [ $? -ne 0 ]; then
+      printf "[%d][%s] Cloning failed, skipping partition\n" $index "$partition_name"
+      continue
+    fi
+
+    printf "[%d][%s] Building LSTs\n" $index "$partition_name"
+    $mod_command build "./$partition_name" --no-download # `-name` doesn't exist: -name "$index"
+
+    printf "[%d][%s] Publishing LSTs\n" $index "$partition_name"
+    $mod_command publish "./$partition_name"
+
+    printf "[%d][%s] Gathering logs\n" $index "$partition_name"
+    $mod_command log builds add "./$partition_name" log.zip --last-build
+
+    printf "[%d][%s] Cleaning up partition\n" $index "$partition_name"
+    # if directory exists, remove it
+    if [ -d "./$partition_name" ]; then
+      rm -rf "./$partition_name"
+    fi
+  done
+
+  # if log_publish_user and log_publish_password are set, publish logs
+  if [ -z "$log_publish_user" ] || [ -z "$log_publish_password" ]; then
+    printf "[%d] No log publishing credentials provided\n" $index
+    return
+  else
+    log_version=$(date '+%Y%m%d%H%M%S')
+    curl --insecure -u "$log_publish_user":"$log_publish_password" -X PUT \
+      "https://artifactory.moderne.ninja/artifactory/moderne-ingest/io/moderne/ingest-log/$log_version/ingest-log-$log_version.zip" \
+      -T log.zip
   fi
 
-  # extract just the partition name from the file name
-  partition_name=$(echo "$file" | cut -d'-' -f2)
-  printf "[%s] Processing partition\n" "$partition_name"
+  # increment index
+  index=$((index+1))
+}
 
-  printf "[%s] Cloning repositories\n" "$partition_name"
-  $mod_command git clone csv "$partition_name" "$file" --filter=tree:0
-
-  # if cloning failed, skip the rest of the loop
-  if [ $? -ne 0 ]; then
-    printf "[%s] Cloning failed, skipping partition\n" "$partition_name"
-    continue
-  fi
-
-  printf "[%s] Building LSTs\n" "$partition_name"
-  $mod_command build "./$partition_name" --no-download # `-name` doesn't exist: -name "$index"
-
-  printf "[%s] Publishing LSTs\n" "$partition_name"
-  $mod_command publish "./$partition_name"
-
-  printf "[%s] Gathering logs\n" "$partition_name"
-  $mod_command log builds add "./$partition_name" log.zip --last-build
-
-  printf "[%s] Cleaning up partition\n" "$partition_name"
-  # if directory exists, remove it
-  if [ -d "./$partition_name" ]; then
-    rm -rf "./$partition_name"
-  fi
+# Continuously build and upload repositories in a loop
+# If you'd like to run this script once, or on a schedule, remove the while loop
+while true; do
+  build_and_upload_repos
 done
-
-# if log_publish_user and log_publish_password are set, publish logs
-if [ -z "$log_publish_user" ] || [ -z "$log_publish_password" ]; then
-  printf "No log publishing credentials provided\n"
-fi
-log_version=$(date '+%Y%m%d%H%M%S')
-curl --insecure -u "$log_publish_user":"$log_publish_password" -X PUT \
-  "https://artifactory.moderne.ninja/artifactory/moderne-ingest/io/moderne/ingest-log/$log_version/ingest-log-$log_version.zip" \
-  -T log.zip
 
