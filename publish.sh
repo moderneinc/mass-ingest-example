@@ -75,7 +75,6 @@ function build_and_upload_repos() {
   # if log_publish_user and log_publish_password are set, publish logs
   if [ -z "$log_publish_user" ] || [ -z "$log_publish_password" ]; then
     printf "[%d] No log publishing credentials provided\n" $index
-    return
   else
     log_version=$(date '+%Y%m%d%H%M%S')
     curl --insecure -u "$log_publish_user":"$log_publish_password" -X PUT \
