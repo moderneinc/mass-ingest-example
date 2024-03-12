@@ -34,8 +34,8 @@ done
 # counter init to 0
 index=0
 
-while true; do
-  # for each chunk, read the contents of hte csv file
+function build_and_upload_repos() {
+  # for each chunk, read the contents of the csv file
   for file in repos-*
   do
     if [ "$(head -n 1 "$file")" != "$header" ]; then
@@ -75,13 +75,20 @@ while true; do
   # if log_publish_user and log_publish_password are set, publish logs
   if [ -z "$log_publish_user" ] || [ -z "$log_publish_password" ]; then
     printf "[%d] No log publishing credentials provided\n" $index
-    break
+  else
+    log_version=$(date '+%Y%m%d%H%M%S')
+    curl --insecure -u "$log_publish_user":"$log_publish_password" -X PUT \
+      "https://artifactory.moderne.ninja/artifactory/moderne-ingest/io/moderne/ingest-log/$log_version/ingest-log-$log_version.zip" \
+      -T log.zip
   fi
-  log_version=$(date '+%Y%m%d%H%M%S')
-  curl --insecure -u "$log_publish_user":"$log_publish_password" -X PUT \
-    "https://artifactory.moderne.ninja/artifactory/moderne-ingest/io/moderne/ingest-log/$log_version/ingest-log-$log_version.zip" \
-    -T log.zip
 
   # increment index
   index=$((index+1))
+}
+
+# Continuously build and upload repositories in a loop
+# If you'd like to run this script once, or on a schedule, remove the while loop
+while true; do
+  build_and_upload_repos
 done
+
