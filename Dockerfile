@@ -33,7 +33,7 @@ ADD grafana-run-dashboard.json /etc/grafana/dashboards/run.json
 ADD prometheus.yml /etc/prometheus/prometheus.yml
 
 FROM dependencies AS modcli
-ARG MODERNE_CLI_VERSION=2.8.6
+ARG MODERNE_CLI_VERSION=v2.8.9
 ARG MODERNE_TENANT=app
 # Personal access token for Moderne; can be created through https://<tenant>.moderne.io/settings/access-token
 ARG MODERNE_TOKEN
