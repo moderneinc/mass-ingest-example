@@ -32,7 +32,7 @@ ADD prometheus.yml /etc/prometheus/prometheus.yml
 FROM dependencies AS modcli
 # Path to the trusted certificates file, which will replace the cacerts file in the configured JDKs if necessary
 ARG TRUSTED_CERTIFICATES_PATH
-ARG MODERNE_CLI_VERSION=2.8.9
+ARG MODERNE_CLI_VERSION=2.8.10
 ARG MODERNE_TENANT
 # Personal access token for Moderne; can be created through https://<tenant>.moderne.io/settings/access-token
 ARG MODERNE_TOKEN
