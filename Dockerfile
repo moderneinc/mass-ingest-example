@@ -99,7 +99,12 @@ ENV PUBLISH_USER=${PUBLISH_USER}
 ENV PUBLISH_PASSWORD=${PUBLISH_PASSWORD}
 
 ADD supervisord.conf /etc/supervisord.conf
-COPY docker-entrypoint.sh /usr/local/bin/
+
+# Uncomment for ingesting repositories
+ADD docker-entrypoint-publish.sh /usr/local/bin/docker-entrypoint.sh
+
+# Uncomment for running recipes
+# ADD docker-entrypoint-recipe-runner.sh /usr/local/bin/docker-entrypoint.sh
 
 WORKDIR /app
 ADD repos.csv ./repos.csv

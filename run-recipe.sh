@@ -1,8 +1,0 @@
-#!/usr/bin/env bash
-
-docker run --rm -it \
-    -p 7001:3000 -p 7080:8080 -p 7090:9090 \
-    -w /app \
-    -v "${PWD}/docker-entrypoint-recipe-runner.sh:/app/docker-entrypoint-recipe-runner.sh" \
-    --entrypoint /app/docker-entrypoint-recipe-runner.sh \
-    moderne-mass-ingest:latest "$@"
