@@ -1,6 +1,6 @@
-# Mass Ingest
+# Moderne CLI solutions
 
-This example demonstrates how to use the [Moderne CLI](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro) to ingest a large number of repositories into a Moderne platform.
+This repository contains examples demonstrating how to use the [Moderne CLI](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro) to perform actions like ingesting a large number of repositories into a Moderne platform or running recipes on a large number of repositories.
 
 ## Step 1: Create a `repos.csv` file
 
@@ -25,10 +25,10 @@ From there, we will modify it depending on your organizational needs. Please not
 
 If your internal services (artifact repository, source control, or the Moderne tenant) are accessed:
 
-* Over HTTPS and they require [SSL/TLS](https://en.wikipedia.org/wiki/Transport_Layer_Security), but have certificates signed by a trusted-by-default root Certificate Authority.
-* Over HTTP (never requiring SSL/TLS)
+- Over HTTPS and they require [SSL/TLS](https://en.wikipedia.org/wiki/Transport_Layer_Security), but have certificates signed by a trusted-by-default root Certificate Authority.
+- Over HTTP (never requiring SSL/TLS)
 
-Please comment out the following lines from your Dockerfile: 
+Please comment out the following lines from your Dockerfile:
 
 ```Dockerfile
 # Configure trust store if self-signed certificates are in use for artifact repository, source control, or moderne tenant
@@ -47,9 +47,9 @@ If you are not sure where to get a suitable cacerts file, you can check out your
 
 The CLI needs access to artifact repositories to publish the LSTs produced during the ingestion process. This is configured via the `PUBLISH_URL`, `PUBLISH_USER`, and `PUBLISH_PASSWORD` [arguments in the Dockerfile](/Dockerfile#L18-L20).
 
-We recommend configuring a repository specifically for LSTs. This avoids intermixing LSTs with other kinds of artifacts – which has several benefits. For instance, updates and improvements to Moderne's parsers can make publishing LSTs based on the same commit desirable. However, doing so could cause problems with version number collisions if you've configured it in another way. 
+We recommend configuring a repository specifically for LSTs. This avoids intermixing LSTs with other kinds of artifacts – which has several benefits. For instance, updates and improvements to Moderne's parsers can make publishing LSTs based on the same commit desirable. However, doing so could cause problems with version number collisions if you've configured it in another way.
 
-Keeping LSTs separate also simplifies the cleanup of old LSTs which are no longer relevant – a policy you would not wish to accidentally apply to your other artifacts. 
+Keeping LSTs separate also simplifies the cleanup of old LSTs which are no longer relevant – a policy you would not wish to accidentally apply to your other artifacts.
 
 Lastly, LSTs must be published to Maven-formatted artifact repositories, but repositories with non-JVM code likely publish artifacts to repositories of other types.
 
@@ -91,7 +91,7 @@ If your organization does use Maven, you more than likely have shared configurat
 
 Connection to a Moderne tenant allows the CLI to determine when it is unnecessary to re-build an LST (as the LST could be downloaded instead to save time). The `MODERNE_TENANT` and `MODERNE_TOKEN` arguments are required to connect to a Moderne tenant.
 
-If you are connecting to a Moderne DX instance, you will need to provide the token it was configured to accept on startup. If you are connecting to a Moderne tenant, you will need to create and use a [Moderne personal access token](https://docs.moderne.io/user-documentation/moderne-platform/how-to-guides/create-api-access-tokens). 
+If you are connecting to a Moderne DX instance, you will need to provide the token it was configured to accept on startup. If you are connecting to a Moderne tenant, you will need to create and use a [Moderne personal access token](https://docs.moderne.io/user-documentation/moderne-platform/how-to-guides/create-api-access-tokens).
 
 ## Step 3: Build the Docker image
 
@@ -110,7 +110,7 @@ docker build -t moderne-mass-ingest:latest \
 
 ## Step 4: Deploy and run the image
 
-Now that you have a Docker image built, you will need to deploy it to the container management platform of your choice and have it run on a schedule. We will leave this as an exercise for the reader as there are many platforms and options for running this. 
+Now that you have a Docker image built, you will need to deploy it to the container management platform of your choice and have it run on a schedule. We will leave this as an exercise for the reader as there are many platforms and options for running this.
 
 <!--
 ## Step 5: Monitor the ingestion process
