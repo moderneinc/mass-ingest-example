@@ -14,8 +14,10 @@ done
 
 for arg in "$@"
 do
-  if [[ "$arg" == --recipe* ]]; then
+  if [[ "$arg" == --recipe=* ]]; then
     recipe="${recipe_arguments[index]}"
+  elif [[ "$arg" == --recipe ]]; then
+    recipe="${recipe_arguments[index+1]}"
   elif [ "$arg" == "--organization" ]; then
     organization="${recipe_arguments[index+1]}"
     unset 'recipe_arguments[index]'
