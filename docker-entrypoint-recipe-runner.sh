@@ -108,11 +108,8 @@ function build_and_run_recipe_from_csv() {
 function build_and_run_recipe_from_organization() {
   partition_name=$organization
   
-  if ! mod git clone moderne "$partition_name" "$organization"; then
-    echo "Failed to clone the organization"
-    exit 1
-  fi
-
+  mod git clone moderne "$partition_name" "$organization"
+  
   build_run_and_log "$partition_name"
 }
 
