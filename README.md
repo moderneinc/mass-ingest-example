@@ -15,6 +15,8 @@ echo "cloneUrl,branch" > repos.csv
 gh repo list spring-projects --source --no-archived --limit 1000 --json sshUrl,defaultBranchRef --template "{{range .}}{{.sshUrl}},{{.defaultBranchRef.name}}{{\"\n\"}}{{end}}" >> repos.csv
 ```
 
+For other source code managers, we've created scripts that can help you create your `repos.csv` file. These can be found in the [repo-fetchers](/repo-fetchers/README.md) section of this repository.
+
 ## Step 2: Customize the Docker image
 
 Begin by copying the [provided Dockerfile](/Dockerfile) to your ingestion repository.
