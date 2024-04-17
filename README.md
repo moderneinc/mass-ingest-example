@@ -87,13 +87,7 @@ ADD maven/settings.xml /root/.m2/settings.xml
 RUN java -jar mod.jar config build maven settings edit /root/.m2/settings.xml
 ```
 
-If your organization does use Maven, you more than likely have shared configurations in a `settings.xml` file. This configuration file is usually required to build most repositories. You'll want to ensure that the Docker image points to the appropriate file. `settings.xml` is typically located at `~/.m2/settings.xml`, but your configuration may differ.
-
-### Moderne Tenant or DX instance
-
-Connection to a Moderne tenant allows the CLI to determine when it is unnecessary to re-build an LST (as the LST could be downloaded instead to save time). The `MODERNE_TENANT` and `MODERNE_TOKEN` arguments are required to connect to a Moderne tenant.
-
-If you are connecting to a Moderne DX instance, you will need to provide the token it was configured to accept on startup. If you are connecting to a Moderne tenant, you will need to create and use a [Moderne personal access token](https://docs.moderne.io/user-documentation/moderne-platform/how-to-guides/create-api-access-tokens). 
+If your organization does use Maven, you more than likely have shared configurations in a `settings.xml` file. This configuration file is usually required to build most repositories. You'll want to ensure that the Docker image points to the appropriate file. `settings.xml` is typically located at `~/.m2/settings.xml`, but your configuration may differ. 
 
 ## Step 3: Build the Docker image
 
