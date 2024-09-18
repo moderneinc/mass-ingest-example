@@ -2,6 +2,8 @@ FROM eclipse-temurin:8-jammy AS jdk8
 FROM eclipse-temurin:11-jammy AS jdk11
 FROM eclipse-temurin:17-jammy AS jdk17
 FROM eclipse-temurin:21-jammy AS jdk21
+#FROM eclipse-temurin:23-jammy AS jdk23
+
 # Import Grafana and Prometheus
 # Comment out the following lines if you don't need Grafana and Prometheus
 FROM grafana/grafana as grafana
@@ -16,6 +18,7 @@ COPY --from=jdk8 /opt/java/openjdk /usr/lib/jvm/temurin-8-jdk
 COPY --from=jdk11 /opt/java/openjdk /usr/lib/jvm/temurin-11-jdk
 COPY --from=jdk17 /opt/java/openjdk /usr/lib/jvm/temurin-17-jdk
 COPY --from=jdk21 /opt/java/openjdk /usr/lib/jvm/temurin-21-jdk
+#COPY --from=jdk23 /opt/java/openjdk /usr/lib/jvm/temurin-23-jdk
 
 # Import Grafana and Prometheus into mass-ingest image
 # Comment out the following lines if you don't need Grafana and Prometheus
