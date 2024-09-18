@@ -9,7 +9,7 @@ FROM prom/prometheus as prometheus
 
 # Install dependencies for `mod` cli
 FROM jdk21 AS dependencies
-RUN apt-get update && apt-get install -y git supervisor
+RUN apt-get -y update && apt-get install -y git unzip zip
 
 # Gather various JDK versions
 COPY --from=jdk8 /opt/java/openjdk /usr/lib/jvm/temurin-8-jdk
@@ -55,9 +55,9 @@ ADD maven/settings.xml /root/.m2/settings.xml
 RUN java -jar mod.jar config build maven settings edit /root/.m2/settings.xml
 
 # Install Maven if some projects do not use the wrapper
-# wget https://dlcdn.apache.org/maven/maven-3/3.9.6/binaries/apache-maven-3.9.6-bin.zip && unzip apache-maven-3.9.6-bin.zip
-#COPY apache-maven-3.9.6 /opt/apache-maven-3.9.6
-#RUN ln -s /opt/apache-maven-3.9.6/bin/mvn /usr/local/bin/mvn
+#RUN wget https://dlcdn.apache.org/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.zip && unzip apache-maven-3.9.9-bin.zip
+#RUN mv apache-maven-3.9.9 /opt/apache-maven-3.9.9
+#RUN ln -s /opt/apache-maven-3.9.9/bin/mvn /usr/local/bin/mvn
 
 # Configure git credentials if they are required to clone; ensure this lines up with your use of https:// or ssh://
 # .git-credentials each line defines credentilas for a host in the format: https://username:password@host
