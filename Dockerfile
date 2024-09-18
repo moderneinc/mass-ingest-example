@@ -11,7 +11,7 @@ FROM prom/prometheus as prometheus
 
 # Install dependencies for `mod` cli
 FROM jdk21 AS dependencies
-RUN apt-get -y update && apt-get install -y git unzip zip
+RUN apt-get -y update && apt-get install -y git supervisor unzip zip
 
 # Gather various JDK versions
 COPY --from=jdk8 /opt/java/openjdk /usr/lib/jvm/temurin-8-jdk
@@ -73,6 +73,7 @@ COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-8-jdk/jre/lib/security/ca
 COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-11-jdk/lib/security/cacerts
 COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-17-jdk/lib/security/cacerts
 COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-21-jdk/lib/security/cacerts
+#COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-23-jdk/lib/security/cacerts
 RUN java -jar mod.jar config http trust-store edit java-home
 
 FROM modcli AS runner
