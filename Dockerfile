@@ -2,6 +2,8 @@ FROM eclipse-temurin:8-jammy AS jdk8
 FROM eclipse-temurin:11-jammy AS jdk11
 FROM eclipse-temurin:17-jammy AS jdk17
 FROM eclipse-temurin:21-jammy AS jdk21
+#FROM eclipse-temurin:23-jammy AS jdk23
+
 # Import Grafana and Prometheus
 # Comment out the following lines if you don't need Grafana and Prometheus
 FROM grafana/grafana as grafana
@@ -9,13 +11,14 @@ FROM prom/prometheus as prometheus
 
 # Install dependencies for `mod` cli
 FROM jdk21 AS dependencies
-RUN apt-get update && apt-get install -y git supervisor
+RUN apt-get -y update && apt-get install -y git supervisor unzip zip
 
 # Gather various JDK versions
 COPY --from=jdk8 /opt/java/openjdk /usr/lib/jvm/temurin-8-jdk
 COPY --from=jdk11 /opt/java/openjdk /usr/lib/jvm/temurin-11-jdk
 COPY --from=jdk17 /opt/java/openjdk /usr/lib/jvm/temurin-17-jdk
 COPY --from=jdk21 /opt/java/openjdk /usr/lib/jvm/temurin-21-jdk
+#COPY --from=jdk23 /opt/java/openjdk /usr/lib/jvm/temurin-23-jdk
 
 # Import Grafana and Prometheus into mass-ingest image
 # Comment out the following lines if you don't need Grafana and Prometheus
@@ -55,9 +58,9 @@ ADD maven/settings.xml /root/.m2/settings.xml
 RUN java -jar mod.jar config build maven settings edit /root/.m2/settings.xml
 
 # Install Maven if some projects do not use the wrapper
-# wget https://dlcdn.apache.org/maven/maven-3/3.9.6/binaries/apache-maven-3.9.6-bin.zip && unzip apache-maven-3.9.6-bin.zip
-#COPY apache-maven-3.9.6 /opt/apache-maven-3.9.6
-#RUN ln -s /opt/apache-maven-3.9.6/bin/mvn /usr/local/bin/mvn
+#RUN wget https://dlcdn.apache.org/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.zip && unzip apache-maven-3.9.9-bin.zip
+#RUN mv apache-maven-3.9.9 /opt/apache-maven-3.9.9
+#RUN ln -s /opt/apache-maven-3.9.9/bin/mvn /usr/local/bin/mvn
 
 # Configure git credentials if they are required to clone; ensure this lines up with your use of https:// or ssh://
 # .git-credentials each line defines credentilas for a host in the format: https://username:password@host
@@ -70,6 +73,7 @@ COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-8-jdk/jre/lib/security/ca
 COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-11-jdk/lib/security/cacerts
 COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-17-jdk/lib/security/cacerts
 COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-21-jdk/lib/security/cacerts
+#COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-23-jdk/lib/security/cacerts
 RUN java -jar mod.jar config http trust-store edit java-home
 
 FROM modcli AS runner
