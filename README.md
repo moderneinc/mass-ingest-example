@@ -8,11 +8,17 @@ The first step needed to integrate private code is to come up with a list of rep
 
 At the very least, you must include two columns: `cloneUrl` and `branch`. However, you can also include additional optional columns if additional information is needed to build your repositories. These optional columns are: `changeset`, `java`, `jvmOpts`, `mavenArgs`, `gradleArgs`, and `bazelRule` (see the [mod git clone csv documentation](https://docs.moderne.io/user-documentation/moderne-cli/cli-reference#mod-git-clone-csv) for more information).
 
-If you use GitHub, you may find it useful to use the GitHub CLI to generate a list of repositories for your organization. For instance, the following command would generate a `repos.csv` file for the `spring-projects` GitHub organization:
+> [!TIP]
+> If you use GitHub, you may find it useful to use the GitHub CLI to generate a list of repositories for your organization. For instance, the following command would generate a `repos.csv` file for the `spring-projects` GitHub organization:
 
 ```bash
-echo "cloneUrl,branch" > repos.csv
-gh repo list spring-projects --source --no-archived --limit 1000 --json sshUrl,defaultBranchRef --template "{{range .}}{{.sshUrl}},{{.defaultBranchRef.name}}{{\"\n\"}}{{end}}" >> repos.csv
+    echo "cloneUrl,branch" > repos.csv
+    gh repo list \
+        spring-projects 
+        --source \
+        --no-archived \
+        --limit 1000 \
+        --json sshUrl,defaultBranchRef --template "{{range .}}{{.sshUrl}},{{.defaultBranchRef.name}}{{\"\n\"}}{{end}}" >> repos.csv
 ```
 
 For other source code managers, we've created scripts that can help you create your `repos.csv` file. These can be found in the [repo-fetchers](/repo-fetchers/README.md) section of this repository.
@@ -93,31 +99,65 @@ If your organization does use Maven, you more than likely have shared configurat
 
 Once you've customized the `Dockerfile` as needed, you can build the image with the following command, filling in your organization's specific values for the build arguments:
 
+
+### Option 1: Without connecting to the Moderne Platform
+
+To start you can build an image that does not connect to the Moderne platform. This is useful for bootstrapping the ingestion process to start publishing the LSTs your Artifactory/Nexus repository.
+
 ```bash
 docker build -t moderne-mass-ingest:latest \
-    --build-arg MODERNE_TENANT=<> \
-    --build-arg MODERNE_TOKEN=<> \
-    --build-arg TRUSTED_CERTIFICATES_PATH=<> \
     --build-arg PUBLISH_URL=<> \
     --build-arg PUBLISH_USER=<> \
     --build-arg PUBLISH_PASSWORD=<> \
     .
 ```
 
+### Option 2: Connecting to the Moderne Platform
+```bash
+docker build -t moderne-mass-ingest:latest \
+    --build-arg PUBLISH_URL=<> \
+    --build-arg PUBLISH_USER=<> \
+    --build-arg PUBLISH_PASSWORD=<> \
+    --build-arg MODERNE_TENANT=<> \
+    --build-arg MODERNE_TOKEN=<> \
+    .
+```
+
+### Build Arguments
+| Argument | Description | Required |
+|---|---|---|
+| `PUBLISH_URL` | The URL of the artifact repository where the LSTs will be published. | Yes |
+| `PUBLISH_USER` | The username for the artifact repository. | Yes |
+| `PUBLISH_PASSWORD` | The password for the artifact repository. | Yes |
+| `MODERNE_TENANT` | The URL of the Moderne tenant. | No |
+| `MODERNE_DX_HOST` | The URL of the Moderne DX application. | No |
+| `MODERNE_TOKEN` | The token for the Moderne tenant. | No |
+| `MODERNE_CLI_VERSION` | The version of the Moderne CLI to use. Will download the latest from Maven Central if not defined.| No |
+| `TRUSTED_CERTIFICATES_PATH` | The path to the cacerts file that contains the self-signed certificates. | No |
+
+
 ## Step 4: Deploy and run the image
 
 Now that you have a Docker image built, you will need to deploy it to the container management platform of your choice and have it run on a schedule. We will leave this as an exercise for the reader as there are many platforms and options for running this. 
 
-<!--
+
+> [!NOTE]
+> We recommend attaching a volume mount to the container at `/var/moderne` to ensure that cloned repositories are stored outside of the guest. 
+
+
 ## Step 5: Monitor the ingestion process
 
-TODO: Explain how to access grafana, and where the logs are published.
+By default the example Docker image will run the `mod monitor` command that will create a scrape target that can be consumed by Prometheus. This example Docker image will also run a Prometheus server that will scrape the scrape target. You can access the Prometheus server at `http://localhost:9090` and the Grafana server at `http://localhost:3000`. The default username and password for Grafana is `admin` and `admin`.
 
 ## Step 6: Troubleshooting
 
 If you want to verify that the image works as expected locally, you can spin it up with the following command:
 ```bash
-docker run -it --rm moderne-mass-ingest:latest -p 3000:3000 -p 8080:8080 -p 9090:9090
+docker run -it --rm \
+    -p 3000:3000 \
+    -p 8080:8080 \
+    -p 9090:9090 \
+    moderne-mass-ingest:latest 
 ```
 
 In case you wish to debug the image, you can suffix the above with `bash`, and from there run `./publish.sh` to see the ingestion process in action.
