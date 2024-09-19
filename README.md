@@ -113,6 +113,7 @@ docker build -t moderne-mass-ingest:latest \
 ```
 
 ### Option 2: Connecting to the Moderne Platform
+
 ```bash
 docker build -t moderne-mass-ingest:latest \
     --build-arg PUBLISH_URL=<> \
@@ -124,6 +125,7 @@ docker build -t moderne-mass-ingest:latest \
 ```
 
 ### Build Arguments
+
 | Argument | Description | Required |
 |---|---|---|
 | `PUBLISH_URL` | The URL of the artifact repository where the LSTs will be published. | Yes |
