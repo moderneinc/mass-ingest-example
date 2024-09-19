@@ -1,2 +1,12 @@
 cloneUrl,branch
+https://github.com/openrewrite/rewrite-cucumber-jvm,main
+https://github.com/openrewrite/rewrite-hibernate,main
 https://github.com/openrewrite/rewrite-javascript,main
+https://github.com/openrewrite/rewrite-launchdarkly,main
+https://github.com/openrewrite/rewrite-liberty,main
+https://github.com/openrewrite/rewrite-maven-plugin,main
+https://github.com/openrewrite/rewrite-micrometer,main
+https://github.com/openrewrite/rewrite-micronaut,main
+https://github.com/openrewrite/rewrite-okhttp,main
+https://github.com/openrewrite/rewrite-recipe-bom,main
+https://github.com/openrewrite/rewrite-recommendations,main

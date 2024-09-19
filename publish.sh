@@ -11,12 +11,18 @@ if [ $# -eq 0 ]
     exit 1
 fi
 
-cp "$1" "$DATA_DIR"
-CSV_FILE="$DATA_DIR/$1"
+# Clean any existing files in the data directory
+if [ -d "$DATA_DIR" ]; then
+  rm -rf "${DATA_DIR:?}"/*
+fi
 
 # Create the data directory and partition directory
 PARTITION_DIR="$DATA_DIR/partitions"
 mkdir -p "$PARTITION_DIR"
+
+
+CSV_FILE="$DATA_DIR/$1"
+cp "$1" "$DATA_DIR"
 
 # split csv file into 10 line chunks.
 # the chunks should be named `repos-{chunk}`
