@@ -70,7 +70,7 @@ function Invoke-BuildAndUploadRepos {
   }
 
   if ($env:PUBLISH_USER || $env:PUBLISH_PASSWORD || $env:PUBLISH_URL) {
-    Write-Host "[${Index}] No long publishing credentials or URL provided"
+    Write-Host "[${Index}] No log publishing credentials or URL provided"
   } else {
     $LogVersion=Get-Date -Format "yyyyMMddHHmmss"
     $SecurePassword = ConvertTo-SecureString -String $env:PUBLISH_PASSWORD -AsPlainText -Force
