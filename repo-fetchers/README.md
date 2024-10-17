@@ -54,7 +54,7 @@ This script fetches all repositories from the specified GitHub organization.
 1. You must also have the [GitHub CLI](https://cli.github.com/) installed.
 2. You must either have run [`gh auth login`](https://cli.github.com/manual/gh_auth_login) or set the `GITHUB_TOKEN` environment variable for authentication.
 
-(**note**: if you use a GitHub installation rather than `github.com` you will have to `gh auth login --hostname github.mycompany.com`)
+(**Note**: if you use a GitHub installation rather than `github.com` you will have to `gh auth login --hostname github.mycompany.com`)
 
 #### Example
 To fetch all repositories from a GitHub organization:
