@@ -58,16 +58,16 @@ WORKDIR /usr/local/bin
 # Download the specified version of moderne-cli JAR file if MODERNE_CLI_VERSION is provided,
 # otherwise download the latest version
 RUN if [ -n "${MODERNE_CLI_VERSION}" ]; then \
-    echo "Downloading version: ${MODERNE_CLI_VERSION}"; \
-    curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/${MODERNE_CLI_VERSION}/moderne-cli-${MODERNE_CLI_VERSION}.jar" --output mod.jar; \
+        echo "Downloading version: ${MODERNE_CLI_VERSION}"; \
+        curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/${MODERNE_CLI_VERSION}/moderne-cli-${MODERNE_CLI_VERSION}.jar" --output mod.jar; \
     else \
-    LATEST_VERSION=$(curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/maven-metadata.xml" | xmllint --xpath 'string(/metadata/versioning/latest)' -); \
-    if [ -z "${LATEST_VERSION}" ]; then \
-    echo "Failed to get latest version"; \
-    exit 1; \
-    fi; \
-    echo "Downloading latest version: ${LATEST_VERSION}"; \
-    curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/${LATEST_VERSION}/moderne-cli-${LATEST_VERSION}.jar" --output mod.jar; \
+        LATEST_VERSION=$(curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/maven-metadata.xml" | xmllint --xpath 'string(/metadata/versioning/latest)' -); \
+        if [ -z "${LATEST_VERSION}" ]; then \
+            echo "Failed to get latest version"; \
+            exit 1; \
+        fi; \
+        echo "Downloading latest version: ${LATEST_VERSION}"; \
+        curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/${LATEST_VERSION}/moderne-cli-${LATEST_VERSION}.jar" --output mod.jar; \
     fi
 
 # Create a shell script 'mod' that runs the moderne-cli JAR file
@@ -80,15 +80,17 @@ RUN chmod +x mod
 WORKDIR /app
 
 RUN if [ -n "${MODERNE_TOKEN}" ]; then \
-    mod config moderne edit --token=${MODERNE_TOKEN} https://${MODERNE_TENANT}.moderne.io; \
+        mod config moderne edit --token=${MODERNE_TOKEN} https://${MODERNE_TENANT}.moderne.io; \
     else \
-    echo "MODERNE_TOKEN not supplied, skipping configuration."; \
+        echo "MODERNE_TOKEN not supplied, skipping configuration."; \
     fi
 
 RUN if [ -n "${PUBLISH_URL}" ] && [ -n "${PUBLISH_USER}" ] && [ -n "${PUBLISH_PASSWORD}" ]; then \
-    mod config lsts artifacts artifactory edit ${PUBLISH_URL} --user ${PUBLISH_USER} --password ${PUBLISH_PASSWORD}; \
+        mod config lsts artifacts artifactory edit ${PUBLISH_URL} --user ${PUBLISH_USER} --password ${PUBLISH_PASSWORD}; \
+    elif [ -n "${PUBLISH_URL}" ] && [ -n "${PUBLISH_TOKEN}" ]; then \
+        mod config lsts artifacts artifactory edit ${PUBLISH_URL} --jfrog-api-token ${PUBLISH_TOKEN}; \
     else \
-    echo "PUBLISH_URL, PUBLISH_USER, and PUBLISH_PASSWORD must all be supplied."; \
+        echo "PUBLISH_URL and either PUBLISH_USER and PUBLISH_PASSWORD or PUBLISH_TOKEN must be supplied."; \
     fi
 
 
