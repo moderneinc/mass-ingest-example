@@ -113,7 +113,7 @@ docker build -t moderne-mass-ingest:latest \
     .
 ```
 
-Using an artifactory API token for authentication:
+Using an API token for authentication:
 ```bash
 docker build -t moderne-mass-ingest:latest \
     --build-arg PUBLISH_URL=<> \
