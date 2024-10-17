@@ -53,7 +53,7 @@ ARG PUBLISH_PASSWORD
 WORKDIR /usr/local/bin
 
 # Set the environment variable MODERNE_CLI_VERSION
-# ENV MODERNE_CLI_VERSION=3.24.3
+# ENV MODERNE_CLI_VERSION=1.0.3225
 
 # Download the specified version of moderne-cli JAR file if MODERNE_CLI_VERSION is provided,
 # otherwise download the latest version
