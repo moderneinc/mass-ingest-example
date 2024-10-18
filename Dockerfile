@@ -47,6 +47,7 @@ ARG MODERNE_TOKEN
 ARG PUBLISH_URL
 ARG PUBLISH_USER
 ARG PUBLISH_PASSWORD
+ARG PUBLISH_TOKEN
 
 # Moderne CLI installation
 # Set the working directory to /usr/local/bin
