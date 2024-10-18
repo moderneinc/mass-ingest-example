@@ -104,11 +104,20 @@ Once you've customized the `Dockerfile` as needed, you can build the image with 
 
 To start you can build an image that does not connect to the Moderne platform. This is useful for bootstrapping the ingestion process to start publishing the LSTs your Artifactory/Nexus repository.
 
+Using a username and password for authentication:
 ```bash
 docker build -t moderne-mass-ingest:latest \
     --build-arg PUBLISH_URL=<> \
     --build-arg PUBLISH_USER=<> \
     --build-arg PUBLISH_PASSWORD=<> \
+    .
+```
+
+Using an API token for authentication:
+```bash
+docker build -t moderne-mass-ingest:latest \
+    --build-arg PUBLISH_URL=<> \
+    --build-arg PUBLISH_TOKEN=<>
     .
 ```
 
