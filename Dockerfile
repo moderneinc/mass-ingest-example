@@ -87,9 +87,9 @@ RUN if [ -n "${MODERNE_TOKEN}" ]; then \
     fi
 
 RUN if [ -n "${PUBLISH_URL}" ] && [ -n "${PUBLISH_USER}" ] && [ -n "${PUBLISH_PASSWORD}" ]; then \
-        mod config lsts artifacts artifactory edit ${PUBLISH_URL} --user ${PUBLISH_USER} --password ${PUBLISH_PASSWORD}; \
+        mod config lsts artifacts maven edit ${PUBLISH_URL} --user ${PUBLISH_USER} --password ${PUBLISH_PASSWORD}; \
     elif [ -n "${PUBLISH_URL}" ] && [ -n "${PUBLISH_TOKEN}" ]; then \
-        mod config lsts artifacts artifactory edit ${PUBLISH_URL} --jfrog-api-token ${PUBLISH_TOKEN}; \
+        mod config lsts artifacts maven edit ${PUBLISH_URL} --jfrog-api-token ${PUBLISH_TOKEN}; \
     else \
         echo "PUBLISH_URL and either PUBLISH_USER and PUBLISH_PASSWORD or PUBLISH_TOKEN must be supplied."; \
     fi
