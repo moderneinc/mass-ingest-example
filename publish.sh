@@ -85,7 +85,7 @@ function build_and_upload_repos() {
         "$PUBLISH_URL/$log_version/ingest-log-$log_version.zip" \
         -T log.zip
     else
-      printf "[%d] No log publishing credentials or $PUBLISH_URL provided\n" $index
+      printf "[%d] No log publishing credentials for %s provided\n" $index $PUBLISH_URL
     fi
   else
     printf "[%d] No log publishing credentials or URL provided\n" $index
