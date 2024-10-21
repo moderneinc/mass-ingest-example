@@ -21,7 +21,7 @@ if [[ -z $AUTH_TOKEN ]]; then
     exit 1
 fi
 
-# defualt GITLAB_DOMAIN to gitlab.com
+# default GITLAB_DOMAIN to gitlab.com
 GITLAB_DOMAIN=${GITLAB_DOMAIN:-https://gitlab.com}
 
 if [[ -z $GROUP ]]; then
@@ -30,7 +30,18 @@ else
     request_url="$GITLAB_DOMAIN/api/v4/groups/$GROUP/projects?include_subgroups=true&simple=true"
 fi
 
-curl --silent \
-    --header "Authorization: Bearer $AUTH_TOKEN" \
-    "$request_url" \
-    | jq -r '["cloneUrl","branch"],(.[] | [.http_url_to_repo, .default_branch]) | @csv'
+pages=$(curl -s -D - -o /dev/null --header "Authorization: Bearer $AUTH_TOKEN" "$request_url" | grep X-Total-Pages | cut -d " " -f2)
+
+jq_header='["cloneUrl","branch"],'
+for i in $(eval echo "{1..$pages}")
+do
+    if [ $i -eq 2 ]; then
+            jq_header=''
+    fi
+    curl --silent \
+        --header "Authorization: Bearer $AUTH_TOKEN" \
+        "$request_url&page=$i" \
+        | jq -r "$jq_header(.[] | [.http_url_to_repo, .default_branch]) | @csv"
+done
+
+echo $result
