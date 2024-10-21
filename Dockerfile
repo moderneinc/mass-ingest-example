@@ -86,6 +86,8 @@ RUN if [ -n "${MODERNE_TOKEN}" ]; then \
         echo "MODERNE_TOKEN not supplied, skipping configuration."; \
     fi
 
+# Note, artifact repositories such as GitLab's Maven API will accept an access token's name and the
+# access token for PUBLISH_USER and PUBLISH_PASSWORD respectively.
 RUN if [ -n "${PUBLISH_URL}" ] && [ -n "${PUBLISH_USER}" ] && [ -n "${PUBLISH_PASSWORD}" ]; then \
         mod config lsts artifacts artifactory edit ${PUBLISH_URL} --user ${PUBLISH_USER} --password ${PUBLISH_PASSWORD}; \
     elif [ -n "${PUBLISH_URL}" ] && [ -n "${PUBLISH_TOKEN}" ]; then \
