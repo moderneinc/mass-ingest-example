@@ -86,6 +86,8 @@ RUN if [ -n "${MODERNE_TOKEN}" ]; then \
         echo "MODERNE_TOKEN not supplied, skipping configuration."; \
     fi
 
+# Note, artifact repositories such as GitLab's Maven API will accept an access token's name and the
+# access token for PUBLISH_USER and PUBLISH_PASSWORD respectively.
 RUN if [ -n "${PUBLISH_URL}" ] && [ -n "${PUBLISH_USER}" ] && [ -n "${PUBLISH_PASSWORD}" ]; then \
         mod config lsts artifacts maven edit ${PUBLISH_URL} --user ${PUBLISH_USER} --password ${PUBLISH_PASSWORD}; \
     elif [ -n "${PUBLISH_URL}" ] && [ -n "${PUBLISH_TOKEN}" ]; then \
@@ -190,7 +192,8 @@ FROM language-support AS runner
 
 # UNCOMMENT for authentication to git repositories
 # Configure git credentials if they are required to clone; ensure this lines up with your use of https:// or ssh://
-# .git-credentials each line defines credentilas for a host in the format: https://username:password@host
+# .git-credentials each line defines credentilas for a host in the format: https://<username>:<password>@host or
+# https://<token-name>:<token>@host
 # COPY .git-credentials /root/.git-credentials
 # RUN git config --global credential.helper store --file=/root/.git-credentials
 # RUN git config --global http.sslVerify false
@@ -221,6 +224,7 @@ WORKDIR /app
 ENV PUBLISH_URL=${PUBLISH_URL}
 ENV PUBLISH_USER=${PUBLISH_USER}
 ENV PUBLISH_PASSWORD=${PUBLISH_PASSWORD}
+ENV PUBLISH_TOKEN=${PUBLISH_TOKEN}
 
 # Disables extra formating in the logs
 ENV CUSTOM_CI=true
