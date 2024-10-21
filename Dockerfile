@@ -190,7 +190,8 @@ FROM language-support AS runner
 
 # UNCOMMENT for authentication to git repositories
 # Configure git credentials if they are required to clone; ensure this lines up with your use of https:// or ssh://
-# .git-credentials each line defines credentilas for a host in the format: https://username:password@host
+# .git-credentials each line defines credentilas for a host in the format: https://<username>:<password>@host or
+# https://<token-name>:<token>@host
 # COPY .git-credentials /root/.git-credentials
 # RUN git config --global credential.helper store --file=/root/.git-credentials
 # RUN git config --global http.sslVerify false
@@ -221,6 +222,7 @@ WORKDIR /app
 ENV PUBLISH_URL=${PUBLISH_URL}
 ENV PUBLISH_USER=${PUBLISH_USER}
 ENV PUBLISH_PASSWORD=${PUBLISH_PASSWORD}
+ENV PUBLISH_TOKEN=${PUBLISH_TOKEN}
 
 # Disables extra formating in the logs
 ENV CUSTOM_CI=true

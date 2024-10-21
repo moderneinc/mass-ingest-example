@@ -73,14 +73,22 @@ function build_and_upload_repos() {
     fi
   done
 
-  # if PUBLISH_USER, PUBLISH_PASSWORD, and PUBLISH_URL are set, publish logs
-  if [ -z "$PUBLISH_USER" ] || [ -z "$PUBLISH_PASSWORD" ] || [ -z "$PUBLISH_URL" ]; then
-    printf "[%d] No log publishing credentials or URL provided\n" $index
-  else
+  # if PUBLISH_USER and PUBLISH_PASSWORD and PUBLISH_UR, or PUBLISH_TOKEN are set, publish logs
+  if [ "$PUBLISH_URL" ]; then
     log_version=$(date '+%Y%m%d%H%M%S')
-    curl --insecure -u "$PUBLISH_USER":"$PUBLISH_PASSWORD" -X PUT \
-      "$PUBLISH_URL/$log_version/ingest-log-$log_version.zip" \
-      -T log.zip
+    if [ "$PUBLISH_USER" ] && [ "$PUBLISH_PASSWORD" ]; then
+      curl --insecure -u "$PUBLISH_USER":"$PUBLISH_PASSWORD" -X PUT \
+        "$PUBLISH_URL/$log_version/ingest-log-$log_version.zip" \
+        -T log.zip
+    elif [ "$PUBLISH_TOKEN" ]; then
+      curl --insecure --header "Authorization: Bearer $PUBLISH_TOKEN" -X PUT \
+        "$PUBLISH_URL/$log_version/ingest-log-$log_version.zip" \
+        -T log.zip
+    else
+      printf "[%d] No log publishing credentials or $PUBLISH_URL provided\n" $index
+    fi
+  else
+    printf "[%d] No log publishing credentials or URL provided\n" $index
   fi
 
   # increment index
