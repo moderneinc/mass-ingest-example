@@ -25,12 +25,30 @@ fi
 GITLAB_DOMAIN=${GITLAB_DOMAIN:-https://gitlab.com}
 
 if [[ -z $GROUP ]]; then
-    request_url="$GITLAB_DOMAIN/api/v4/projects?membership=true&simple=true"
+    base_request_url="$GITLAB_DOMAIN/api/v4/projects?membership=true&simple=true"
 else
-    request_url="$GITLAB_DOMAIN/api/v4/groups/$GROUP/projects?include_subgroups=true&simple=true"
+    base_request_url="$GITLAB_DOMAIN/api/v4/groups/$GROUP/projects?include_subgroups=true&simple=true"
 fi
 
-curl --silent \
-    --header "Authorization: Bearer $AUTH_TOKEN" \
-    "$request_url" \
-    | jq -r '["cloneUrl","branch"],(.[] | [.http_url_to_repo, .default_branch]) | @csv'
+page=1
+per_page=100
+
+echo '"cloneUrl","branch"'
+while :; do
+    # Construct the request URL with pagination parameters
+    request_url="${base_request_url}&page=${page}&per_page=${per_page}"
+
+    # Fetch the data
+    response=$(curl --silent --header "Authorization: Bearer $AUTH_TOKEN" "$request_url")
+
+    # Check if the response is empty, if so, break the loop
+    if [[ $(echo "$response" | jq '. | length') -eq 0 ]]; then
+        break
+    fi
+
+    # Process and output data
+    echo "$response" | jq -r '(.[] | [.http_url_to_repo, .default_branch]) | @csv'
+
+    # Increment page counter
+    ((page++))
+done
