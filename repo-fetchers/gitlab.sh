@@ -33,6 +33,7 @@ fi
 page=1
 per_page=100
 
+echo '"cloneUrl","branch"'
 while :; do
     # Construct the request URL with pagination parameters
     request_url="${base_request_url}&page=${page}&per_page=${per_page}"
@@ -46,7 +47,7 @@ while :; do
     fi
 
     # Process and output data
-    echo "$response" | jq -r '["cloneUrl","branch"],(.[] | [.http_url_to_repo, .default_branch]) | @csv'
+    echo "$response" | jq -r '(.[] | [.http_url_to_repo, .default_branch]) | @csv'
 
     # Increment page counter
     ((page++))
