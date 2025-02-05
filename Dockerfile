@@ -103,13 +103,15 @@ FROM modcli AS language-support
 # RUN mkdir /opt/gradle
 # RUN unzip -d /opt/gradle gradle-8.10-bin.zip
 
-# Maven support
-# RUN wget https://dlcdn.apache.org/maven/maven-3/3.9.8/binaries/apache-maven-3.9.8-bin.zip && unzip apache-maven-3.9.8-bin.zip
-# RUN mv apache-maven-3.9.8 /opt/apache-maven-3.9.8
-# RUN ln -s /opt/apache-maven-3.9.8/bin/mvn /usr/local/bin/mvn
+
+# Install Maven if some projects do not use the wrapper
+# RUN wget https://dlcdn.apache.org/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.zip && unzip apache-maven-3.9.9-bin.zip
+# RUN mv apache-maven-3.9.9 /opt/apache-maven-3.9.9
+# RUN ln -s /opt/apache-maven-3.9.9/bin/mvn /usr/local/bin/mvn
+
 
 # Install a Maven wrapper external to projects
-# RUN /opt/apache-maven-3.9.8/bin/mvn -N wrapper:wrapper
+# RUN /opt/apache-maven-3.9.9/bin/mvn -N wrapper:wrapper
 # RUN mkdir -p /opt/maven-wrapper/bin
 # RUN mv mvnw mvnw.cmd .mvn /opt/maven-wrapper/bin/
 # ENV PATH="${PATH}:/opt/maven-wrapper/bin"
@@ -182,11 +184,6 @@ FROM modcli AS language-support
 # Configure Maven Settings if they are required to build
 # COPY maven/settings.xml /root/.m2/settings.xml
 # RUN mod config build maven settings edit /root/.m2/settings.xml
-
-# Install Maven if some projects do not use the wrapper
-#RUN wget https://dlcdn.apache.org/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.zip && unzip apache-maven-3.9.9-bin.zip
-#RUN mv apache-maven-3.9.9 /opt/apache-maven-3.9.9
-#RUN ln -s /opt/apache-maven-3.9.9/bin/mvn /usr/local/bin/mvn
 
 FROM language-support AS runner
 
