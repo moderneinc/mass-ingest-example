@@ -183,6 +183,7 @@ FROM modcli AS language-support
 # UNCOMMENT for custom Maven settings
 # Configure Maven Settings if they are required to build
 # COPY maven/settings.xml /root/.m2/settings.xml
+# COPY maven/security-settings.xml /root/.m2/security-settings.xml
 # RUN mod config build maven settings edit /root/.m2/settings.xml
 
 FROM language-support AS runner
@@ -194,6 +195,11 @@ FROM language-support AS runner
 # COPY .git-credentials /root/.git-credentials
 # RUN git config --global credential.helper store --file=/root/.git-credentials
 # RUN git config --global http.sslVerify false
+# UNCOMMENT if using ssh keys
+# RUN mkdir /root/.ssh && chmod 755 /root/.ssh
+# COPY .ssh/id_rsa /root/.ssh/id_rsa
+# COPY .ssh/known_hosts /root/.ssh/known_hosts
+# RUN chmod 600 /root/.ssh/id_rsa /root/.ssh/known_hosts
 
 # Configure trust store if self-signed certificates are in use for artifact repository, source control, or moderne tenant
 # Path to the trusted certificates file, which will replace the cacerts file in the configured JDKs if necessary
