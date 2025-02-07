@@ -11,7 +11,7 @@ FROM prom/prometheus AS prometheus
 
 # Install dependencies for `mod` cli
 FROM jdk21 AS dependencies
-RUN apt-get -y update && apt-get install -y git git-lfs jq libxml2-utils unzip zip supervisor && git lfs install 
+RUN apt-get -y update && apt-get install -y git git-lfs jq libxml2-utils unzip zip supervisor vim && git lfs install
 
 # Gather various JDK versions
 COPY --from=jdk8 /opt/java/openjdk /usr/lib/jvm/temurin-8-jdk
@@ -196,15 +196,13 @@ FROM language-support AS runner
 # RUN git config --global http.sslVerify false
 
 # Configure trust store if self-signed certificates are in use for artifact repository, source control, or moderne tenant
-# Path to the trusted certificates file, which will replace the cacerts file in the configured JDKs if necessary
-# ARG TRUSTED_CERTIFICATES_PATH
-# COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-8-jdk/jre/lib/security/cacerts
-# COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-11-jdk/lib/security/cacerts
-# COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-17-jdk/lib/security/cacerts
-# COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-21-jdk/lib/security/cacerts
-# COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-23-jdk/lib/security/cacerts
+# COPY mycert.crt /root/mycert.crt
+# RUN /usr/lib/jvm/temurin-8-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-8-jdk/jre/lib/security/cacerts
+# RUN /usr/lib/jvm/temurin-11-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-11-jdk/lib/security/cacerts
+# RUN /usr/lib/jvm/temurin-17-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-17-jdk/lib/security/cacerts
+# RUN /usr/lib/jvm/temurin-21-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-21-jdk/lib/security/cacerts
+# RUN /usr/lib/jvm/temurin-23-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-23-jdk/lib/security/cacerts
 # RUN mod config http trust-store edit java-home
-
 
 # OPTIONAL - Customize JVM options
 RUN mod config java options edit "-Xmx4g -Xss3m"
