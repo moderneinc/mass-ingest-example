@@ -183,7 +183,7 @@ FROM modcli AS language-support
 # UNCOMMENT for custom Maven settings
 # Configure Maven Settings if they are required to build
 # COPY maven/settings.xml /root/.m2/settings.xml
-# COPY maven/security-settings.xml /root/.m2/security-settings.xml
+# COPY maven/settings-security.xml /root/.m2/settings-security.xml
 # RUN mod config build maven settings edit /root/.m2/settings.xml
 
 FROM language-support AS runner
