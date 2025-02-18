@@ -82,8 +82,12 @@ WORKDIR /app
 
 RUN if [ -n "${MODERNE_TOKEN}" ]; then \
         mod config moderne edit --token=${MODERNE_TOKEN} https://${MODERNE_TENANT}.moderne.io; \
+        mod config scm moderne sync; \
     else \
         echo "MODERNE_TOKEN not supplied, skipping configuration."; \
+        # uncomment to configure an on premise scm. This is not required if the MODERNE_TOKEN is supplied and the above sync is performed. 
+        # See https://docs.moderne.io/user-documentation/moderne-cli/how-to-guides/on-prem-scm-config/ for more details
+        # mod config scm add bitbucket "https://bitbucket.moderne.io/stash" --alternate-url="ssh://bitbucket.moderne.io:7999"; \
     fi
 
 # Note, artifact repositories such as GitLab's Maven API will accept an access token's name and the
