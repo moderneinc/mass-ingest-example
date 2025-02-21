@@ -21,7 +21,7 @@ At the very least, you must include two columns: `cloneUrl` and `branch`. Howeve
         --json sshUrl,defaultBranchRef --template "{{range .}}{{.sshUrl}},{{.defaultBranchRef.name}}{{\"\n\"}}{{end}}" >> repos.csv
 ```
 
-For other source code managers, we've created scripts that can help you create your `repos.csv` file. These can be found in the [repo-fetchers](/repo-fetchers/README.md) section of this repository.
+For other source code managers, we've created scripts that can help you create your `repos.csv` file. These can be found in the [repo-fetchers](https://github.com/moderneinc/repository-fetchers) section of this repository.
 
 ## Step 2: Customize the Docker image
 
