@@ -103,13 +103,13 @@ RUN if [ -n "${PUBLISH_URL}" ] && [ -n "${PUBLISH_USER}" ] && [ -n "${PUBLISH_PA
 
 FROM modcli AS language-support
 # Gradle support
-# RUN wget https://services.gradle.org/distributions/gradle-8.10-bin.zip
+# RUN wget --no-check-certificate https://services.gradle.org/distributions/gradle-8.10-bin.zip
 # RUN mkdir /opt/gradle
 # RUN unzip -d /opt/gradle gradle-8.10-bin.zip
 
 
 # Install Maven if some projects do not use the wrapper
-# RUN wget https://dlcdn.apache.org/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.zip && unzip apache-maven-3.9.9-bin.zip
+# RUN wget --no-check-certificate https://dlcdn.apache.org/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.zip && unzip apache-maven-3.9.9-bin.zip
 # RUN mv apache-maven-3.9.9 /opt/apache-maven-3.9.9
 # RUN ln -s /opt/apache-maven-3.9.9/bin/mvn /usr/local/bin/mvn
 
@@ -122,7 +122,7 @@ FROM modcli AS language-support
 
 
 # UNCOMMENT for Android support
-# RUN wget https://dl.google.com/android/repository/commandlinetools-linux-8512546_latest.zip
+# RUN wget --no-check-certificate https://dl.google.com/android/repository/commandlinetools-linux-8512546_latest.zip
 # RUN unzip commandlinetools-linux-8512546_latest.zip
 # RUN mkdir -p /usr/lib/android-sdk/cmdline-tools/latest/
 # RUN cp -R cmdline-tools/* /usr/lib/android-sdk/cmdline-tools/latest/
@@ -140,7 +140,7 @@ FROM modcli AS language-support
 # ENV ANDROID_SDK_ROOT=${ANDROID_HOME}
 
 # UNCOMMENT for Bazel support
-# RUN wget https://github.com/bazelbuild/bazelisk/releases/download/v1.20.0/bazelisk-linux-amd64
+# RUN wget --no-check-certificate https://github.com/bazelbuild/bazelisk/releases/download/v1.20.0/bazelisk-linux-amd64
 # RUN cp bazelisk-linux-amd64 /usr/local/bin/bazel
 # RUN chmod +x /usr/local/bin/bazel
 
