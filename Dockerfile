@@ -120,7 +120,6 @@ FROM modcli AS language-support
 # RUN mv mvnw mvnw.cmd .mvn /opt/maven-wrapper/bin/
 # ENV PATH="${PATH}:/opt/maven-wrapper/bin"
 
-
 # UNCOMMENT for Android support
 # RUN wget --no-check-certificate https://dl.google.com/android/repository/commandlinetools-linux-8512546_latest.zip
 # RUN unzip commandlinetools-linux-8512546_latest.zip
@@ -213,6 +212,10 @@ FROM language-support AS runner
 # RUN /usr/lib/jvm/temurin-21-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-21-jdk/lib/security/cacerts
 # RUN /usr/lib/jvm/temurin-23-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-23-jdk/lib/security/cacerts
 # RUN mod config http trust-store edit java-home
+
+# mvnw scripts in maven projects may attempt to download maven-wrapper jars using wget.
+# UNCOMMENT the following to set wget's CA certificate
+# RUN echo "ca_certificate = /root/mycert.crt" > /root/.wgetrc
 
 # OPTIONAL - Customize JVM options
 RUN mod config java options edit "-Xmx4g -Xss3m"
