@@ -56,7 +56,7 @@ function build_and_upload_repos() {
     partition_name=$(echo "$file" | cut -d'-' -f2)
 
     # if cloning failed, skip the rest of the loop
-    mod git clone csv "$partition_name" "$file" --filter=tree
+    mod git clone csv "$partition_name" "$file" --filter=tree:0
 
     mod build "./$partition_name" --no-download
 
