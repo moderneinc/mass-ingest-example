@@ -40,14 +40,15 @@ Please comment out the following lines from your Dockerfile:
 
 ```Dockerfile
 # Configure trust store if self-signed certificates are in use for artifact repository, source control, or moderne tenant
-COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-8-jdk/jre/lib/security/cacerts
-COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-11-jdk/lib/security/cacerts
-COPY ${TRUSTED_CERTIFICATES_PATH} /usr/lib/jvm/temurin-17-jdk/lib/security/cacerts
+COPY mycert.crt /root/mycert.crt
+RUN /usr/lib/jvm/temurin-8-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-8-jdk/jre/lib/security/cacerts
+..
+RUN mod config http trust-store edit java-home
 ```
 
 If your internal services, instead, use self-signed certs, you will need to configure the CLI and JVMs installed within the Docker image to trust your organization's self-signed certificate:
 
-When invoking, Docker, supply the `TRUSTED_CERTIFICATES_PATH` argument pointing to an appropriate [cacerts file](https://www.ibm.com/docs/en/sdk-java-technology/8?topic=certificate-cacerts-certificates-file).
+When invoking, Docker, supply the appropriate [cacerts file](https://www.ibm.com/docs/en/sdk-java-technology/8?topic=certificate-cacerts-certificates-file).
 
 If you are not sure where to get a suitable cacerts file, you can check out your local machine as you probably have one there. On JDK 8, you can find your cacerts file within its installation directory under `jre/lib/security/cacerts`. On newer JDK versions, you can find your cacerts file within is installation directory under `lib/security/cacerts`.
 
@@ -66,7 +67,7 @@ Lastly, LSTs must be published to Maven-formatted artifact repositories, but rep
 Most source control systems require authentication to access their repositories. If your source control **does not** require authentication to `git clone` repositories, comment out the [following lines](/Dockerfile#L35-L36):
 
 ```Dockerfile
-ADD .git-credentials /root/.git-credentials
+COPY .git-credentials /root/.git-credentials
 RUN git config --global credential.helper store --file=/root/.git-credentials
 ```
 
@@ -89,8 +90,8 @@ https://sambsnyd:likescats@github.com
 If your organization **does not** use the Maven build tool, comment out the [following lines](/Dockerfile#L30-L31):
 
 ```Dockerfile
-ADD maven/settings.xml /root/.m2/settings.xml
-RUN java -jar mod.jar config build maven settings edit /root/.m2/settings.xml
+COPY maven/settings.xml /root/.m2/settings.xml
+RUN mod config build maven settings edit /root/.m2/settings.xml
 ```
 
 If your organization does use Maven, you more than likely have shared configurations in a `settings.xml` file. This configuration file is usually required to build most repositories. You'll want to ensure that the Docker image points to the appropriate file. `settings.xml` is typically located at `~/.m2/settings.xml`, but your configuration may differ. 
