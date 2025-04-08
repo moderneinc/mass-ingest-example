@@ -4,7 +4,7 @@ FROM eclipse-temurin:17-jammy AS jdk17
 FROM eclipse-temurin:21-jammy AS jdk21
 # FROM eclipse-temurin:23-jammy AS jdk23
 
-# UNCOMMENT if you use a custom maven iamge with settings
+# UNCOMMENT if you use a custom maven image with settings
 # FROM <custom docker image> AS maven
 
 # Import Grafana and Prometheus
