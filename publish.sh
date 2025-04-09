@@ -44,6 +44,8 @@ done
 index=0
 
 function build_and_upload_repos() {
+  rm -f log.zip
+
   # for each chunk, read the contents of the csv file
   for file in repos-*
   do
