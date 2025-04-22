@@ -2,7 +2,7 @@ FROM eclipse-temurin:8-jammy AS jdk8
 FROM eclipse-temurin:11-jammy AS jdk11
 FROM eclipse-temurin:17-jammy AS jdk17
 FROM eclipse-temurin:21-jammy AS jdk21
-# FROM eclipse-temurin:23-jammy AS jdk23
+# FROM eclipse-temurin:24-jammy AS jdk24
 
 # Import Grafana and Prometheus
 # Comment out the following lines if you don't need Grafana and Prometheus
@@ -18,7 +18,7 @@ COPY --from=jdk8 /opt/java/openjdk /usr/lib/jvm/temurin-8-jdk
 COPY --from=jdk11 /opt/java/openjdk /usr/lib/jvm/temurin-11-jdk
 COPY --from=jdk17 /opt/java/openjdk /usr/lib/jvm/temurin-17-jdk
 COPY --from=jdk21 /opt/java/openjdk /usr/lib/jvm/temurin-21-jdk
-# COPY --from=jdk23 /opt/java/openjdk /usr/lib/jvm/temurin-23-jdk
+# COPY --from=jdk24 /opt/java/openjdk /usr/lib/jvm/temurin-24-jdk
 
 # Import Grafana and Prometheus into mass-ingest image
 # Comment out the following lines if you don't need Grafana and Prometheus
@@ -103,10 +103,10 @@ RUN if [ -n "${PUBLISH_URL}" ] && [ -n "${PUBLISH_USER}" ] && [ -n "${PUBLISH_PA
 
 FROM modcli AS language-support
 # Gradle support
-# RUN wget --no-check-certificate https://services.gradle.org/distributions/gradle-8.10-bin.zip
+# RUN wget --no-check-certificate https://services.gradle.org/distributions/gradle-8.13-bin.zip
 # RUN mkdir /opt/gradle
-# RUN unzip -d /opt/gradle gradle-8.10-bin.zip
-# ENV PATH="${PATH}:/opt/gradle/gradle-8.10/bin"
+# RUN unzip -d /opt/gradle gradle-8.13-bin.zip
+# ENV PATH="${PATH}:/opt/gradle/gradle-8.13/bin"
 
 
 # Install Maven if some projects do not use the wrapper
@@ -211,7 +211,7 @@ FROM language-support AS runner
 # RUN /usr/lib/jvm/temurin-11-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-11-jdk/lib/security/cacerts
 # RUN /usr/lib/jvm/temurin-17-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-17-jdk/lib/security/cacerts
 # RUN /usr/lib/jvm/temurin-21-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-21-jdk/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-23-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-23-jdk/lib/security/cacerts
+# RUN /usr/lib/jvm/temurin-24-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-24-jdk/lib/security/cacerts
 # RUN mod config http trust-store edit java-home
 
 # mvnw scripts in maven projects may attempt to download maven-wrapper jars using wget.
