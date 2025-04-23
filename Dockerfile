@@ -155,29 +155,26 @@ FROM modcli AS language-support
 #     && add-apt-repository ppa:deadsnakes/ppa \
 #     && apt-get update
     
-# # Install Python 3.12 and pip
+# # Install Python 3.11 and pip
 # RUN apt-get install -y \
-#     python3.12 \
-#     python3.12-venv \
-#     python3.12-dev \
+#     python3.11 \
+#     python3.11-venv \
+#     python3.11-dev \
+#     python3.11-distutils \
 #     && apt-get -y autoremove \
 #     && apt-get clean
 
-# # Set Python 3.12 as the default
-# RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 && \
+# # Set Python 3.11 as the default
+# RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
 #    update-alternatives --config python3
 
-# # Install pip for Python 3.12 using the bundled `ensurepip` and upgrade it
-# RUN python3.12 -m ensurepip --upgrade
+# # Install pip for Python 3.11 using the bundled `ensurepip` and upgrade it
+# RUN python3.11 -m ensurepip --upgrade
 
-# # Update pip to the latest version for the installed Python 3.12
-# RUN python3.12 -m pip install --upgrade pip
+# # Update pip to the latest version for the installed Python 3.11
+# RUN python3.11 -m pip install --upgrade pip
 
-# RUN python3.12 -m pip install more-itertools cbor2
-
-# @see https://stackoverflow.com/a/76691103
-# Install setuptools for Python 3.12 (distutils is no longer included in the standard library)
-# RUN python3.12 -m pip install setuptools
+# RUN python3.11 -m pip install more-itertools cbor2
 
 # UNCOMMENT for .NET
 # RUN apt-get install -y dotnet-sdk-6.0
