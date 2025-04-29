@@ -9,19 +9,7 @@ The first step needed to integrate private code is to come up with a list of rep
 At the very least, you must include two columns: `cloneUrl` and `branch`. However, you can also include additional optional columns if additional information is needed to build your repositories. These optional columns are: `changeset`, `java`, `jvmOpts`, `mavenArgs`, `gradleArgs`, and `bazelRule` (see the [mod git clone csv documentation](https://docs.moderne.io/user-documentation/moderne-cli/cli-reference#mod-git-clone-csv) for more information).
 
 > [!TIP]
-> If you use GitHub, you may find it useful to use the GitHub CLI to generate a list of repositories for your organization. For instance, the following command would generate a `repos.csv` file for the `spring-projects` GitHub organization:
-
-```bash
-    echo "cloneUrl,branch" > repos.csv
-    gh repo list \
-        spring-projects 
-        --source \
-        --no-archived \
-        --limit 1000 \
-        --json sshUrl,defaultBranchRef --template "{{range .}}{{.sshUrl}},{{.defaultBranchRef.name}}{{\"\n\"}}{{end}}" >> repos.csv
-```
-
-For other source code managers, we've created scripts that can help you create your `repos.csv` file. These can be found in the [repo-fetchers](https://github.com/moderneinc/repository-fetchers) section of this repository.
+> We offer scripts to assist you in generating your repos.csv file. You can find them in the [repo-fetchers](https://github.com/moderneinc/repository-fetchers) repository.
 
 ## Step 2: Customize the Docker image
 
