@@ -64,7 +64,7 @@ Lastly, LSTs must be published to Maven-formatted artifact repositories, but rep
 
 ### Source Control Credentials
 
-Most source control systems require authentication to access their repositories. If your source control **requirest** authentication to `git clone` repositories, uncomment the [following lines](/Dockerfile#L204-L205):
+Most source control systems require authentication to access their repositories. If your source control **requires** authentication to `git clone` repositories, uncomment the [following lines](/Dockerfile#L204-L205):
 
 ```Dockerfile
 COPY .git-credentials /root/.git-credentials
