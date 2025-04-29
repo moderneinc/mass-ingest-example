@@ -4,6 +4,9 @@ FROM eclipse-temurin:17-jammy AS jdk17
 FROM eclipse-temurin:21-jammy AS jdk21
 # FROM eclipse-temurin:24-jammy AS jdk24
 
+# UNCOMMENT if you use a custom maven image with settings
+# FROM <custom docker image> AS maven
+
 # Import Grafana and Prometheus
 # Comment out the following lines if you don't need Grafana and Prometheus
 FROM grafana/grafana AS grafana
@@ -94,8 +97,10 @@ RUN if [ -n "${MODERNE_TOKEN}" ]; then \
 # access token for PUBLISH_USER and PUBLISH_PASSWORD respectively.
 RUN if [ -n "${PUBLISH_URL}" ] && [ -n "${PUBLISH_USER}" ] && [ -n "${PUBLISH_PASSWORD}" ]; then \
         mod config lsts artifacts maven edit ${PUBLISH_URL} --user ${PUBLISH_USER} --password ${PUBLISH_PASSWORD}; \
+        # mod config lsts artifacts maven edit ${PUBLISH_URL} --user ${PUBLISH_USER} --password ${PUBLISH_PASSWORD} --skip-ssl; \
     elif [ -n "${PUBLISH_URL}" ] && [ -n "${PUBLISH_TOKEN}" ]; then \
         mod config lsts artifacts maven edit ${PUBLISH_URL} --jfrog-api-token ${PUBLISH_TOKEN}; \
+        # mod config lsts artifacts maven edit ${PUBLISH_URL} --jfrog-api-token ${PUBLISH_TOKEN} --skip-ssl; \
     else \
         echo "PUBLISH_URL and either PUBLISH_USER and PUBLISH_PASSWORD or PUBLISH_TOKEN must be supplied."; \
     fi
@@ -183,8 +188,9 @@ FROM modcli AS language-support
 
 
 # UNCOMMENT for custom Maven settings
-# Configure Maven Settings if they are required to build
+# Configure Maven Settings if they are required to build (choose betwween a settings file withing this repo or the docker image variant):
 # COPY maven/settings.xml /root/.m2/settings.xml
+# RUN cp $MAVEN_CONFIG/settings.xml /root/.m2/settings.xml # For custom maven docker imagee
 # COPY maven/settings-security.xml /root/.m2/settings-security.xml
 # RUN mod config build maven settings edit /root/.m2/settings.xml
 
@@ -197,6 +203,7 @@ FROM language-support AS runner
 # COPY .git-credentials /root/.git-credentials
 # RUN git config --global credential.helper store --file=/root/.git-credentials
 # RUN git config --global http.sslVerify false
+
 # UNCOMMENT if using ssh keys
 # RUN mkdir /root/.ssh && chmod 755 /root/.ssh
 # COPY .ssh/id_rsa /root/.ssh/id_rsa
