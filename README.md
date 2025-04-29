@@ -64,7 +64,7 @@ Lastly, LSTs must be published to Maven-formatted artifact repositories, but rep
 
 ### Source Control Credentials
 
-Most source control systems require authentication to access their repositories. If your source control **requirest** authentication to `git clone` repositories, uncomment the [following lines](/Dockerfile#L197-L198):
+Most source control systems require authentication to access their repositories. If your source control **requirest** authentication to `git clone` repositories, uncomment the [following lines](/Dockerfile#L204-L205):
 
 ```Dockerfile
 COPY .git-credentials /root/.git-credentials
@@ -87,7 +87,7 @@ https://sambsnyd:likescats@github.com
 
 ### Maven Settings
 
-If your organization **uses** the Maven build tool, uncomment the [following lines](/Dockerfile#L187-L189):
+If your organization **uses** the Maven build tool, uncomment the [following lines](/Dockerfile#L192-L196):
 
 ```Dockerfile
 COPY maven/settings.xml /root/.m2/settings.xml
