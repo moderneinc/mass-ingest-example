@@ -71,7 +71,10 @@ function build_and_upload_repos() {
     fi
   done
 
-  # if PUBLISH_USER and PUBLISH_PASSWORD and PUBLISH_UR, or PUBLISH_TOKEN are set, publish logs
+
+
+  # For publishing logs, PUBLISH_URL must be set. For authentication, either 
+  # set both PUBLISH_USER and PUBLISH_PASSWORD or just PUBLISH_TOKEN. 
   if [ "$PUBLISH_URL" ]; then
     log_version=$(date '+%Y%m%d%H%M%S')
     if [ "$PUBLISH_USER" ] && [ "$PUBLISH_PASSWORD" ]; then
