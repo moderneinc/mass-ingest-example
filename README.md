@@ -61,10 +61,11 @@ RUN git config --global credential.helper store --file=/root/.git-credentials
 
 In the more common scenario that your source control does require authentication, you will need to create and include a `.git-credentials` file. You will want to supply the credentials for a service account with access to all repositories.
 
-Each line of the `.git-credentials` file specifies the `username` and plaintext `password` for a particular `host` in the format:
+Each line of the `.git-credentials` file specifies the `username/token-name` and plaintext `password/token` for a particular `host` in the format:
 
 ```
 https://username:password@host
+https://<token-name>:<token>@host
 ```
 
 For example:

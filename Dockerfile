@@ -198,8 +198,8 @@ FROM language-support AS runner
 
 # UNCOMMENT for authentication to git repositories
 # Configure git credentials if they are required to clone; ensure this lines up with your use of https:// or ssh://
-# .git-credentials each line defines credentilas for a host in the format: https://<username>:<password>@host or
-# https://<token-name>:<token>@host
+# .git-credentials each line defines credentilas for a host in the format:
+# https://<username>:<password>@host or https://<token-name>:<token>@host
 # COPY .git-credentials /root/.git-credentials
 # RUN git config --global credential.helper store --file=/root/.git-credentials
 # RUN git config --global http.sslVerify false
