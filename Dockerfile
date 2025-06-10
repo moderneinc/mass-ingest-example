@@ -113,15 +113,14 @@ FROM modcli AS language-support
 # RUN unzip -d /opt/gradle gradle-8.14-bin.zip
 # ENV PATH="${PATH}:/opt/gradle/gradle-8.14/bin"
 
-
 # Install Maven if some projects do not use the wrapper
-# RUN wget --no-check-certificate https://archive.apache.org/dist/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.zip && unzip apache-maven-3.9.9-bin.zip
-# RUN mv apache-maven-3.9.9 /opt/apache-maven-3.9.9
-# RUN ln -s /opt/apache-maven-3.9.9/bin/mvn /usr/local/bin/mvn
-
+# ENV MAVEN_VERSION=3.9.10
+# RUN wget --no-check-certificate https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz && tar xzvf apache-maven-${MAVEN_VERSION}-bin.tar.gz
+# RUN mv apache-maven-${MAVEN_VERSION} /opt/apache-maven-${MAVEN_VERSION}
+# RUN ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 
 # Install a Maven wrapper external to projects
-# RUN /opt/apache-maven-3.9.9/bin/mvn -N wrapper:wrapper
+# RUN /usr/local/bin/mvn -N wrapper:wrapper
 # RUN mkdir -p /opt/maven-wrapper/bin
 # RUN mv mvnw mvnw.cmd .mvn /opt/maven-wrapper/bin/
 # ENV PATH="${PATH}:/opt/maven-wrapper/bin"
