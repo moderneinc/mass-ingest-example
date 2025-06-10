@@ -120,7 +120,7 @@ FROM modcli AS language-support
 # RUN ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 
 # Install a Maven wrapper external to projects
-# RUN /opt/apache-maven-${MAVEN_VERSION}/bin/mvn -N wrapper:wrapper
+# RUN /usr/local/bin/mvn -N wrapper:wrapper
 # RUN mkdir -p /opt/maven-wrapper/bin
 # RUN mv mvnw mvnw.cmd .mvn /opt/maven-wrapper/bin/
 # ENV PATH="${PATH}:/opt/maven-wrapper/bin"
