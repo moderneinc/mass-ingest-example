@@ -115,7 +115,7 @@ FROM modcli AS language-support
 
 # Install Maven if some projects do not use the wrapper
 # ENV MAVEN_VERSION=3.9.9
-# RUN wget --no-check-certificate https://dlcdn.apache.org/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.zip && unzip apache-maven-${MAVEN_VERSION}-bin.zip
+# RUN wget --no-check-certificate https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz && tar xzvf apache-maven-${MAVEN_VERSION}-bin.tar.gz
 # RUN mv apache-maven-${MAVEN_VERSION} /opt/apache-maven-${MAVEN_VERSION}
 # RUN ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 
