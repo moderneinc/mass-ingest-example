@@ -141,6 +141,11 @@ docker build -t moderne-mass-ingest:latest \
 
 Now that you have a Docker image built, you will need to deploy it to the container management platform of your choice and have it run on a schedule. We will leave this as an exercise for the reader as there are many platforms and options for running this. 
 
+That being said, **at a minimum**, we recommend that you run this image on a system with at least 2 CPU cores, 16 GB of memory, and 32 GB of disk space. Depending on your repo sizes and desired mass ingest cycle time, you may choose to increase these specs.
+
+For example, if you have 1000+ repositories, we recommend using 64-128 GB of storage space.
+
+It's your responsibility to monitor this and adjust as needed. See the [next step](#step-5-monitor-the-ingestion-process) for monitoring instructions.
 
 > [!NOTE]
 > We recommend attaching a volume mount to the container at `/var/moderne` to ensure that cloned repositories are stored outside of the guest. 
@@ -148,7 +153,11 @@ Now that you have a Docker image built, you will need to deploy it to the contai
 
 ## Step 5: Monitor the ingestion process
 
-By default the example Docker image will run the `mod monitor` command that will create a scrape target that can be consumed by Prometheus. This example Docker image will also run a Prometheus server that will scrape the scrape target. You can access the Prometheus server at `http://localhost:9090` and the Grafana server at `http://localhost:3000`. The default username and password for Grafana is `admin` and `admin`.
+By default, the example Docker image will run the `mod monitor` command that will create a scrape target that can be consumed by Prometheus.
+
+You can scrape the metrics from the `/prometheus` endpoint.
+
+The example Docker image provided in this repo will also run a Prometheus server that will scrape the scrape target. You can access the Prometheus server at `http://localhost:9090` and the Grafana server at `http://localhost:3000`. The default username and password for Grafana is `admin` and `admin`.
 
 ## Step 6: Troubleshooting
 
