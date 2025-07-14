@@ -52,12 +52,6 @@ function Invoke-BuildAndUploadRepos {
 
     mod git clone csv .\$PartitionName $File --filter=tree:0
 
-    # if cloning failed, skip the rest of the loop
-    if (-not $?) {
-      Write-Host "[$Index][${PartitionName}] Cloning failed, skipping partition"
-      continue
-    }
-
     mod build .\$PartitionName --no-download
 
     mod publish .\$PartitionName
