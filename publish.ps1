@@ -4,7 +4,7 @@ Param(
   [string]$CsvFile
 )
 
-$ErrorActionPreference="Stop" # abort on errors
+$ErrorActionPreference="Continue" # continue on errors to match bash behavior
 
 # Clean any existing files in the data directory
 if (Test-Path -Path $env:DATA_DIR) {
