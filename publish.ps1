@@ -63,15 +63,23 @@ function Invoke-BuildAndUploadRepos {
     }
   }
 
-  if ($env:PUBLISH_USER || $env:PUBLISH_PASSWORD || $env:PUBLISH_URL) {
-    Write-Host "[${Index}] No log publishing credentials or URL provided"
-  } else {
+  if ($env:PUBLISH_URL) {
     $LogVersion=Get-Date -Format "yyyyMMddHHmmss"
-    $SecurePassword = ConvertTo-SecureString -String $env:PUBLISH_PASSWORD -AsPlainText -Force
-    $Credential = New-Object PSCredential($env:PUBLISH_USER, $SecurePassword)
-    Invoke-WebRequest -Credential $Credential -Method PUT -UseBasicParsing `
-        -Uri "$env:PUBLISH_URL/$LogVersion/ingest-log-$LogVersion.zip" `
-        -InFile .\log.zip
+    if ($env:PUBLISH_USER -and $env:PUBLISH_PASSWORD) {
+      $SecurePassword = ConvertTo-SecureString -String $env:PUBLISH_PASSWORD -AsPlainText -Force
+      $Credential = New-Object PSCredential($env:PUBLISH_USER, $SecurePassword)
+      Invoke-WebRequest -Credential $Credential -Method PUT -UseBasicParsing `
+          -Uri "$env:PUBLISH_URL/$LogVersion/ingest-log-$LogVersion.zip" `
+          -InFile .\log.zip
+    } elseif ($env:PUBLISH_TOKEN) {
+      Invoke-WebRequest -Headers @{"Authorization"="Bearer $env:PUBLISH_TOKEN"} -Method PUT -UseBasicParsing `
+          -Uri "$env:PUBLISH_URL/$LogVersion/ingest-log-$LogVersion.zip" `
+          -InFile .\log.zip
+    } else {
+      Write-Host "[$Index] No log publishing credentials for $env:PUBLISH_URL provided"
+    }
+  } else {
+    Write-Host "[$Index] No log publishing credentials or URL provided"
   }
 
   # increment index
