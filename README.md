@@ -6,7 +6,9 @@ This example demonstrates how to use the [Moderne CLI](https://docs.moderne.io/u
 
 The first step needed to integrate private code is to come up with a list of repositories that should be ingested (`repos.csv`). This list should be in a CSV format with the first row composed of headers for the columns.
 
-At the very least, you must include two columns: `cloneUrl` and `branch`. However, you can also include additional optional columns if additional information is needed to build your repositories. These optional columns are: `changeset`, `java`, `jvmOpts`, `mavenArgs`, `gradleArgs`, and `bazelRule` (see the [mod git clone csv documentation](https://docs.moderne.io/user-documentation/moderne-cli/cli-reference#mod-git-clone-csv) for more information).
+At the very least, you must include two columns: `cloneUrl` and `branch`. However, you can also include additional optional columns if additional information is needed to build your repositories. 
+
+For a list of all of the columns and configuration options, please check out our [creating a repos.csv reference doc](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv).
 
 > [!TIP]
 > We offer scripts to assist you in generating your repos.csv file. You can find them in the [repo-fetchers](https://github.com/moderneinc/repository-fetchers) repository.
