@@ -37,6 +37,7 @@ COPY observability/ /etc/.
 # COPY prometheus.yml /etc/prometheus/prometheus.yml
 
 FROM dependencies AS modcli
+ARG MODERNE_CLI_STAGE=stable
 ARG MODERNE_CLI_VERSION
 ARG MODERNE_TENANT
 ARG MODERNE_DX_HOST
@@ -60,13 +61,21 @@ WORKDIR /usr/local/bin
 RUN if [ -n "${MODERNE_CLI_VERSION}" ]; then \
     echo "Downloading version: ${MODERNE_CLI_VERSION}"; \
     curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/${MODERNE_CLI_VERSION}/moderne-cli-${MODERNE_CLI_VERSION}.jar" --output mod.jar; \
-    else \
-    LATEST_VERSION=$(curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/maven-metadata.xml" | xmllint --xpath 'string(/metadata/versioning/latest)' -); \
+    elif [ "${MODERNE_CLI_STAGE}" == "staging" ]; then \
+    LATEST_VERSION=$(curl -s --insecure --request GET --url "https://api.github.com/repos/moderneinc/moderne-cli-releases/releases" | jq '.[0].tag_name' -r | sed "s/^v//"); \
     if [ -z "${LATEST_VERSION}" ]; then \
-    echo "Failed to get latest version"; \
+    echo "Failed to get latest staging version"; \
     exit 1; \
     fi; \
-    echo "Downloading latest version: ${LATEST_VERSION}"; \
+    echo "Downloading latest staging version: ${LATEST_VERSION}"; \
+    curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/${LATEST_VERSION}/moderne-cli-${LATEST_VERESION}.jar" --output mod.jar; \
+    else \
+    LATEST_VERSION=$(curl -s --insecure --request GET --url "https://api.github.com/repos/moderneinc/moderne-cli-releases/releases/latest" | jq '.tag_name' -r | sed "s/^v//"); \
+    if [ -z "${LATEST_VERSION}" ]; then \
+    echo "Failed to get latest stable version"; \
+    exit 1; \
+    fi; \
+    echo "Downloading latest stable version: ${LATEST_VERSION}"; \
     curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/${LATEST_VERSION}/moderne-cli-${LATEST_VERSION}.jar" --output mod.jar; \
     fi
 
