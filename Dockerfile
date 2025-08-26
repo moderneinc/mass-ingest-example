@@ -4,11 +4,7 @@ FROM eclipse-temurin:17-jammy AS jdk17
 FROM eclipse-temurin:21-jammy AS jdk21
 # FROM eclipse-temurin:22-jammy AS jdk22
 
-# UNCOMMENT if you use a custom maven image with settings
-# FROM <custom docker image> AS maven
-
 # Import Grafana and Prometheus
-# Comment out the following lines if you don't need Grafana and Prometheus
 FROM grafana/grafana AS grafana
 FROM prom/prometheus AS prometheus
 
@@ -24,20 +20,13 @@ COPY --from=jdk21 /opt/java/openjdk /usr/lib/jvm/temurin-21-jdk
 # COPY --from=jdk22 /opt/java/openjdk /usr/lib/jvm/temurin-22-jdk
 
 # Import Grafana and Prometheus into mass-ingest image
-# Comment out the following lines if you don't need Grafana and Prometheus
 COPY --from=grafana /usr/share/grafana /usr/share/grafana
 COPY --from=grafana /etc/grafana /etc/grafana
 COPY --from=prometheus /bin/prometheus /bin/prometheus
 COPY --from=prometheus /etc/prometheus /etc/prometheus
 
 # Copy configs for prometheus and grafana
-# Comment out the following lines if you don't need Grafana and Prometheus
 COPY observability/ /etc/.
-# COPY grafana-datasource.yml /etc/grafana/provisioning/datasources/grafana-datasource.yml
-# COPY grafana-dashboard.yml /etc/grafana/provisioning/dashboards/grafana-dashboard.yml
-# COPY grafana-build-dashboard.json /etc/grafana/dashboards/build.json
-# COPY grafana-run-dashboard.json /etc/grafana/dashboards/run.json
-# COPY prometheus.yml /etc/prometheus/prometheus.yml
 
 FROM dependencies AS modcli
 ARG MODERNE_CLI_STAGE=stable
@@ -56,9 +45,6 @@ ARG PUBLISH_TOKEN
 # Moderne CLI installation
 # Set the working directory to /usr/local/bin
 WORKDIR /usr/local/bin
-
-# Set the environment variable MODERNE_CLI_VERSION
-# ENV MODERNE_CLI_VERSION=3.26.3
 
 # Download the specified version of moderne-cli JAR file if MODERNE_CLI_VERSION is provided,
 # otherwise download the latest version
@@ -97,19 +83,14 @@ RUN if [ -n "${MODERNE_TOKEN}" ]; then \
         mod config scm moderne sync; \
     else \
         echo "MODERNE_TOKEN not supplied, skipping configuration."; \
-        # uncomment to configure an on premise scm. This is not required if the MODERNE_TOKEN is supplied and the above sync is performed. 
-        # See https://docs.moderne.io/user-documentation/moderne-cli/how-to-guides/on-prem-scm-config/ for more details
-        # mod config scm add bitbucket "https://bitbucket.moderne.io/stash" --alternate-url="ssh://bitbucket.moderne.io:7999"; \
     fi
 
 # Note, artifact repositories such as GitLab's Maven API will accept an access token's name and the
 # access token for PUBLISH_USER and PUBLISH_PASSWORD respectively.
 RUN if [ -n "${PUBLISH_URL}" ] && [ -n "${PUBLISH_USER}" ] && [ -n "${PUBLISH_PASSWORD}" ]; then \
         mod config lsts artifacts maven edit ${PUBLISH_URL} --user ${PUBLISH_USER} --password ${PUBLISH_PASSWORD}; \
-        # mod config lsts artifacts maven edit ${PUBLISH_URL} --user ${PUBLISH_USER} --password ${PUBLISH_PASSWORD} --skip-ssl; \
     elif [ -n "${PUBLISH_URL}" ] && [ -n "${PUBLISH_TOKEN}" ]; then \
         mod config lsts artifacts artifactory edit ${PUBLISH_URL} --jfrog-api-token ${PUBLISH_TOKEN}; \
-        # mod config lsts artifacts artifactory edit ${PUBLISH_URL} --jfrog-api-token ${PUBLISH_TOKEN} --skip-ssl; \
     else \
         echo "PUBLISH_URL and either PUBLISH_USER and PUBLISH_PASSWORD or PUBLISH_TOKEN must be supplied."; \
     fi
@@ -193,44 +174,29 @@ FROM modcli AS language-support
 # RUN apt-get install -y dotnet-sdk-6.0
 # RUN apt-get install -y dotnet-sdk-8.0
 
-
-# UNCOMMENT for custom Maven settings
-# Configure Maven Settings if they are required to build (choose betwween a settings file withing this repo or the docker image variant):
-# COPY maven/settings.xml /root/.m2/settings.xml
-# RUN cp $MAVEN_CONFIG/settings.xml /root/.m2/settings.xml # For custom maven docker imagee
-# COPY maven/settings-security.xml /root/.m2/settings-security.xml
-# RUN mod config build maven settings edit /root/.m2/settings.xml
-
 FROM language-support AS runner
 
-# UNCOMMENT for authentication to git repositories
-# Configure git credentials if they are required to clone; ensure this lines up with your use of https:// or ssh://
-# .git-credentials each line defines credentilas for a host in the format:
-# https://<username>:<password>@host or https://<token-name>:<token>@host
-# COPY .git-credentials /root/.git-credentials
-# RUN git config --global credential.helper store --file=/root/.git-credentials
-# RUN git config --global http.sslVerify false
+# ==============================================================================
+# CREDENTIAL CONFIGURATION 
+# Credentials are configured at container startup using environment variables.
+# This ensures secrets are not embedded in the image and can be securely managed
+# by your container orchestration platform (Kubernetes, Docker Swarm, etc.).
+# ==============================================================================
 
-# UNCOMMENT if using ssh keys
-# RUN mkdir /root/.ssh && chmod 755 /root/.ssh
-# COPY .ssh/id_rsa /root/.ssh/id_rsa
-# COPY .ssh/known_hosts /root/.ssh/known_hosts
-# RUN chmod 600 /root/.ssh/id_rsa /root/.ssh/known_hosts
+# Supported environment variables (see init-credentials.sh and .env.example):
+# - GIT_CREDENTIALS: Git credentials in format "https://user:token@host" (one per line)
+# - SSH_PRIVATE_KEY: SSH private key content
+# - SSH_KNOWN_HOSTS: SSH known hosts content  
+# - MAVEN_SETTINGS_XML: Complete Maven settings.xml content
+# - MAVEN_SETTINGS_SECURITY_XML: Maven settings security for encrypted passwords
+# - GRADLE_PROPERTIES: Gradle properties content
+# - CUSTOM_CA_CERT: Custom CA certificate content
+# - NPM_REGISTRY & NPM_AUTH_TOKEN: NPM configuration
+# - PIP_INDEX_URL & PIP_TRUSTED_HOST: Python pip configuration
 
-# Configure trust store if self-signed certificates are in use for artifact repository, source control, or moderne tenant
-# COPY mycert.crt /root/mycert.crt
-# RUN /usr/lib/jvm/temurin-8-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-8-jdk/jre/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-11-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-11-jdk/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-17-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-17-jdk/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-21-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-21-jdk/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-22-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-22-jdk/lib/security/cacerts
-# RUN mod config http trust-store edit java-home
+# Credentials are injected at runtime via the init-credentials.sh script
 
-# mvnw scripts in maven projects may attempt to download maven-wrapper jars using wget.
-# UNCOMMENT the following to set wget's CA certificate
-# RUN echo "ca_certificate = /root/mycert.crt" > /root/.wgetrc
-
-# OPTIONAL - Customize JVM options
+# Customize JVM options
 RUN mod config java options edit "-Xmx4g -Xss3m"
 
 # Available ports
@@ -253,9 +219,10 @@ ENV CUSTOM_CI=true
 # Set the data directory for the publish script
 ENV DATA_DIR=/var/moderne
 
+# Copy initialization and execution scripts
+COPY --chmod=755 init-credentials.sh init-credentials.sh
 COPY --chmod=755 publish.sh publish.sh
 
-# Optional: mount from host
 COPY repos.csv repos.csv
 
 ENTRYPOINT ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]

@@ -21,26 +21,15 @@ From there, we will modify it depending on your organizational needs. Please not
 
 ### Self-Signed Certificates
 
-If your internal services (artifact repository, source control, or the Moderne tenant) are accessed:
+If your internal services use self-signed certificates, provide your custom CA certificate via the `CUSTOM_CA_CERT` environment variable:
 
-* Over HTTPS and they require [SSL/TLS](https://en.wikipedia.org/wiki/Transport_Layer_Security), but have certificates signed by a trusted-by-default root Certificate Authority.
-* Over HTTP (never requiring SSL/TLS)
-
-Please comment out the following lines from your Dockerfile: 
-
-```Dockerfile
-# Configure trust store if self-signed certificates are in use for artifact repository, source control, or moderne tenant
-COPY mycert.crt /root/mycert.crt
-RUN /usr/lib/jvm/temurin-8-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-8-jdk/jre/lib/security/cacerts
-..
-RUN mod config http trust-store edit java-home
+```bash
+CUSTOM_CA_CERT="-----BEGIN CERTIFICATE-----
+[your certificate content]
+-----END CERTIFICATE-----"
 ```
 
-If your internal services, instead, use self-signed certs, you will need to configure the CLI and JVMs installed within the Docker image to trust your organization's self-signed certificate:
-
-When invoking, Docker, supply the appropriate [cacerts file](https://www.ibm.com/docs/en/sdk-java-technology/8?topic=certificate-cacerts-certificates-file).
-
-If you are not sure where to get a suitable cacerts file, you can check out your local machine as you probably have one there. On JDK 8, you can find your cacerts file within its installation directory under `jre/lib/security/cacerts`. On newer JDK versions, you can find your cacerts file within is installation directory under `lib/security/cacerts`.
+This will automatically configure the CLI and all JVMs within the Docker image to trust your organization's certificate. The certificate will be imported into the Java trust stores and configured for use by the mod CLI at container startup.
 
 ### Artifact repository
 
@@ -54,38 +43,43 @@ Lastly, LSTs must be published to Maven-formatted artifact repositories, but rep
 
 ### Source Control Credentials
 
-Most source control systems require authentication to access their repositories. If your source control **requires** authentication to `git clone` repositories, uncomment the [following lines](/Dockerfile#L204-L205):
+Most source control systems require authentication to access their repositories. Credentials are provided via environment variables at container runtime, allowing your container orchestration platform (Kubernetes, Docker Swarm, etc.) to securely inject secrets without embedding them in the image.
 
-```Dockerfile
-COPY .git-credentials /root/.git-credentials
-RUN git config --global credential.helper store --file=/root/.git-credentials
+For HTTPS authentication, set the `GIT_CREDENTIALS` environment variable:
+```bash
+GIT_CREDENTIALS="https://username:token@github.com
+https://username:password@gitlab.com"
 ```
 
-In the more common scenario that your source control does require authentication, you will need to create and include a `.git-credentials` file. You will want to supply the credentials for a service account with access to all repositories.
+For SSH authentication, use:
+```bash
+SSH_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
+[your private key content]
+-----END RSA PRIVATE KEY-----"
 
-Each line of the `.git-credentials` file specifies the `username` / `token-name` and plaintext `password` / `token` for a particular `host` in the format:
-
-```
-https://username:password@host
-https://<token-name>:<token>@host
+SSH_KNOWN_HOSTS="github.com ssh-rsa AAAAB3NzaC1yc2E..."
 ```
 
-For example:
-
-```
-https://sambsnyd:likescats@github.com
-```
+See [.env.example](.env.example) for a complete list of supported environment variables.
 
 ### Maven Settings
 
-If your organization **uses** the Maven build tool, uncomment the [following lines](/Dockerfile#L192-L196):
+If your organization **uses** the Maven build tool, provide your Maven settings via the `MAVEN_SETTINGS_XML` environment variable:
 
-```Dockerfile
-COPY maven/settings.xml /root/.m2/settings.xml
-RUN mod config build maven settings edit /root/.m2/settings.xml
+```bash
+MAVEN_SETTINGS_XML='<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
+  <servers>
+    <server>
+      <id>my-repo</id>
+      <username>maven-user</username>
+      <password>maven-password</password>
+    </server>
+  </servers>
+  <!-- ... rest of settings.xml ... -->
+</settings>'
 ```
 
-If your organization does use Maven, you more than likely have shared configurations in a `settings.xml` file. This configuration file is usually required to build most repositories. You'll want to ensure that the Docker image points to the appropriate file. `settings.xml` is typically located at `~/.m2/settings.xml`, but your configuration may differ. 
+If your organization uses Maven, you likely have shared configurations in a `settings.xml` file that is required to build most repositories. This file is typically located at `~/.m2/settings.xml` on developer machines. 
 
 ## Step 3: Build the Docker image
 
@@ -141,9 +135,49 @@ docker build -t moderne-mass-ingest:latest \
 
 ## Step 4: Deploy and run the image
 
-Now that you have a Docker image built, you will need to deploy it to the container management platform of your choice and have it run on a schedule. We will leave this as an exercise for the reader as there are many platforms and options for running this. 
+Now that you have a Docker image built, you will need to deploy it to the container management platform of your choice and have it run on a schedule. 
 
-That being said, **at a minimum**, we recommend that you run this image on a system with at least 2 CPU cores, 16 GB of memory, and 32 GB of disk space. Depending on your repo sizes and desired mass ingest cycle time, you may choose to increase these specs.
+### Running with Environment Variables
+
+When deploying the container, you can provide credentials via environment variables instead of embedding them in the image. This is the recommended approach for production deployments.
+
+#### Using Docker Run
+
+```bash
+docker run -it --rm \
+    -p 3000:3000 -p 8080:8080 -p 9090:9090 \
+    --env-file .env \
+    -v $(pwd)/data:/var/moderne \
+    -v $(pwd)/repos.csv:/app/repos.csv:ro \
+    moderne-mass-ingest:latest
+```
+
+#### Using Docker Compose
+
+See [docker-compose.env.yml](docker-compose.env.yml) for an example configuration using environment variables.
+
+```bash
+# Copy and customize the environment file
+cp .env.example .env
+# Edit .env with your credentials
+
+# Run with docker-compose
+docker-compose -f docker-compose.env.yml up
+```
+
+#### Supported Environment Variables
+
+See [.env.example](.env.example) for a complete list of supported environment variables, including:
+- `GIT_CREDENTIALS` - Git HTTPS credentials
+- `SSH_PRIVATE_KEY` - SSH private key for Git access
+- `MAVEN_SETTINGS_XML` - Complete Maven settings.xml content
+- `GRADLE_PROPERTIES` - Gradle properties
+- `CUSTOM_CA_CERT` - Custom CA certificate for self-signed certs
+- And many more...
+
+### Resource Requirements
+
+**At a minimum**, we recommend that you run this image on a system with at least 2 CPU cores, 16 GB of memory, and 32 GB of disk space. Depending on your repo sizes and desired mass ingest cycle time, you may choose to increase these specs.
 
 For example, if you have 1000+ repositories, we recommend using 64-128 GB of storage space.
 
@@ -169,6 +203,7 @@ docker run -it --rm \
     -p 3000:3000 \
     -p 8080:8080 \
     -p 9090:9090 \
+    --env-file .env \
     moderne-mass-ingest:latest 
 ```
 
