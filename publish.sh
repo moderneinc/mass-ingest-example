@@ -57,7 +57,7 @@ function build_and_upload_repos() {
     # extract just the partition name from the file name
     partition_name=$(echo "$file" | cut -d'-' -f2)
 
-    mod git sync csv "$partition_name" --with-sources
+    mod git sync csv "$partition_name" "$file" --with-sources
 
     mod build "./$partition_name" --no-download
 
