@@ -14,7 +14,7 @@ FROM prom/prometheus AS prometheus
 
 # Install dependencies for `mod` cli
 FROM jdk21 AS dependencies
-RUN apt-get -y update && apt-get install -y git git-lfs jq libxml2-utils unzip zip supervisor vim && git lfs install
+RUN apt-get -y update && apt-get install -y ca-certificates ca-certificates-java git git-lfs jq libxml2-utils unzip zip supervisor vim && git lfs install
 
 # Gather various JDK versions
 COPY --from=jdk8 /opt/java/openjdk /usr/lib/jvm/temurin-8-jdk
