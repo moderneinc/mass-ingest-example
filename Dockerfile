@@ -1,8 +1,8 @@
-FROM eclipse-temurin:8-jammy AS jdk8
-FROM eclipse-temurin:11-jammy AS jdk11
-FROM eclipse-temurin:17-jammy AS jdk17
-FROM eclipse-temurin:21-jammy AS jdk21
-FROM eclipse-temurin:25-jammy AS jdk25
+FROM eclipse-temurin:8-noble AS jdk8
+FROM eclipse-temurin:11-noble AS jdk11
+FROM eclipse-temurin:17-noble AS jdk17
+FROM eclipse-temurin:21-noble AS jdk21
+FROM eclipse-temurin:25-noble AS jdk25
 
 # UNCOMMENT if you use a custom maven image with settings
 # FROM <custom docker image> AS maven
