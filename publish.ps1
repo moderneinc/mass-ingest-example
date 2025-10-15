@@ -50,7 +50,7 @@ function Invoke-BuildAndUploadRepos {
     # extract just the partition name from the file name
     $PartitionName=($File -split "-")[1]
 
-    mod git clone csv .\$PartitionName $File --filter=tree:0
+    mod git sync csv .\$PartitionName $File --with-sources
 
     mod build .\$PartitionName --no-download
 
