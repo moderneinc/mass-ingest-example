@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  mass-ingest:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./repos.csv:/app/repos.csv
+    environment:
+      # - MODERNE_TENANT=https://<tenant>.moderne.io
+      # Personal access token for Moderne; can be created through https://<tenant>.moderne.io/settings/access-token
+      # - MODERNE_TOKEN=token
+      # We recommend a dedicated Artifactory Maven repository, allowing both releases & snapshots; supply the full URL here
+      # - PUBLISH_URL=https://artifactory.example.com/artifactory/moderne-ingest
+      # We also support token authentication via PUBLISH_TOKEN=token
+      # - PUBLISH_USER=admin
+      # - PUBLISH_PASSWORD=admin
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./observability/grafana:/etc/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - monitoring
+    depends_on:
+      - prometheus
+
+networks:
+  monitoring:
+    driver: bridge
