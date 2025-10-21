@@ -9,7 +9,7 @@ FROM eclipse-temurin:25-jdk AS jdk25
 
 # Install dependencies for `mod` cli
 FROM jdk25 AS dependencies
-RUN apt-get -y update && apt-get install -y curl git git-lfs jq libxml2-utils unzip wget zip supervisor vim && git lfs install
+RUN apt-get -y update && apt-get install -y curl git git-lfs jq libxml2-utils unzip wget zip vim && git lfs install
 
 # Gather various JDK versions
 COPY --from=jdk8 /opt/java/openjdk /usr/lib/jvm/temurin-8-jdk
