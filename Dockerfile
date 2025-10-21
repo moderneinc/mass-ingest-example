@@ -20,8 +20,9 @@ COPY --from=jdk25 /opt/java/openjdk /usr/lib/jvm/temurin-25-jdk
 
 FROM dependencies AS modcli
 ARG MODERNE_CLI_STAGE=stable
+ARG MODERNE_CLI_VERSION
 # Set the environment variable MODERNE_CLI_VERSION
-# ENV MODERNE_CLI_VERSION=3.26.3
+ENV MODERNE_CLI_VERSION=${MODERNE_CLI_VERSION}
 
 WORKDIR /app
 
