@@ -52,7 +52,7 @@ RUN if [ -n "${MODERNE_CLI_VERSION}" ]; then \
 RUN echo -e '#!/bin/sh\njava -jar /usr/local/bin/mod.jar "$@"' > /usr/local/bin/mod
 
 # Make the 'mod' script executable
-RUN chmod +x mod
+RUN chmod +x /usr/local/bin/mod
 
 RUN if [ -n "${MODERNE_TOKEN}" ]; then \
         mod config moderne edit --token=${MODERNE_TOKEN} https://${MODERNE_TENANT}.moderne.io; \
