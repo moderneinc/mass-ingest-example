@@ -1,0 +1,18 @@
+services:
+  mass-ingest:
+    build:
+      context: .
+      args:
+        PUBLISH_URL: ${PUBLISH_URL}
+        PUBLISH_USER: ${PUBLISH_USER}
+        PUBLISH_PASSWORD: ${PUBLISH_PASSWORD}
+    ports:
+      - "8080:8080"
+    environment:
+      - REPOS_CSV_URL=${REPOS_CSV_URL:-}
+    volumes:
+      - data:/var/moderne
+    restart: unless-stopped
+
+volumes:
+  data:
