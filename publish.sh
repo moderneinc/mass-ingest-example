@@ -12,16 +12,16 @@ if [ $# -eq 0 ]
 fi
 
 info() {
-  printf "[%s][%d-%d] %s\n" "$INSTANCE_ID" "$START_INDEX" "$END_INDEX" "$1"
+  printf "[%s][%s-%s] %s\n" "$INSTANCE_ID" "${START_INDEX:-}" "${END_INDEX:-}" "$1"
 }
 
 die() {
-  printf "[%s][%d-%d] %s\n" "$INSTANCE_ID" "$START_INDEX" "$END_INDEX" "$1" >&2
+  printf "[%s][%s-%s] %s\n" "$INSTANCE_ID" "${START_INDEX:-}" "${END_INDEX:-}" "$1" >&2
   exit 1
 }
 
 main() {
-  setup
+  initialize_instance_metadata
 
   # read the first positional argument as the source csv file
   SOURCE_CSV=$1
@@ -52,6 +52,7 @@ main() {
 }
 
 ingest_repos() {
+  configure_credentials
   prepare_environment
   start_monitoring
   if [ -n "$ORGANIZATION" ]; then
@@ -82,9 +83,32 @@ ingest_repos() {
   stop_monitoring
 }
 
-setup() {
+# Initialize instance if running on AWS EC2 (batch mode)
+initialize_instance_metadata() {
   TOKEN=$(curl --connect-timeout 2 -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
   export INSTANCE_ID=$(curl --connect-timeout 2 -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id || echo "localhost")
+}
+
+# Configure credentials at runtime (passed via environment variables)
+configure_credentials() {
+  info "Configuring credentials"
+
+  # Configure Moderne tenant if token provided
+  if [ -n "${MODERNE_TOKEN:-}" ] && [ -n "${MODERNE_TENANT:-}" ]; then
+    info "Configuring Moderne tenant: ${MODERNE_TENANT}"
+    mod config moderne edit --token="${MODERNE_TOKEN}" "https://${MODERNE_TENANT}.moderne.io"
+  fi
+
+  # Configure artifact repository
+  if [ -n "${PUBLISH_URL:-}" ] && [ -n "${PUBLISH_USER:-}" ] && [ -n "${PUBLISH_PASSWORD:-}" ]; then
+    info "Configuring artifact repository with username/password"
+    mod config lsts artifacts maven edit "${PUBLISH_URL}" --user "${PUBLISH_USER}" --password "${PUBLISH_PASSWORD}"
+  elif [ -n "${PUBLISH_URL:-}" ] && [ -n "${PUBLISH_TOKEN:-}" ]; then
+    info "Configuring artifact repository with API token"
+    mod config lsts artifacts artifactory edit "${PUBLISH_URL}" --jfrog-api-token "${PUBLISH_TOKEN}"
+  else
+    die "PUBLISH_URL and either PUBLISH_USER/PUBLISH_PASSWORD or PUBLISH_TOKEN must be supplied via environment variables"
+  fi
 }
 
 # Clean any existing files
@@ -99,14 +123,14 @@ prepare_environment() {
 start_monitoring() {
   info "Starting monitoring"
   nohup mod monitor --port 8080 > /dev/null 2>&1 &
-  echo $! > "$DATA_DIR/$MONITOR_PID"
+  echo $! > "$DATA_DIR/monitor.pid"
 }
 
 stop_monitoring() {
   info "Cleaning up monitoring"
-  if [ -f "$DATA_DIR/$MONITOR_PID" ]; then
-    kill -9 $(cat "$DATA_DIR/$MONITOR_PID")
-    rm "$DATA_DIR/$MONITOR_PID"
+  if [ -f "$DATA_DIR/monitor.pid" ]; then
+    kill -9 $(cat "$DATA_DIR/monitor.pid")
+    rm "$DATA_DIR/monitor.pid"
   fi
 }
 

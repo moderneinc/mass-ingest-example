@@ -33,7 +33,8 @@ function Write-Fatal() {
 }
 
 function Ingest-Repos() {
-  Initialize-Setup
+  Initialize-InstanceMetadata
+  Configure-Credentials
   Prepare-Environment
   Start-Monitoring
 
@@ -64,7 +65,8 @@ function Ingest-Repos() {
   Stop-Monitoring
 }
 
-function Initialize-Setup() {
+# Initialize instance if running on AWS EC2 (batch mode)
+function Initialize-InstanceMetadata() {
   try {
     $Token = Invoke-RestMethod -Method Put -TimeoutSec 2 -Uri "http://169.254.169.254/latest/api/token" -Headers @{"X-aws-ec2-metadata-token-ttl-seconds"="21600"}
     $script:InstanceId = Invoke-RestMethod -TimeoutSec 2 -Uri "http://169.254.169.254/latest/meta-data/instance-id" -Headers @{"X-aws-ec2-metadata-token"=$Token}
@@ -73,7 +75,28 @@ function Initialize-Setup() {
   }
 }
 
-# Clean any existing files
+# Configure credentials at runtime (passed via environment variables)
+function Configure-Credentials() {
+  Write-Info "Configuring credentials"
+
+  # Configure Moderne tenant if token provided
+  if ($env:MODERNE_TOKEN -and $env:MODERNE_TENANT) {
+    Write-Info "Configuring Moderne tenant: $env:MODERNE_TENANT"
+    mod config moderne edit --token="$env:MODERNE_TOKEN" "https://$env:MODERNE_TENANT.moderne.io"
+  }
+
+  # Configure artifact repository
+  if ($env:PUBLISH_URL -and $env:PUBLISH_USER -and $env:PUBLISH_PASSWORD) {
+    Write-Info "Configuring artifact repository with username/password"
+    mod config lsts artifacts maven edit "$env:PUBLISH_URL" --user "$env:PUBLISH_USER" --password "$env:PUBLISH_PASSWORD"
+  } elseif ($env:PUBLISH_URL -and $env:PUBLISH_TOKEN) {
+    Write-Info "Configuring artifact repository with API token"
+    mod config lsts artifacts artifactory edit "$env:PUBLISH_URL" --jfrog-api-token "$env:PUBLISH_TOKEN"
+  } else {
+    Write-Fatal "PUBLISH_URL and either PUBLISH_USER/PUBLISH_PASSWORD or PUBLISH_TOKEN must be supplied via environment variables"
+  }
+}
+
 function Prepare-Environment() {
   Write-Info "Preparing environment"
   New-Item -Type Directory "$env:DATA_DIR" -Force | Out-Null

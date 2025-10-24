@@ -1,133 +1,186 @@
-# Mass Ingest
+# Mass ingest
 
-This example demonstrates how to use the [Moderne CLI](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro) to ingest a large number of repositories into a Moderne platform.
+Production-ready examples for ingesting large numbers of repositories into Moderne using the [Moderne CLI](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro).
 
-## Step 1: Create a `repos.csv` file
+## Choose your deployment stage
 
-The first step needed to integrate private code is to come up with a list of repositories that should be ingested (`repos.csv`). This list should be in a CSV format with the first row composed of headers for the columns.
+This repository provides three progressive deployment examples. Each stage is **completely independent** and self-contained - you can start at any stage based on your needs.
 
-At the very least, you must include two columns: `cloneUrl` and `branch`. However, you can also include additional optional columns if additional information is needed to build your repositories. 
+### 1-quickstart: Get started quickly
 
-For a list of all of the columns and configuration options, please check out our [creating a repos.csv reference doc](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv).
+**Best for:**
+- Quick proof of concept
+- Small repository counts (< 1.000 repos)
+- Development and testing
+- Learning how mass-ingest works
 
-> [!TIP]
-> We offer scripts to assist you in generating your repos.csv file. You can find them in the [repo-fetchers](https://github.com/moderneinc/repository-fetchers) repository.
+**What's included:**
+- Single Docker container
+- Manual docker commands
+- Basic monitoring via CLI metrics endpoint
 
-## Step 2: Customize the Docker image
+**Resources needed:**
+- 2 CPU cores
+- 16 GB RAM
+- 32+ GB disk
 
-Begin by copying the [provided Dockerfile](/Dockerfile) to your ingestion repository.
+[→ Start with 1-quickstart](./1-quickstart/)
 
-From there, we will modify it depending on your organizational needs. Please note that the ingestion process requires access to several of your internal systems to function correctly. This includes your source control system, your artifact repository, and your Moderne tenant or DX instance.
+---
 
-### Self-Signed Certificates
+### 2-observability: Add monitoring and visibility
 
-If your internal services (artifact repository, source control, or the Moderne tenant) are accessed:
+**Best for:**
+- Production use on a single host
+- Small repository counts (< 1.000 repos)
+- Medium repository count with manual scaling (<10.000 repos)
+- Need for operational visibility
+- Continuous ingestion workflows
 
-* Over HTTPS and they require [SSL/TLS](https://en.wikipedia.org/wiki/Transport_Layer_Security), but have certificates signed by a trusted-by-default root Certificate Authority.
-* Over HTTP (never requiring SSL/TLS)
+**What's included:**
+- Docker Compose orchestration
+- Integrated Grafana dashboards
+- Prometheus metrics collection
+- Automated restarts and scheduling
 
-Please comment out the following lines from your Dockerfile: 
+**Resources needed:**
+- 3 CPU cores (2 for mass-ingest, 1 for monitoring)
+- 18 GB RAM (16 for mass-ingest, 2 for monitoring)
+- 50+ GB disk
 
-```Dockerfile
-# Configure trust store if self-signed certificates are in use for artifact repository, source control, or moderne tenant
-COPY mycert.crt /root/mycert.crt
-RUN /usr/lib/jvm/temurin-8-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-8-jdk/jre/lib/security/cacerts
-..
-RUN mod config http trust-store edit java-home
+[→ Start with 2-observability](./2-observability/)
+
+---
+
+### 3-scalability: Scale to production
+
+**Best for:**
+- Large repository counts (>10.000 repos)
+- Parallel processing requirements
+- Production deployment with automatic scaling
+- Enterprise environments
+
+**What's included:**
+- AWS Batch for parallel workers
+- Terraform infrastructure as code
+- EventBridge Scheduler for automation
+- Auto-scaling compute environment
+- Production monitoring and cost optimization
+
+**Resources needed:**
+- AWS account with appropriate permissions
+- Terraform >= 1.0
+- VPC with NAT gateway
+- Configurable compute (scales from 0 to 256+ vCPUs)
+
+[→ Start with 3-scalability](./3-scalability/)
+
+---
+
+## Repository structure
+
+```
+mass-ingest-example/
+├── Dockerfile            # Container image definition (used by all stages)
+├── publish.sh            # Main ingestion script
+├── publish.ps1           # PowerShell version
+├── repos.csv             # Example repository list
+│
+├── 1-quickstart/         # Single container deployment
+│   └── README.md
+│
+├── 2-observability/      # Docker Compose with monitoring
+│   ├── docker-compose.yml
+│   ├── .env.example
+│   ├── observability/    # Grafana and Prometheus configs
+│   └── README.md
+│
+└── 3-scalability/        # AWS Batch production deployment
+    ├── chunk.sh          # Batch job partitioning script
+    ├── terraform/
+    │   ├── main.tf
+    │   ├── variables.tf
+    │   └── outputs.tf
+    └── README.md
 ```
 
-If your internal services, instead, use self-signed certs, you will need to configure the CLI and JVMs installed within the Docker image to trust your organization's self-signed certificate:
+## Prerequisites (all stages)
 
-When invoking, Docker, supply the appropriate [cacerts file](https://www.ibm.com/docs/en/sdk-java-technology/8?topic=certificate-cacerts-certificates-file).
+Before starting with any stage, you'll need:
 
-If you are not sure where to get a suitable cacerts file, you can check out your local machine as you probably have one there. On JDK 8, you can find your cacerts file within its installation directory under `jre/lib/security/cacerts`. On newer JDK versions, you can find your cacerts file within is installation directory under `lib/security/cacerts`.
+1. **Repository list**: Create `repos.csv` with repositories to ingest
+   ```csv
+   cloneUrl,branch,origin,path
+   https://github.com/org/repo1,main,github.com,org/repo1
+   https://github.com/org/repo2,main,github.com,org/repo2
+   ```
 
-### Artifact repository
+2. **Artifact repository**: Maven-formatted repository for publishing LSTs
+   - Artifactory, Nexus, or similar
+   - Dedicated repository recommended (separate from other artifacts)
+   - Credentials with publish permissions
 
-The CLI needs access to artifact repositories to publish the LSTs produced during the ingestion process. This is configured via the `PUBLISH_URL`, `PUBLISH_USER`, and `PUBLISH_PASSWORD` [environment variables](/docker-compose.yml#L12-L19).
+3. **Source control access**: If repositories require authentication
+   - Service account with read access to all repositories
+   - Personal access token or credentials
 
-We recommend configuring a repository specifically for LSTs. This avoids intermixing LSTs with other kinds of artifacts – which has several benefits. For instance, updates and improvements to Moderne's parsers can make publishing LSTs based on the same commit desirable. However, doing so could cause problems with version number collisions if you've configured it in another way. 
+4. **Docker**: Installed and running (for stages 1 and 2)
 
-Keeping LSTs separate also simplifies the cleanup of old LSTs which are no longer relevant – a policy you would not wish to accidentally apply to your other artifacts. 
+5. **AWS account**: Required only for stage 3
 
-Lastly, LSTs must be published to Maven-formatted artifact repositories, but repositories with non-JVM code likely publish artifacts to repositories of other types.
+## Quick comparison
 
-### Source Control Credentials
+| Feature | 1-quickstart | 2-observability | 3-scalability |
+|---------|---------|-----------|---------|
+| **Deployment** | Single container | Docker Compose | AWS Batch + Terraform |
+| **Monitoring** | CLI metrics endpoint | Grafana + Prometheus | CloudWatch + optional Grafana |
+| **Scaling** | Manual | Single host | Auto-scaling parallel workers |
+| **Scheduling** | Manual/cron | Docker restart policy | EventBridge Scheduler |
+| **Cost** | Lowest | Low | Scales with usage |
+| **Setup time** | 15 minutes | 30 minutes | 1-2 hours |
+| **Ideal repo count** | < 100 | 100-1000 | 1000+ |
+| **Parallel processing** | No | No | Yes |
 
-Most source control systems require authentication to access their repositories. If your source control **requires** authentication to `git clone` repositories, uncomment the [following lines](/Dockerfile#L172-L173):
+## Common configuration
 
-```Dockerfile
-COPY .git-credentials /root/.git-credentials
-RUN git config --global credential.helper store --file=/root/.git-credentials
-```
+All stages share the same core configuration needs:
 
-In the more common scenario that your source control does require authentication, you will need to create and include a `.git-credentials` file. You will want to supply the credentials for a service account with access to all repositories.
+### Environment variables
 
-Each line of the `.git-credentials` file specifies the `username` / `token-name` and plaintext `password` / `token` for a particular `host` in the format:
+- `PUBLISH_URL` - Artifact repository URL (e.g., `https://artifactory.example.com/artifactory/moderne-ingest/`)
+- `PUBLISH_USER` - Repository username
+- `PUBLISH_PASSWORD` - Repository password
+- `PUBLISH_TOKEN` - Alternative to user/password for JFrog
+- `MODERNE_TENANT` - Your Moderne tenant name (optional)
+- `MODERNE_TOKEN` - Moderne API token (optional)
 
-```
-https://username:password@host
-https://<token-name>:<token>@host
-```
+### Repository list format
 
-For example:
+The `repos.csv` file must include:
+- `cloneUrl` - Full git clone URL
+- `branch` - Branch to build
+- `origin` - Source identifier (e.g., `github.com`)
+- `path` - Repository path/identifier
 
-```
-https://sambsnyd:likescats@github.com
-```
+For advanced options, see [repos.csv documentation](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv).
 
-### Maven Settings
+### Build arguments
 
-If your organization **uses** the Maven build tool, uncomment the [following lines](/Dockerfile#L162-L164):
+All Dockerfiles support:
+- `MODERNE_CLI_VERSION` - Specific CLI version (defaults to latest stable)
+- `MODERNE_CLI_STAGE` - Use `staging` for pre-release versions
 
-```Dockerfile
-COPY maven/settings.xml /root/.m2/settings.xml
-RUN mod config build maven settings edit /root/.m2/settings.xml
-```
+## Generating repository lists
 
-If your organization does use Maven, you more than likely have shared configurations in a `settings.xml` file. This configuration file is usually required to build most repositories. You'll want to ensure that the Docker image points to the appropriate file. `settings.xml` is typically located at `~/.m2/settings.xml`, but your configuration may differ. 
+We provide scripts to generate `repos.csv` from various sources:
+- [Repository Fetchers](https://github.com/moderneinc/repository-fetchers) - Scripts for GitHub, GitLab, Bitbucket, and more
 
-## Step 3: Build the Docker image
+## Support and documentation
 
-Once you've customized the `Dockerfile` as needed, you can build the image with the following command, filling in your organization's specific values for the build arguments:
+- [Moderne CLI documentation](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro)
+- [repos.csv reference](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv)
+- [Report issues](https://github.com/moderneinc/mass-ingest-example/issues)
 
-```bash
-docker build -t moderne-mass-ingest:latest .
-```
+## License
 
-### Build Arguments
-
-| Argument | Description | Required |
-|---|---|---|
-| `MODERNE_CLI_STAGE` | The release stage of the Moderne CLI to use. Will download the latest from Maven Central if not defined.| No |
-| `MODERNE_CLI_VERSION` | The version of the Moderne CLI to use. Will download the latest from Maven Central if not defined.| No |
-
-
-## Step 4: Deploy and run the image
-
-Now that you have a Docker image built, you will need to deploy it to the container management platform of your choice and have it run on a schedule. We will leave this as an exercise for the reader as there are many platforms and options for running this. 
-
-That being said, **at a minimum**, we recommend that you run this image on a system with at least 2 CPU cores, 16 GB of memory, and 32 GB of disk space. Depending on your repo sizes and desired mass ingest cycle time, you may choose to increase these specs.
-
-For example, if you have 1000+ repositories, we recommend using 64-128 GB of storage space.
-
-It's your responsibility to monitor this and adjust as needed. See the [next step](#step-5-monitor-the-ingestion-process) for monitoring instructions.
-
-## Step 5: Monitor the ingestion process
-
-By default, the example Docker image will run the `mod monitor` command that will create a scrape target that can be consumed by Prometheus.
-
-You can scrape the metrics from the `/prometheus` endpoint.
-
-The example Docker Compose script provided in this repo will also run a Prometheus server that will scrape the mass ingest container target and a Grafana server for visualizing the metrics. You can access the Grafana server at `http://localhost:3000`. The default username and password for Grafana is `admin` and `admin`.
-
-## Step 6: Troubleshooting
-
-If you want to verify that the image works as expected locally, you can spin it up with the following command:
-```bash
-docker run -it --rm \
-    -p 8080:8080 \
-    moderne-mass-ingest:latest
-```
-
-In case you wish to debug the image, you can suffix the above with `bash`, and from there run `./publish.sh` to see the ingestion process in action.
+This example code is provided as-is for use with Moderne products.

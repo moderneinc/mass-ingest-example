@@ -38,7 +38,7 @@ RUN if [ -n "${MODERNE_CLI_VERSION}" ]; then \
             exit 1; \
         fi; \
         echo "Downloading latest staging version: ${LATEST_VERSION}"; \
-        curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/${LATEST_VERSION}/moderne-cli-${LATEST_VERESION}.jar" --output /usr/local/bin/mod.jar; \
+        curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/${LATEST_VERSION}/moderne-cli-${LATEST_VERSION}.jar" --output /usr/local/bin/mod.jar; \
     else \
         LATEST_VERSION=$(curl -s --insecure --request GET --url "https://api.github.com/repos/moderneinc/moderne-cli-releases/releases/latest" | jq '.tag_name' -r | sed "s/^v//"); \
         if [ -z "${LATEST_VERSION}" ]; then \
@@ -55,26 +55,9 @@ RUN echo -e '#!/bin/sh\njava -jar /usr/local/bin/mod.jar "$@"' > /usr/local/bin/
 # Make the 'mod' script executable
 RUN chmod +x /usr/local/bin/mod
 
-RUN if [ -n "${MODERNE_TOKEN}" ]; then \
-        mod config moderne edit --token=${MODERNE_TOKEN} https://${MODERNE_TENANT}.moderne.io; \
-    else \
-        echo "MODERNE_TOKEN not supplied, skipping configuration."; \
-        # uncomment to configure an on premise scm. This is not required if the MODERNE_TOKEN is supplied and the above sync is performed. 
-        # See https://docs.moderne.io/user-documentation/moderne-cli/how-to-guides/on-prem-scm-config/ for more details
-        # mod config scm add bitbucket "https://bitbucket.moderne.io/stash" --alternate-url="ssh://bitbucket.moderne.io:7999"; \
-    fi
-
-# Note, artifact repositories such as GitLab's Maven API will accept an access token's name and the
-# access token for PUBLISH_USER and PUBLISH_PASSWORD respectively.
-RUN if [ -n "${PUBLISH_URL}" ] && [ -n "${PUBLISH_USER}" ] && [ -n "${PUBLISH_PASSWORD}" ]; then \
-        mod config lsts artifacts maven edit ${PUBLISH_URL} --user ${PUBLISH_USER} --password ${PUBLISH_PASSWORD}; \
-        # mod config lsts artifacts maven edit ${PUBLISH_URL} --user ${PUBLISH_USER} --password ${PUBLISH_PASSWORD} --skip-ssl; \
-    elif [ -n "${PUBLISH_URL}" ] && [ -n "${PUBLISH_TOKEN}" ]; then \
-        mod config lsts artifacts artifactory edit ${PUBLISH_URL} --jfrog-api-token ${PUBLISH_TOKEN}; \
-        # mod config lsts artifacts artifactory edit ${PUBLISH_URL} --jfrog-api-token ${PUBLISH_TOKEN} --skip-ssl; \
-    else \
-        echo "PUBLISH_URL and either PUBLISH_USER and PUBLISH_PASSWORD or PUBLISH_TOKEN must be supplied."; \
-    fi
+# Credential configuration has been moved to runtime (publish.sh/publish.ps1) to avoid
+# baking sensitive credentials into Docker image layers. Credentials are now passed as
+# environment variables and configured when the container starts.
 
 
 FROM modcli AS language-support
@@ -206,7 +189,9 @@ ENV CUSTOM_CI=true
 # Set the data directory for the publish script
 ENV DATA_DIR=/var/moderne
 
-COPY --chmod=755 chunk.sh chunk.sh
+# Copy scripts
+# UNCOMMENT for 3-scalability (AWS Batch)
+# COPY --chmod=755 3-scalability/chunk.sh chunk.sh
 COPY --chmod=755 publish.sh publish.sh
 
 # Optional: mount from host

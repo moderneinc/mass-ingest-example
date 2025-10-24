@@ -1,26 +1,30 @@
-version: '3.8'
-
 services:
   mass-ingest:
-    build: .
+    build:
+      context: ..
+      args:
+        MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION}
+    environment:
+      - PUBLISH_URL=${PUBLISH_URL}
+      - PUBLISH_USER=${PUBLISH_USER}
+      - PUBLISH_PASSWORD=${PUBLISH_PASSWORD}
+      - PUBLISH_TOKEN=${PUBLISH_TOKEN}
+      - MODERNE_TENANT=${MODERNE_TENANT}
+      - MODERNE_TOKEN=${MODERNE_TOKEN}
     restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
-      - ./repos.csv:/app/repos.csv
-    environment:
-      # - MODERNE_TENANT=https://<tenant>.moderne.io
-      # Personal access token for Moderne; can be created through https://<tenant>.moderne.io/settings/access-token
-      # - MODERNE_TOKEN=token
-      # We recommend a dedicated Artifactory Maven repository, allowing both releases & snapshots; supply the full URL here
-      # - PUBLISH_URL=https://artifactory.example.com/artifactory/moderne-ingest
-      # We also support token authentication via PUBLISH_TOKEN=token
-      # - PUBLISH_USER=admin
-      # - PUBLISH_PASSWORD=admin
+      - data:/var/moderne
+      - ../repos.csv:/app/repos.csv
+    networks:
+      - monitoring
 
   prometheus:
     image: prom/prometheus:latest
     restart: unless-stopped
+    ports:
+      - "9090:9090"
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
     networks:
@@ -32,7 +36,8 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ./observability/grafana:/etc/grafana
+      - ./observability/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
@@ -45,3 +50,6 @@ services:
 networks:
   monitoring:
     driver: bridge
+
+volumes:
+  data:
