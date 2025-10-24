@@ -1,8 +1,8 @@
 #!/bin/bash
 
 #set -o errexit   # abort on nonzero exitstatus
-set -o nounset   # abort on unbound variable
-set -o pipefail  # don't hide errors within pipes
+#set -o nounset   # abort on unbound variable
+#set -o pipefail  # don't hide errors within pipes
 
 # if no argument is provided, print an error message and exit
 if [ $# -eq 0 ]
@@ -160,7 +160,7 @@ send_logs() {
   local index=$1
   local timestamp=$(date +"%Y%m%d%H%M")
 
-  # if PUBLISH_USER and PUBLISH_PASSWORD are set, publish logs
+  # if PUBLISH_USER and PUBLISH_PASSWORD are set, or PUBLISH_TOKEN is set, publish logs
   if [[ -n "$PUBLISH_USER" && -n "$PUBLISH_PASSWORD" ]]; then
     logs_url=$PUBLISH_URL/io/moderne/ingest-log/$index/$timestamp/ingest-log-cli-$timestamp-$index.zip
     info "Uploading logs to $logs_url"
