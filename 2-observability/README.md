@@ -68,13 +68,13 @@ This starts:
 
 ### 4. Access monitoring
 
-**Grafana dashboards:**
+**Grafana dashboards (primary interface):**
 - URL: http://localhost:3000
 - Username: `admin`
 - Password: `admin`
 
-**Prometheus:**
-- URL: http://localhost:9090
+**Prometheus (optional):**
+Prometheus is accessible internally by Grafana. To access the Prometheus UI directly, uncomment the ports section in `docker-compose.yml` and visit http://localhost:9090
 
 **Raw metrics:**
 ```bash

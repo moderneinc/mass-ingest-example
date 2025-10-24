@@ -22,8 +22,9 @@ services:
   prometheus:
     image: prom/prometheus:latest
     restart: unless-stopped
-    ports:
-      - "9090:9090"
+    # Uncomment to access Prometheus UI directly (optional - Grafana is the primary interface)
+    # ports:
+    #   - "9090:9090"
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
     networks:
