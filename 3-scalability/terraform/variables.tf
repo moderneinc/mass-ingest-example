@@ -31,6 +31,18 @@ variable "moderne_token" {
   # example = "arn:aws:secretsmanager:us-east-1:123456789012:secret:mass-ingest/moderne"
 }
 
+variable "moderne_git_credentials" {
+  type = string
+  default = ""
+  # example = "arn:aws:secretsmanager:us-east-1:123456789012:secret:mass-ingest/git-credentials"
+}
+
+variable "moderne_ssh_credentials" {
+  type = string
+  default = ""
+  # example = "arn:aws:secretsmanager:us-east-1:123456789012:secret:mass-ingest/ssh-private-key"
+}
+
 variable "moderne_publish_url" {
   type = string
   # example = "http://artifactory.example.com/artifactory/moderne-ingest"
@@ -45,13 +57,18 @@ variable "moderne_publish_user" {
 variable "moderne_publish_password" {
   type = string
   default = ""
-  # example = "arn:aws:secretsmanager:us-west-2:123456789012:secret:mass-ingest/publishing:password::"
+  # example = "arn:aws:secretsmanager:us-east-1:123456789012:secret:mass-ingest/publishing:password::"
 }
 
 variable "moderne_publish_token" {
   type = string
   default = ""
-  # example = "arn:aws:secretsmanager:us-west-2:123456789012:secret:mass-ingest/publishing:password::"
+  # example = "arn:aws:secretsmanager:us-east-1:123456789012:secret:mass-ingest/publishing:password::"
+}
+
+variable "ingest_csv_file" {
+  type = string
+  default = "repos.csv"
 }
 
 variable "ingest_chunk_size" {

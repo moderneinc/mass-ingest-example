@@ -23,23 +23,7 @@ This example adds comprehensive observability to mass-ingest using:
 
 ## Quick start
 
-### 1. Configure environment variables
-
-Copy the example environment file:
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` with your credentials:
-
-```bash
-PUBLISH_URL=https://your-artifactory.com/artifactory/moderne-ingest/
-PUBLISH_USER=your-username
-PUBLISH_PASSWORD=your-password
-```
-
-### 2. Prepare your repository list
+### 1. Prepare your repository list
 
 Edit `../repos.csv` with your repositories:
 
@@ -54,6 +38,22 @@ Required columns:
 - `branch` - Branch to build
 - `origin` - Source control host (e.g., github.com)
 - `path` - Repository path (e.g., org/repo)
+
+### 2. Configure environment variables
+
+Copy the example environment file:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your credentials:
+
+```bash
+PUBLISH_URL=https://your-artifactory.com/artifactory/moderne-ingest/
+PUBLISH_USER=your-username
+PUBLISH_PASSWORD=your-password
+```
 
 ### 3. Start all services
 

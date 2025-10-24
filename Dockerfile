@@ -18,6 +18,10 @@ COPY --from=jdk17 /opt/java/openjdk /usr/lib/jvm/temurin-17-jdk
 COPY --from=jdk21 /opt/java/openjdk /usr/lib/jvm/temurin-21-jdk
 COPY --from=jdk25 /opt/java/openjdk /usr/lib/jvm/temurin-25-jdk
 
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+    unzip awscliv2.zip && \
+    ./aws/install
+
 FROM dependencies AS modcli
 ARG MODERNE_CLI_STAGE=stable
 ARG MODERNE_CLI_VERSION

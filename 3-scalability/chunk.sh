@@ -4,7 +4,15 @@ main() {
   csv_file=$1
   chunk_size=${2:-10}
 
-  if [ ! -f "$1" ]; then
+  if [[ "$csv_file" == "s3://"* ]]; then
+    aws s3 cp "$csv_file" "repos.csv"
+    local_csv_file="repos.csv"
+  elif [[ "$csv_file" == "http://"* || "$csv_file" == "https://"* ]]; then
+    curl "$csv_file" -o "repos.csv"
+    local_csv_file="repos.csv"
+  elif [[ -f "$csv_file" ]]; then
+    local_csv_file="$csv_file"
+  else
     printf "File %s does not exist\n" "$1"
     exit 1
   fi

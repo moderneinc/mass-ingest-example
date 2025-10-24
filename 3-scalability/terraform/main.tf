@@ -192,7 +192,7 @@ resource "aws_batch_job_definition" "chunk_job_definition" {
   type = "container"
   container_properties = jsonencode({
     image = "${var.image_registry}:${var.image_tag}"
-    command = ["./chunk.sh", "repos.csv", var.ingest_chunk_size],
+    command = ["./chunk.sh", var.ingest_csv_file, var.ingest_chunk_size],
     resourceRequirements = [
       {
         type = "VCPU",
@@ -275,7 +275,7 @@ resource "aws_batch_job_definition" "processor_job_definition" {
   type = "container"
   container_properties = jsonencode({
     image = "${var.image_registry}:${var.image_tag}",
-    command = ["./publish.sh", "repos.csv", "--start", "Ref::Start", "--end", "Ref::End"],
+    command = ["./publish.sh", var.ingest_csv_file, "--start", "Ref::Start", "--end", "Ref::End"],
     resourceRequirements = [
       {
         type = "VCPU",
@@ -304,6 +304,21 @@ resource "aws_batch_job_definition" "processor_job_definition" {
           valueFrom = var.moderne_token,
         },
       ] : [],
+
+      var.moderne_git_credentials != "" ? [
+        {
+          name = "GIT_CREDENTIALS",
+          valueFrom = var.moderne_git_credentials,
+        },
+      ]: [],
+
+      var.moderne_ssh_credentials != "" ? [
+        {
+          name = "GIT_SSH_CREDENTIALS",
+          valueFrom = var.moderne_ssh_credentials,
+        },
+      ] : [],
+
       var.moderne_publish_token != "" ? [
         {
           name = "PUBLISH_TOKEN",
@@ -318,7 +333,7 @@ resource "aws_batch_job_definition" "processor_job_definition" {
           name = "PUBLISH_PASSWORD",
           valueFrom = var.moderne_publish_password,
         },
-      ]
+      ],
     )
   })
   timeout {

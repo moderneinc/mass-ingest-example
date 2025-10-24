@@ -32,7 +32,19 @@ main() {
   initialize_instance_metadata
 
   # read the first positional argument as the source csv file
-  SOURCE_CSV=$1
+  csv_file=$1
+  if [[ "$csv_file" == "s3://"* ]]; then
+    aws s3 cp "$csv_file" "repos.csv"
+    local_csv_file="repos.csv"
+  elif [[ "$csv_file" == "http://"* || "$csv_file" == "https://"* ]]; then
+    curl "$csv_file" -o "repos.csv"
+    local_csv_file="repos.csv"
+  elif [[ -f "$csv_file" ]]; then
+    local_csv_file="$csv_file"
+  else
+    die "File '$csv_file' does not exist"
+  fi
+
   # shift the arguments to read the next positional argument as the index
   shift
   # all other arguments should be read as flags with getopts
@@ -56,10 +68,12 @@ main() {
   done
 
   # build/ingest all repos
-  ingest_repos
+  ingest_repos "$local_csv_file"
 }
 
 ingest_repos() {
+  csv_file="$1"
+
   configure_credentials
   prepare_environment
   start_monitoring
@@ -67,14 +81,14 @@ ingest_repos() {
     local clone_dir="$DATA_DIR/$ORGANIZATION"
     printf "Organization: %s\n" "$ORGANIZATION"
     mkdir -p "$clone_dir"
-    mod git sync csv "$clone_dir" "$SOURCE_CSV" --organization "$ORGANIZATION" --with-sources
+    mod git sync csv "$clone_dir" "$csv_file" --organization "$ORGANIZATION" --with-sources
     mod git pull "$clone_dir"
     mod build "$clone_dir" --no-download
     mod publish "$clone_dir"
     mod log builds add "$clone_dir" "$DATA_DIR/log.zip" --last-build
     send_logs "org-$ORGANIZATION"
   else
-    select_repositories "$SOURCE_CSV"
+    select_repositories "$csv_file"
 
     # create a partition name based on the current partition and the current date YYYY-MM-DD-HH-MM
     partition_name=$(date +"%Y-%m-%d-%H-%M")
@@ -109,6 +123,16 @@ configure_credentials() {
   if [ -n "${MODERNE_TOKEN:-}" ] && [ -n "${MODERNE_TENANT:-}" ]; then
     info "Configuring Moderne tenant: ${MODERNE_TENANT}"
     mod config moderne edit --token="${MODERNE_TOKEN}" "${MODERNE_TENANT}"
+  fi
+
+  if [ -n "${GIT_CREDENTIALS}" ]; then
+    echo -e "${GIT_CREDENTIALS}" > /root/.git-credentials
+  fi
+
+  if [ -n "${GIT_SSH_CREDENTIALS}" ]; then
+    mkdir -p /root/.ssh
+    echo -e "${GIT_SSH_CREDENTIALS}" > /root/.ssh/private-key
+    chmod 600 /root/.ssh/private-key
   fi
 
   # Configure artifact repository

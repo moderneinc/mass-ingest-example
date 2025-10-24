@@ -32,7 +32,26 @@ Architecture:
 
 ## Quick start
 
-### 1. Build and push Docker image
+### 1. Prepare your repository list
+
+Create or edit `../repos.csv` with your repositories and determine where you wish to store it. Mass Ingest is capable of pulling your `repos.csv` from local disk, S3, or unauthenticated HTTP(S).
+
+> [!INFO]
+> [`chunk.sh`](chunk.sh#L11) and [`publish.sh`](../publish.sh#L40) can be updated to enable authenticated HTTP(S), if desired.
+
+```csv
+cloneUrl,branch,origin,path
+https://github.com/org/repo1,main,github.com,org/repo1
+https://github.com/org/repo2,main,github.com,org/repo2
+```
+
+Required columns:
+- `cloneUrl` - Full HTTPS clone URL
+- `branch` - Branch to build
+- `origin` - Source control host (e.g., github.com)
+- `path` - Repository path (e.g., org/repo)
+
+### 2. Build and push Docker image
 
 ```bash
 # Build the image from repository root
@@ -54,26 +73,59 @@ docker tag mass-ingest:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/mass-
 docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/mass-ingest:latest
 ```
 
-### 2. Store secrets in AWS Secrets Manager
+### 3. Store secrets in AWS Secrets Manager
+
+#### 3a. Moderne token
 
 ```bash
 aws secretsmanager create-secret \
   --name mass-ingest/moderne-token \
   --secret-string "your-moderne-token"
+```
 
-# Either set username+password or token
-# Username+Password
+#### 3b. Git credentials
+
+For username+password or username+token authentication:
+
+```bash
+aws secretsmanager create-secret \
+  --name mass-ingest/git-credentials \
+  --secret-string "https://username:token@github.com
+https://username:token@gitlab.com"
+```
+
+For SSH key authentication:
+
+```bash
+aws secretsmanager create-secret \
+  --name mass-ingest/ssh-private-key \
+  --secret-string file://id_ed25519
+```
+
+> [!WARNING]
+> Certain special characters in the password can lead to potential problems
+
+#### 3c. Publishing credentials
+
+For password authentication:
+
+```bash
 aws secretsmanager create-secret \
   --name mass-ingest/publishing \
   --secret-string '{"username": "your-artifactory-user", "password": "your-artifactory-password"}'
+```
 
-# Token
+For token authentication:
+```bash
 aws secretsmanager create-secret \
   --name mass-ingest/publishing \
   --secret-string '{"token":"your-publishing-token"}'
 ```
 
-### 3. Configure Terraform variables
+> [!WARNING]
+> Certain special characters in the password can lead to potential problems
+
+### 4. Configure Terraform variables
 
 Create `terraform/terraform.tfvars`:
 
@@ -86,6 +138,11 @@ image_tag                 = "latest"
 moderne_tenant            = "https://app.moderne.io"  # or your tenant url
 moderne_token             = "arn:aws:secretsmanager:region:account:secret:mass-ingest/moderne-token"
 moderne_publish_url       = "https://artifactory.example.com/artifactory/moderne-ingest/"
+
+# Set either username+password/token or SSH authentication
+# moderne_git_credentials   = "arn:aws:secretsmanager:region:account:secret:mass-ingest/git-credentials"
+# moderne_ssh_credentials   = "arn:aws:secretsmanager:region:account:secret:mass-ingest/ssh-private-key"
+
 # Set either user+password or token for publishing
 # moderne_publish_user      = "arn:aws:secretsmanager:region:account:secret:mass-ingest/publishing:username::"
 # moderne_publish_password  = "arn:aws:secretsmanager:region:account:secret:mass-ingest/publishing:password::"
@@ -97,7 +154,7 @@ default_tags = {
 }
 ```
 
-### 4. Deploy infrastructure
+### 5. Deploy infrastructure
 
 ```bash
 cd terraform
@@ -115,80 +172,7 @@ This creates:
 - Security groups
 - CloudWatch log groups
 
-### 5. Prepare repos.csv
-
-Create or edit `../repos.csv` with your repositories:
-
-```csv
-cloneUrl,branch,origin,path
-https://github.com/org/repo1,main,github.com,org/repo1
-https://github.com/org/repo2,main,github.com,org/repo2
-```
-
-Required columns:
-- `cloneUrl` - Full HTTPS clone URL
-- `branch` - Branch to build
-- `origin` - Source control host (e.g., github.com)
-- `path` - Repository path (e.g., org/repo)
-
-### 6. Configure repository authentication (if needed)
-
-For private repositories, you have several options for providing git credentials to AWS Batch workers.
-
-**Option A: AWS Secrets Manager (recommended)**
-
-Store credentials in Secrets Manager and inject them into the container:
-
-```bash
-# Create secret with git credentials
-aws secretsmanager create-secret \
-  --name mass-ingest/git-credentials \
-  --secret-string "https://username:token@github.com
-https://username:token@gitlab.com"
-
-# Add to terraform.tfvars
-git_credentials_secret_arn = "arn:aws:secretsmanager:region:account:secret:mass-ingest/git-credentials"
-```
-
-Then modify the job definition to mount the secret as a file or environment variable.
-
-**Option B: EFS mount (recommended for SSH keys)**
-
-1. Create an EFS filesystem
-2. Mount it to an EC2 instance and copy `.git-credentials` or `.ssh` directory
-3. Configure Batch job definition to mount the EFS volume at runtime
-4. Set proper mount points: `/root/.git-credentials` or `/root/.ssh`
-
-**Option C: Bake into image (use with caution)**
-
-If all workers need identical credentials and your image registry has strict access controls:
-
-```bash
-# Build with credentials
-docker build -t mass-ingest:latest \
-  --secret id=git-credentials,src=.git-credentials \
-  ..
-
-# Push to secure registry
-docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/mass-ingest:latest
-```
-
-⚠️ **WARNING**: This bakes secrets into the image. Only use if your ECR repository has proper IAM access controls. Consider using AWS ECR's image scanning to detect exposed credentials.
-
-### 7. Upload repos.csv
-
-The repos.csv must be available to the chunk job. Options:
-
-**Option A: Bake into image**
-Already handled - repos.csv is copied from `../repos.csv` during build.
-
-**Option B: Download from S3**
-Modify the chunk job command to download from S3:
-```hcl
-command = ["sh", "-c", "aws s3 cp s3://bucket/repos.csv repos.csv && ./chunk.sh repos.csv"]
-```
-
-### 8. Trigger manually (optional)
+### 6. Trigger manually (optional)
 
 ```bash
 aws batch submit-job \
@@ -202,7 +186,7 @@ aws batch submit-job \
 ### Chunk job
 1. Reads `repos.csv`
 2. Calculates number of repositories
-3. Divides into partitions (e.g., 50 repos per worker)
+3. Divides into partitions (e.g., 10 repos per worker)
 4. Submits processor jobs for each partition with `--start` and `--end` parameters
 
 ### Processor jobs
@@ -272,10 +256,10 @@ resource "aws_scheduler_schedule" "daily_trigger" {
 
 ### Partition size
 
-The `chunk.sh` script determines partition size. Modify `chunk.sh` in this directory:
+The `chunk.sh` script is responsible for splitting up the source CSV by the configured partition size. The default partition size is 10, but can be modified via the terraform variable:
 
-```bash
-PARTITION_SIZE=50  # Repositories per worker
+```hcl
+ingest_chunk_size=50  # Repositories per worker
 ```
 
 ## Monitoring
