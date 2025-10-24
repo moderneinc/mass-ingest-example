@@ -102,16 +102,13 @@ docker compose down -v
 
 ### Build arguments
 
-You can customize the CLI version as a build argument in `docker-compose.yml`:
+To use a specific CLI version, add it to your `.env` file:
 
-```yaml
-build:
-  context: ..
-  args:
-    MODERNE_CLI_VERSION: 3.50.0  # Specific version
+```
+MODERNE_CLI_VERSION=3.50.0
 ```
 
-Credentials are configured at runtime via environment variables (not baked into the image). These are already configured in your `.env` file and passed through in `docker-compose.yml`.
+Environment variables and build arguments from `.env` are automatically loaded by `docker-compose.yml`.
 
 ### Repository authentication
 
@@ -229,14 +226,9 @@ services:
     build:
       context: ..
       args:
-        MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION}
-    environment:
-      - PUBLISH_URL=${PUBLISH_URL}
-      - PUBLISH_USER=${PUBLISH_USER}
-      - PUBLISH_PASSWORD=${PUBLISH_PASSWORD}
-      - PUBLISH_TOKEN=${PUBLISH_TOKEN}
-      - MODERNE_TENANT=${MODERNE_TENANT}
-      - MODERNE_TOKEN=${MODERNE_TOKEN}
+        MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION:-}
+    env_file:
+      - .env
     command: ["./publish.sh", "repos.csv", "--start", "1", "--end", "1000"]
     restart: unless-stopped
     ports:
@@ -251,14 +243,9 @@ services:
     build:
       context: ..
       args:
-        MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION}
-    environment:
-      - PUBLISH_URL=${PUBLISH_URL}
-      - PUBLISH_USER=${PUBLISH_USER}
-      - PUBLISH_PASSWORD=${PUBLISH_PASSWORD}
-      - PUBLISH_TOKEN=${PUBLISH_TOKEN}
-      - MODERNE_TENANT=${MODERNE_TENANT}
-      - MODERNE_TOKEN=${MODERNE_TOKEN}
+        MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION:-}
+    env_file:
+      - .env
     command: ["./publish.sh", "repos.csv", "--start", "1001", "--end", "2000"]
     restart: unless-stopped
     ports:
@@ -273,14 +260,9 @@ services:
     build:
       context: ..
       args:
-        MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION}
-    environment:
-      - PUBLISH_URL=${PUBLISH_URL}
-      - PUBLISH_USER=${PUBLISH_USER}
-      - PUBLISH_PASSWORD=${PUBLISH_PASSWORD}
-      - PUBLISH_TOKEN=${PUBLISH_TOKEN}
-      - MODERNE_TENANT=${MODERNE_TENANT}
-      - MODERNE_TOKEN=${MODERNE_TOKEN}
+        MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION:-}
+    env_file:
+      - .env
     command: ["./publish.sh", "repos.csv", "--start", "2001", "--end", "3000"]
     restart: unless-stopped
     ports:

@@ -3,14 +3,9 @@ services:
     build:
       context: ..
       args:
-        MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION}
-    environment:
-      - PUBLISH_URL=${PUBLISH_URL}
-      - PUBLISH_USER=${PUBLISH_USER}
-      - PUBLISH_PASSWORD=${PUBLISH_PASSWORD}
-      - PUBLISH_TOKEN=${PUBLISH_TOKEN}
-      - MODERNE_TENANT=${MODERNE_TENANT}
-      - MODERNE_TOKEN=${MODERNE_TOKEN}
+        MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION:-}
+    env_file:
+      - .env
     restart: unless-stopped
     ports:
       - "8080:8080"
