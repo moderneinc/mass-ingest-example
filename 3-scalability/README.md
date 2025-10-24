@@ -2,7 +2,11 @@
 
 Production-scale deployment using AWS Batch for parallel repository processing.
 
-**Best for:** > 10,000 repositories, automatic scaling, and enterprise production environments.
+**Best for:**
+- Large repository counts (> 10,000 repos)
+- Enterprise production environments
+- When you need automatic scaling and parallel processing
+- Fully managed infrastructure with minimal operational overhead
 
 ## Overview
 
@@ -106,7 +110,21 @@ This creates:
 - Security groups
 - CloudWatch log groups
 
-### 5. Upload repos.csv
+### 5. Prepare repos.csv
+
+Create or edit `../repos.csv` with your repositories:
+
+```csv
+cloneUrl,branch,origin,path
+https://github.com/org/repo1,main,github.com,org/repo1
+https://github.com/org/repo2,main,github.com,org/repo2
+```
+
+Required columns:
+- `cloneUrl` - Full HTTPS clone URL
+- `branch` - Branch to build
+- `origin` - Source control host (e.g., github.com)
+- `path` - Repository path (e.g., org/repo)
 
 The repos.csv must be available to the chunk job. Options:
 
@@ -347,7 +365,7 @@ Actual costs vary based on:
 - Instance types
 - Region
 
-## Next steps
+## Optional enhancements
 
 - Set up CloudWatch alarms for job failures
 - Configure SNS notifications for job completion

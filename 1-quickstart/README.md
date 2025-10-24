@@ -2,7 +2,11 @@
 
 Single container deployment for ingesting repositories into Moderne.
 
-**Best for:** < 1,000 repositories, development, testing, and learning how mass-ingest works.
+**Best for:**
+- Proof of concept deployments
+- Development of the mass-ingest scripts
+- Learning how mass-ingest works
+- Simple use cases with small repository counts (<1,000 repos)
 
 ## Overview
 
@@ -11,7 +15,7 @@ This example demonstrates the simplest way to run mass-ingest: a single Docker c
 ## Prerequisites
 
 - Docker installed
-- Access to an artifact repository (Artifactory, Nexus, etc.) with Maven format support
+- Access to an artifact repository (Artifactory, Nexus, etc.) with Maven 2 format support
 - A `repos.csv` file listing repositories to ingest
 
 ## Quick start
@@ -35,7 +39,7 @@ Required columns:
 ### 2. Build the Docker image
 
 ```bash
-docker build -t mass-ingest:basic ..
+docker build -t mass-ingest:quickstart ..
 ```
 
 Optional build arguments:
@@ -43,7 +47,7 @@ Optional build arguments:
 
 Example with specific CLI version:
 ```bash
-docker build -t mass-ingest:basic --build-arg MODERNE_CLI_VERSION=3.50.0 ..
+docker build -t mass-ingest:quickstart --build-arg MODERNE_CLI_VERSION=3.50.0 ..
 ```
 
 ### 3. Run the container
@@ -57,7 +61,7 @@ docker run --rm \
   -e PUBLISH_URL=https://your-artifactory.com/artifactory/moderne-ingest/ \
   -e PUBLISH_USER=your-username \
   -e PUBLISH_PASSWORD=your-password \
-  mass-ingest:basic
+  mass-ingest:quickstart
 ```
 
 Required environment variables:
@@ -95,18 +99,36 @@ docker logs -f <container-id>
 
 ### Repository authentication
 
-If your repositories require authentication, uncomment and configure in `Dockerfile`:
+If your repositories require authentication, create a `.git-credentials` file and mount it at runtime:
 
-```dockerfile
-# For HTTPS authentication
-COPY .git-credentials /root/.git-credentials
-RUN git config --global credential.helper "store --file=/root/.git-credentials"
-```
-
-Create `.git-credentials` in the repository root:
+Create `.git-credentials`:
 ```
 https://username:token@github.com
 https://username:token@gitlab.com
+```
+
+Mount it when running the container:
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  -v $(pwd)/data:/var/moderne \
+  -v $(pwd)/.git-credentials:/root/.git-credentials:ro \
+  -e PUBLISH_URL=https://your-artifactory.com/artifactory/moderne-ingest/ \
+  -e PUBLISH_USER=your-username \
+  -e PUBLISH_PASSWORD=your-password \
+  mass-ingest:quickstart
+```
+
+Alternatively, use SSH keys by mounting your `.ssh` directory:
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  -v $(pwd)/data:/var/moderne \
+  -v $(pwd)/.ssh:/root/.ssh:ro \
+  -e PUBLISH_URL=https://your-artifactory.com/artifactory/moderne-ingest/ \
+  -e PUBLISH_USER=your-username \
+  -e PUBLISH_PASSWORD=your-password \
+  mass-ingest:quickstart
 ```
 
 ### Self-signed certificates
@@ -155,7 +177,7 @@ Recommended storage:
 
 Mount a volume for persistent storage:
 ```bash
-docker run -v /path/to/storage:/var/moderne mass-ingest:basic
+docker run -v /path/to/storage:/var/moderne mass-ingest:quickstart
 ```
 
 ## Build timeout
@@ -171,7 +193,7 @@ Example with Docker restart policy:
 docker run -d \
   --restart unless-stopped \
   -v $(pwd)/data:/var/moderne \
-  mass-ingest:basic
+  mass-ingest:quickstart
 ```
 
 ## Troubleshooting
@@ -192,7 +214,7 @@ Increase JVM memory in `Dockerfile`:
 RUN mod config java options edit "-Xmx8g -Xss3m"
 ```
 
-## Next steps
+## Alternative deployment options
 
 - **2-observability**: Add Docker Compose with Grafana/Prometheus for better monitoring
 - **3-scalability**: Scale with parallel workers using Terraform/ECS

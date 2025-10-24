@@ -149,19 +149,27 @@ FROM modcli AS language-support
 
 FROM language-support AS runner
 
-# UNCOMMENT for authentication to git repositories
-# Configure git credentials if they are required to clone; ensure this lines up with your use of https:// or ssh://
-# .git-credentials each line defines credentilas for a host in the format:
-# https://<username>:<password>@host or https://<token-name>:<token>@host
-# COPY .git-credentials /root/.git-credentials
-# RUN git config --global credential.helper "store --file=/root/.git-credentials"
+# Git authentication configuration
+# Git credentials are configured at runtime via volume mounts to avoid baking secrets into the image.
+# Configure git to use the credential store that will be mounted at runtime
+RUN git config --global credential.helper "store --file=/root/.git-credentials"
+# Optionally disable SSL verification if needed
 # RUN git config --global http.sslVerify false
 
-# UNCOMMENT if using ssh keys
-# RUN mkdir /root/.ssh && chmod 755 /root/.ssh
-# COPY .ssh/id_rsa /root/.ssh/id_rsa
-# COPY .ssh/known_hosts /root/.ssh/known_hosts
-# RUN chmod 600 /root/.ssh/id_rsa /root/.ssh/known_hosts
+# Mount git credentials at runtime with:
+# docker run -v $(pwd)/.git-credentials:/root/.git-credentials:ro ...
+#
+# .git-credentials format (one line per host):
+# https://<username>:<password>@github.com
+# https://<token-name>:<token>@gitlab.com
+
+# SSH keys for git authentication (if needed instead of https credentials)
+# Mount at runtime to avoid baking secrets into the image:
+# docker run -v $(pwd)/.ssh:/root/.ssh:ro ...
+#
+# Ensure your .ssh directory contains:
+# - id_rsa (private key with 600 permissions)
+# - known_hosts (with 644 permissions)
 
 # Configure trust store if self-signed certificates are in use for artifact repository, source control, or moderne tenant
 # COPY mycert.crt /root/mycert.crt

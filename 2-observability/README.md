@@ -2,7 +2,11 @@
 
 Docker Compose deployment with integrated Grafana and Prometheus monitoring.
 
-**Best for:** < 1,000 repositories (single worker), or < 10,000 repositories with manual scaling (multiple workers).
+**Best for:**
+- Production deployments requiring monitoring and visibility
+- When you need to track build metrics and performance
+- Small to medium repository counts (< 1,000 repos single worker, < 10,000 repos with manual scaling)
+- Teams that want pre-configured dashboards and alerting capabilities
 
 ## Overview
 
@@ -44,6 +48,12 @@ cloneUrl,branch,origin,path
 https://github.com/org/repo1,main,github.com,org/repo1
 https://github.com/org/repo2,main,github.com,org/repo2
 ```
+
+Required columns:
+- `cloneUrl` - Full HTTPS clone URL
+- `branch` - Branch to build
+- `origin` - Source control host (e.g., github.com)
+- `path` - Repository path (e.g., org/repo)
 
 ### 3. Start all services
 
@@ -105,17 +115,32 @@ Credentials are configured at runtime via environment variables (not baked into 
 
 ### Repository authentication
 
-If repositories require authentication, modify `Dockerfile`:
+Git authentication is already configured in the image. If your repositories require authentication, uncomment the volume mount in `docker-compose.yml`.
 
-```dockerfile
-# For HTTPS authentication
-COPY .git-credentials /root/.git-credentials
-RUN git config --global credential.helper "store --file=/root/.git-credentials"
-```
-
-Create `.git-credentials` in the repository root:
+Create `.git-credentials`:
 ```
 https://username:token@github.com
+https://username:token@gitlab.com
+```
+
+Uncomment in `docker-compose.yml`:
+```yaml
+services:
+  mass-ingest:
+    volumes:
+      - data:/var/moderne
+      - ../repos.csv:/app/repos.csv
+      - ./.git-credentials:/root/.git-credentials:ro  # Uncomment this line
+```
+
+Alternatively, use SSH keys by uncommenting the SSH volume mount:
+```yaml
+services:
+  mass-ingest:
+    volumes:
+      - data:/var/moderne
+      - ../repos.csv:/app/repos.csv
+      - ./.ssh:/root/.ssh:ro  # Uncomment this line
 ```
 
 ### Custom repos.csv location
@@ -339,7 +364,7 @@ docker compose exec mass-ingest cat /var/moderne/log.zip
 Recommended per container:
 - **mass-ingest**: 2 CPU, 16 GB RAM, 32+ GB disk
 - **Prometheus**: 1 CPU, 2 GB RAM, 10 GB disk
-- **Grafana**: 0.5 CPU, 512 MB RAM, 1 GB disk
+- **Grafana**: 1 CPU, 512 MB RAM, 1 GB disk
 
 Adjust in docker-compose.yml:
 ```yaml
@@ -350,7 +375,7 @@ deploy:
       memory: 16G
 ```
 
-## Next steps
+## Alternative deployment options
 
 - **3-scalability**: Scale with parallel workers using Terraform/ECS for large repository counts
 
