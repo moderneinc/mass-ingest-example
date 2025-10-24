@@ -12,11 +12,19 @@ if [ $# -eq 0 ]
 fi
 
 info() {
-  printf "[%s][%s-%s] %s\n" "$INSTANCE_ID" "${START_INDEX:-}" "${END_INDEX:-}" "$1"
+  local range="${START_INDEX:-}-${END_INDEX:-}"
+  if [[ -z "${END_INDEX:-}" || -z "${START_INDEX:-}" ]]; then
+    range="all"
+  fi
+  printf "[%s][%s] %s\n" "$INSTANCE_ID" "$range" "$1"
 }
 
 die() {
-  printf "[%s][%s-%s] %s\n" "$INSTANCE_ID" "${START_INDEX:-}" "${END_INDEX:-}" "$1" >&2
+  local range="${START_INDEX:-}-${END_INDEX:-}"
+  if [[ -z "${END_INDEX:-}" || -z "${START_INDEX:-}" ]]; then
+    range="all"
+  fi
+  printf "[%s][%s] %s\n" "$INSTANCE_ID" "$range" "$1" >&2
   exit 1
 }
 
@@ -55,7 +63,7 @@ ingest_repos() {
   configure_credentials
   prepare_environment
   start_monitoring
-  if [ -n "$ORGANIZATION" ]; then
+  if [ -n "${ORGANIZATION:-}" ]; then
     local clone_dir="$DATA_DIR/$ORGANIZATION"
     printf "Organization: %s\n" "$ORGANIZATION"
     mkdir -p "$clone_dir"
@@ -78,7 +86,11 @@ ingest_repos() {
     fi
 
     # Upload results
-    send_logs "$START_INDEX-$END_INDEX"
+    if [[ -z "${END_INDEX:-}" || -z "${START_INDEX:-}" ]]; then
+      send_logs "all"
+    else
+      send_logs "$START_INDEX-$END_INDEX"
+    fi
   fi
   stop_monitoring
 }
@@ -141,7 +153,7 @@ select_repositories() {
     die "File $csv_file does not exist"
   fi
 
-  if [[ -n "$START_INDEX" && -n "$END_INDEX" ]]; then
+  if [[ -n "${START_INDEX:-}" && -n "${END_INDEX:-}" ]]; then
     info "Selecting repositories from $csv_file starting at $START_INDEX and ending at $END_INDEX"
 
     header=$(head -n 1 "$csv_file")

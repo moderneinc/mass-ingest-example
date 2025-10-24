@@ -20,7 +20,12 @@ function Write-Info() {
     [string]$Message
   )
 
-  Write-Host "[$script:InstanceId][$StartIndex-$EndIndex] $Message"
+  if (-not $StartIndex -or -not $EndIndex) {
+    $range = "all"
+  } else {
+    $range = "$StartIndex-$EndIndex"
+  }
+  Write-Host "[$script:InstanceId][$range] $Message"
 }
 
 function Write-Fatal() {
@@ -28,7 +33,12 @@ function Write-Fatal() {
     [string]$Message
   )
 
-  Write-Error "[$script:InstanceId][$StartIndex-$EndIndex] $Message"
+  if (-not $StartIndex -or -not $EndIndex) {
+    $range = "all"
+  } else {
+    $range = "$StartIndex-$EndIndex"
+  }
+  Write-Error "[$script:InstanceId][$range] $Message"
   exit 1
 }
 
@@ -60,7 +70,8 @@ function Ingest-Repos() {
       Write-Info "Successfully built and uploaded repositories"
     }
 
-    Send-Logs "$StartIndex-$EndIndex"
+    $indexRange = if ($StartIndex -and $EndIndex) { "$StartIndex-$EndIndex" } else { "all" }
+    Send-Logs $indexRange
   }
   Stop-Monitoring
 }
