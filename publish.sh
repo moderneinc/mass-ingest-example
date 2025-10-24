@@ -108,7 +108,7 @@ configure_credentials() {
   # Configure Moderne tenant if token provided
   if [ -n "${MODERNE_TOKEN:-}" ] && [ -n "${MODERNE_TENANT:-}" ]; then
     info "Configuring Moderne tenant: ${MODERNE_TENANT}"
-    mod config moderne edit --token="${MODERNE_TOKEN}" "https://${MODERNE_TENANT}.moderne.io"
+    mod config moderne edit --token="${MODERNE_TOKEN}" "${MODERNE_TENANT}"
   fi
 
   # Configure artifact repository
@@ -196,7 +196,7 @@ send_logs() {
   local index=$1
   local timestamp=$(date +"%Y%m%d%H%M")
 
-  # if PUBLISH_USER and PUBLISH_PASSWORD are set, publish logs
+  # if PUBLISH_USER and PUBLISH_PASSWORD are set, or PUBLISH_TOKEN is set, publish logs
   if [[ -n "$PUBLISH_USER" && -n "$PUBLISH_PASSWORD" ]]; then
     logs_url=$PUBLISH_URL/io/moderne/ingest-log/$index/$timestamp/ingest-log-cli-$timestamp-$index.zip
     info "Uploading logs to $logs_url"

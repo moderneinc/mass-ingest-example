@@ -151,7 +151,7 @@ All stages share the same core configuration needs:
 - `PUBLISH_USER` - Repository username
 - `PUBLISH_PASSWORD` - Repository password
 - `PUBLISH_TOKEN` - Alternative to user/password for JFrog
-- `MODERNE_TENANT` - Your Moderne tenant name (optional)
+- `MODERNE_TENANT` - Your Moderne tenant url (optional)
 - `MODERNE_TOKEN` - Moderne API token (optional)
 
 ### Repository authentication

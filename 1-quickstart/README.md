@@ -71,7 +71,7 @@ Required environment variables:
 
 Optional environment variables:
 - `MODERNE_TOKEN` - Moderne platform token
-- `MODERNE_TENANT` - Moderne tenant name (e.g., "app" or "tenant-name")
+- `MODERNE_TENANT` - Moderne tenant url (e.g., "https://app.moderne.io" or "https://tenant.moderne.io")
 
 The container will:
 1. Start metrics server on port 8080

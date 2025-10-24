@@ -93,7 +93,7 @@ function Configure-Credentials() {
   # Configure Moderne tenant if token provided
   if ($env:MODERNE_TOKEN -and $env:MODERNE_TENANT) {
     Write-Info "Configuring Moderne tenant: $env:MODERNE_TENANT"
-    mod config moderne edit --token="$env:MODERNE_TOKEN" "https://$env:MODERNE_TENANT.moderne.io"
+    mod config moderne edit --token="$env:MODERNE_TOKEN" "$env:MODERNE_TENANT"
   }
 
   # Configure artifact repository
@@ -191,7 +191,7 @@ function Send-Logs() {
 
   $Timestamp = Get-Date -Format "yyyyMMddHHmm"
 
-  # if PUBLISH_USER and PUBLISH_PASSWORD are set, publish logs
+  # if PUBLISH_USER and PUBLISH_PASSWORD are set, or PUBLISH_TOKEN is set, publish logs
   if ($env:PUBLISH_USER -and $env:PUBLISH_PASSWORD) {
     $SecurePassword = ConvertTo-SecureString -String $env:PUBLISH_PASSWORD -AsPlainText -Force
     $Credential = New-Object PSCredential($env:PUBLISH_USER, $SecurePassword)

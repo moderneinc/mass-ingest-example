@@ -54,7 +54,26 @@ docker tag mass-ingest:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/mass-
 docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/mass-ingest:latest
 ```
 
-### 2. Configure Terraform variables
+### 2. Store secrets in AWS Secrets Manager
+
+```bash
+aws secretsmanager create-secret \
+  --name mass-ingest/moderne-token \
+  --secret-string "your-moderne-token"
+
+# Either set username+password or token
+# Username+Password
+aws secretsmanager create-secret \
+  --name mass-ingest/publishing \
+  --secret-string '{"username": "your-artifactory-user", "password": "your-artifactory-password"}'
+
+# Token
+aws secretsmanager create-secret \
+  --name mass-ingest/publishing \
+  --secret-string '{"token":"your-publishing-token"}'
+```
+
+### 3. Configure Terraform variables
 
 Create `terraform/terraform.tfvars`:
 
@@ -64,32 +83,18 @@ vpc_id                    = "vpc-xxxxx"
 subnet_ids                = ["subnet-xxxxx", "subnet-yyyyy"]
 image_registry            = "<your-registry>/mass-ingest"
 image_tag                 = "latest"
-moderne_tenant            = "app"  # or your tenant name
-moderne_token             = "arn:aws:secretsmanager:region:account:secret:moderne-token"
+moderne_tenant            = "https://app.moderne.io"  # or your tenant url
+moderne_token             = "arn:aws:secretsmanager:region:account:secret:mass-ingest/moderne-token"
 moderne_publish_url       = "https://artifactory.example.com/artifactory/moderne-ingest/"
-moderne_publish_user      = "arn:aws:secretsmanager:region:account:secret:publish-user"
-moderne_publish_password  = "arn:aws:secretsmanager:region:account:secret:publish-password"
+# Set either user+password or token for publishing
+# moderne_publish_user      = "arn:aws:secretsmanager:region:account:secret:mass-ingest/publishing:username::"
+# moderne_publish_password  = "arn:aws:secretsmanager:region:account:secret:mass-ingest/publishing:password::"
+# moderne_publish_token     = "arn:aws:secretsmanager:region:account:secret:mass-ingest/publishing:token::"
 
 default_tags = {
   Environment = "production"
   Project     = "mass-ingest"
 }
-```
-
-### 3. Store secrets in AWS Secrets Manager
-
-```bash
-aws secretsmanager create-secret \
-  --name mass-ingest/moderne-token \
-  --secret-string "your-moderne-token"
-
-aws secretsmanager create-secret \
-  --name mass-ingest/publish-user \
-  --secret-string "your-artifactory-user"
-
-aws secretsmanager create-secret \
-  --name mass-ingest/publish-password \
-  --secret-string "your-artifactory-password"
 ```
 
 ### 4. Deploy infrastructure

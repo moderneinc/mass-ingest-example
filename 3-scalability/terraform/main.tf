@@ -192,7 +192,7 @@ resource "aws_batch_job_definition" "chunk_job_definition" {
   type = "container"
   container_properties = jsonencode({
     image = "${var.image_registry}:${var.image_tag}"
-    command = ["./chunk.sh", "repos.csv"],
+    command = ["./chunk.sh", "repos.csv", var.ingest_chunk_size],
     resourceRequirements = [
       {
         type = "VCPU",
@@ -297,20 +297,29 @@ resource "aws_batch_job_definition" "processor_job_definition" {
         value = var.moderne_publish_url,
       },
     ],
-    secrets = [
-      {
-        name = "MODERNE_TOKEN",
-        valueFrom = var.moderne_token,
-      },
-      {
-        name = "PUBLISH_USER",
-        valueFrom = var.moderne_publish_user,
-      },
-      {
-        name = "PUBLISH_PASSWORD",
-        valueFrom = var.moderne_publish_password,
-      },
-    ]
+    secrets = concat(
+      var.moderne_token != "" ? [
+        {
+          name = "MODERNE_TOKEN",
+          valueFrom = var.moderne_token,
+        },
+      ] : [],
+      var.moderne_publish_token != "" ? [
+        {
+          name = "PUBLISH_TOKEN",
+          valueFrom = var.moderne_publish_token,
+        },
+      ] : [
+        {
+          name = "PUBLISH_USER",
+          valueFrom = var.moderne_publish_user,
+        },
+        {
+          name = "PUBLISH_PASSWORD",
+          valueFrom = var.moderne_publish_password,
+        },
+      ]
+    )
   })
   timeout {
     attempt_duration_seconds = 3600
