@@ -375,12 +375,14 @@ deploy:
       memory: 16G
 ```
 
-## Alternative deployment options
-
-- **3-scalability**: Scale with parallel workers using Terraform/ECS for large repository counts
-
 ## Additional resources
 
+- [Moderne CLI documentation](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro)
+- [repos.csv reference](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv)
 - [Prometheus Query Basics](https://prometheus.io/docs/prometheus/latest/querying/basics/)
 - [Grafana Dashboards](https://grafana.com/docs/grafana/latest/dashboards/)
 - [Docker Compose Documentation](https://docs.docker.com/compose/)
+
+## Alternative deployment options
+
+- **3-scalability**: Scale with parallel workers using Terraform/ECS for large repository counts

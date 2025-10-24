@@ -154,15 +154,22 @@ All stages share the same core configuration needs:
 - `MODERNE_TENANT` - Your Moderne tenant name (optional)
 - `MODERNE_TOKEN` - Moderne API token (optional)
 
-### Repository list format
+### Repository authentication
 
+For private repositories, credentials are mounted at runtime (never baked into images):
+- `.git-credentials` file for HTTPS
+- `.ssh` directory for SSH
+
+See each stage's README for specific mounting instructions.
+
+### Repository list format
 The `repos.csv` file must include:
 - `cloneUrl` - Full git clone URL
 - `branch` - Branch to build
 - `origin` - Source identifier (e.g., `github.com`)
 - `path` - Repository path/identifier
 
-For advanced options, see [repos.csv documentation](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv).
+See [repos.csv documentation](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv) for advanced options.
 
 ### Build arguments
 

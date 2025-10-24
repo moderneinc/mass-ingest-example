@@ -214,12 +214,12 @@ Increase JVM memory in `Dockerfile`:
 RUN mod config java options edit "-Xmx8g -Xss3m"
 ```
 
+## Additional resources
+
+- [Moderne CLI documentation](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro)
+- [repos.csv reference](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv)
+
 ## Alternative deployment options
 
 - **2-observability**: Add Docker Compose with Grafana/Prometheus for better monitoring
 - **3-scalability**: Scale with parallel workers using Terraform/ECS
-
-## Additional resources
-
-- [Moderne CLI Documentation](https://docs.moderne.io/user-documentation/moderne-cli/)
-- [repos.csv Format Reference](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv)

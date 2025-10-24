@@ -126,6 +126,52 @@ Required columns:
 - `origin` - Source control host (e.g., github.com)
 - `path` - Repository path (e.g., org/repo)
 
+### 6. Configure repository authentication (if needed)
+
+For private repositories, you have several options for providing git credentials to AWS Batch workers.
+
+**Option A: AWS Secrets Manager (recommended)**
+
+Store credentials in Secrets Manager and inject them into the container:
+
+```bash
+# Create secret with git credentials
+aws secretsmanager create-secret \
+  --name mass-ingest/git-credentials \
+  --secret-string "https://username:token@github.com
+https://username:token@gitlab.com"
+
+# Add to terraform.tfvars
+git_credentials_secret_arn = "arn:aws:secretsmanager:region:account:secret:mass-ingest/git-credentials"
+```
+
+Then modify the job definition to mount the secret as a file or environment variable.
+
+**Option B: EFS mount (recommended for SSH keys)**
+
+1. Create an EFS filesystem
+2. Mount it to an EC2 instance and copy `.git-credentials` or `.ssh` directory
+3. Configure Batch job definition to mount the EFS volume at runtime
+4. Set proper mount points: `/root/.git-credentials` or `/root/.ssh`
+
+**Option C: Bake into image (use with caution)**
+
+If all workers need identical credentials and your image registry has strict access controls:
+
+```bash
+# Build with credentials
+docker build -t mass-ingest:latest \
+  --secret id=git-credentials,src=.git-credentials \
+  ..
+
+# Push to secure registry
+docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/mass-ingest:latest
+```
+
+⚠️ **WARNING**: This bakes secrets into the image. Only use if your ECR repository has proper IAM access controls. Consider using AWS ECR's image scanning to detect exposed credentials.
+
+### 7. Upload repos.csv
+
 The repos.csv must be available to the chunk job. Options:
 
 **Option A: Bake into image**
@@ -137,7 +183,7 @@ Modify the chunk job command to download from S3:
 command = ["sh", "-c", "aws s3 cp s3://bucket/repos.csv repos.csv && ./chunk.sh repos.csv"]
 ```
 
-### 6. Trigger manually (optional)
+### 8. Trigger manually (optional)
 
 ```bash
 aws batch submit-job \
@@ -365,15 +411,17 @@ Actual costs vary based on:
 - Instance types
 - Region
 
+## Additional resources
+
+- [Moderne CLI documentation](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro)
+- [repos.csv reference](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv)
+- [AWS Batch Documentation](https://docs.aws.amazon.com/batch/)
+- [Terraform AWS Provider](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
+- [AWS Batch Best Practices](https://docs.aws.amazon.com/batch/latest/userguide/best-practices.html)
+
 ## Optional enhancements
 
 - Set up CloudWatch alarms for job failures
 - Configure SNS notifications for job completion
 - Integrate with CI/CD for automatic image updates
 - Add custom metrics for business intelligence
-
-## Additional resources
-
-- [AWS Batch Documentation](https://docs.aws.amazon.com/batch/)
-- [Terraform AWS Provider](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
-- [AWS Batch Best Practices](https://docs.aws.amazon.com/batch/latest/userguide/best-practices.html)
