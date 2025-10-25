@@ -327,33 +327,7 @@ compute_resources {
 
 ## Troubleshooting
 
-### Jobs stay in PENDING
-- Check VPC/subnet configuration
-- Verify security group allows outbound traffic
-- Check max_vcpus limit
-- Review IAM permissions
-
-### Jobs fail immediately
-- Check Docker image is accessible
-- Verify secrets ARNs are correct
-- Review CloudWatch logs
-- Check PUBLISH_URL format
-
-### Out of memory errors
-Increase memory in job definition:
-```hcl
-{ type = "MEMORY", value = "30720" }  # 30 GB
-```
-
-### Network timeouts
-- Verify security group egress rules
-- Check VPC has NAT gateway for internet access
-- Ensure ECR/secrets endpoints are reachable
-
-### Chunk job doesn't submit workers
-- Check IAM role has `batch:SubmitJob` permission
-- Verify job queue and definition ARNs
-- Review chunk.sh script logs
+See dedicated [troubleshooting](./TROUBLESHOOTING.md) page
 
 ## Cleanup
 
@@ -371,12 +345,15 @@ Note: This does not delete:
 
 ## Scaling guidance
 
+General guidance is 1 worker per 1000 repositories provides a reasonable ingestion time at scale.
+
 | Repository count | Recommended config |
 |-----------------|-------------------|
 | < 100 | Use 1-quickstart or 2-observability |
-| 100-1000 | 2-4 workers, m6a.xlarge |
-| 1000-5000 | 10-20 workers, m6a.2xlarge |
-| 5000+ | 50+ workers, adjust max_vcpus |
+| 100-1000 | 1-2 workers |
+| 1000-10000 | 5-10 workers |
+| 10000-50000 | 10-50 workers |
+| 50000+ | 50+ workers, adjust max_vcpus |
 
 ## Security considerations
 
