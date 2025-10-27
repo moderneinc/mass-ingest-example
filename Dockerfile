@@ -18,9 +18,13 @@ COPY --from=jdk17 /opt/java/openjdk /usr/lib/jvm/temurin-17-jdk
 COPY --from=jdk21 /opt/java/openjdk /usr/lib/jvm/temurin-21-jdk
 COPY --from=jdk25 /opt/java/openjdk /usr/lib/jvm/temurin-25-jdk
 
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
-    unzip awscliv2.zip && \
-    ./aws/install
+# UNCOMMENT FOR 3-scalability: Install AWS CLI for S3 repos.csv support (~300MB)
+# Required if using S3 URLs for repos.csv in AWS Batch deployments
+# Also useful for 2-observability if fetching repos.csv from S3
+# RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+#     unzip awscliv2.zip && \
+#     ./aws/install && \
+#     rm -rf awscliv2.zip aws
 
 FROM dependencies AS modcli
 ARG MODERNE_CLI_STAGE=stable

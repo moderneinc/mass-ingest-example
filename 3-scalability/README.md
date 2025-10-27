@@ -53,6 +53,9 @@ Required columns:
 
 ### 2. Build and push Docker image
 
+> [!NOTE]
+> **For S3 repos.csv support:** If using `s3://` URLs for your repos.csv (e.g., `ingest_csv_file = "s3://bucket/repos.csv"`), uncomment the AWS CLI installation section in the Dockerfile before building. This adds ~300MB to the image. HTTP/HTTPS repos.csv URLs work without AWS CLI.
+
 ```bash
 # Build the image from repository root
 docker build -t mass-ingest:latest ..
