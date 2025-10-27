@@ -11,94 +11,231 @@ if [ $# -eq 0 ]
     exit 1
 fi
 
-# Clean any existing files in the data directory
-if [ -d "$DATA_DIR" ]; then
-  rm -rf "${DATA_DIR:?}"/*
-fi
-
-# Create the data directory and partition directory
-PARTITION_DIR="$DATA_DIR/partitions"
-mkdir -p "$PARTITION_DIR"
-
-
-CSV_FILE="$DATA_DIR/$1"
-cp "$1" "$DATA_DIR"
-
-# split csv file into 10 line chunks.
-# the chunks should be named `repos-{chunk}`
-# the csv file will contain two columns: url and branch
-# capture the first row as the header and save to var
-header=$(head -n 1 "$CSV_FILE")
-cd "$PARTITION_DIR" || exit
-split -l 10 "$CSV_FILE" repos-
-
-# ensure each chunk has the header row
-for file in repos-*
-  do
-    if [ "$(head -n 1 "$file")" != "$header" ]; then
-      echo "$header" | cat - "$file" > temp && mv temp "$file"
-    fi
-done
-
-# counter init to 0
-index=0
-
-function build_and_upload_repos() {
-  rm -f log.zip
-
-  # for each chunk, read the contents of the csv file
-  for file in repos-*
-  do
-    if [ "$(head -n 1 "$file")" != "$header" ]; then
-      # prepend header to the file
-      echo "$header" | cat - "$file" > temp && mv temp "$file"
-    fi
-
-    # extract just the partition name from the file name
-    partition_name=$(echo "$file" | cut -d'-' -f2)
-
-    mod git sync csv "$partition_name" "$file" --with-sources
-
-    mod build "./$partition_name" --no-download
-
-    mod publish "./$partition_name"
-
-    mod log builds add "./$partition_name" log.zip --last-build
-
-    # if directory exists, remove it
-    if [ -d "./$partition_name" ]; then
-      rm -rf "./$partition_name"
-    fi
-  done
-
-
-
-  # For publishing logs, PUBLISH_URL must be set. For authentication, either 
-  # set both PUBLISH_USER and PUBLISH_PASSWORD or just PUBLISH_TOKEN. 
-  if [ "$PUBLISH_URL" ]; then
-    log_version=$(date '+%Y%m%d%H%M%S')
-    if [ "$PUBLISH_USER" ] && [ "$PUBLISH_PASSWORD" ]; then
-      curl --insecure -u "$PUBLISH_USER":"$PUBLISH_PASSWORD" -X PUT \
-        "$PUBLISH_URL/$log_version/ingest-log-$log_version.zip" \
-        -T log.zip
-    elif [ "$PUBLISH_TOKEN" ]; then
-      curl --insecure --header "Authorization: Bearer $PUBLISH_TOKEN" -X PUT \
-        "$PUBLISH_URL/$log_version/ingest-log-$log_version.zip" \
-        -T log.zip
-    else
-      printf "[%d] No log publishing credentials for %s provided\n" $index $PUBLISH_URL
-    fi
-  else
-    printf "[%d] No log publishing credentials or URL provided\n" $index
+info() {
+  local range="${START_INDEX:-}-${END_INDEX:-}"
+  if [[ -z "${END_INDEX:-}" || -z "${START_INDEX:-}" ]]; then
+    range="all"
   fi
-
-  # increment index
-  index=$((index+1))
+  printf "[%s][%s] %s\n" "$INSTANCE_ID" "$range" "$1"
 }
 
-# Continuously build and upload repositories in a loop
-# If you'd like to run this script once, or on a schedule, remove the while loop
-while true; do
-  build_and_upload_repos
-done
+die() {
+  local range="${START_INDEX:-}-${END_INDEX:-}"
+  if [[ -z "${END_INDEX:-}" || -z "${START_INDEX:-}" ]]; then
+    range="all"
+  fi
+  printf "[%s][%s] %s\n" "$INSTANCE_ID" "$range" "$1" >&2
+  exit 1
+}
 
+main() {
+  initialize_instance_metadata
+
+  # read the first positional argument as the source csv file
+  csv_file=$1
+  if [[ "$csv_file" == "s3://"* ]]; then
+    aws s3 cp "$csv_file" "repos.csv"
+    local_csv_file="repos.csv"
+  elif [[ "$csv_file" == "http://"* || "$csv_file" == "https://"* ]]; then
+    curl "$csv_file" -o "repos.csv"
+    local_csv_file="repos.csv"
+  elif [[ -f "$csv_file" ]]; then
+    local_csv_file="$csv_file"
+  else
+    die "File '$csv_file' does not exist"
+  fi
+
+  # shift the arguments to read the next positional argument as the index
+  shift
+  # all other arguments should be read as flags with getopts
+  while [[ $# -ne 0 ]]; do
+    arg="$1"
+    case "$arg" in
+      --end)
+        END_INDEX="$2"
+        ;;
+      -o|--organization)
+        ORGANIZATION="$2"
+        ;;
+      --start)
+        START_INDEX="$2"
+        ;;
+      *)
+        die "Invalid option: $arg"
+        ;;
+    esac
+    shift 2
+  done
+
+  # build/ingest all repos
+  ingest_repos "$local_csv_file"
+}
+
+ingest_repos() {
+  csv_file="$1"
+
+  configure_credentials
+  prepare_environment
+  start_monitoring
+  if [ -n "${ORGANIZATION:-}" ]; then
+    local clone_dir="$DATA_DIR/$ORGANIZATION"
+    printf "Organization: %s\n" "$ORGANIZATION"
+    mkdir -p "$clone_dir"
+    mod git sync csv "$clone_dir" "$csv_file" --organization "$ORGANIZATION" --with-sources
+    mod git pull "$clone_dir"
+    mod build "$clone_dir" --no-download
+    mod publish "$clone_dir"
+    mod log builds add "$clone_dir" "$DATA_DIR/log.zip" --last-build
+    send_logs "org-$ORGANIZATION"
+  else
+    select_repositories "$csv_file"
+
+    # create a partition name based on the current partition and the current date YYYY-MM-DD-HH-MM
+    partition_name=$(date +"%Y-%m-%d-%H-%M")
+
+    if ! build_and_upload_repos "$partition_name" "$DATA_DIR/selected-repos.csv"; then
+      info "Error building and uploading repositories"
+    else
+      info "Successfully built and uploaded repositories"
+    fi
+
+    # Upload results
+    if [[ -z "${END_INDEX:-}" || -z "${START_INDEX:-}" ]]; then
+      send_logs "all"
+    else
+      send_logs "$START_INDEX-$END_INDEX"
+    fi
+  fi
+  stop_monitoring
+}
+
+# Initialize instance if running on AWS EC2 (batch mode)
+initialize_instance_metadata() {
+  TOKEN=$(curl --connect-timeout 2 -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+  export INSTANCE_ID=$(curl --connect-timeout 2 -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id || echo "localhost")
+}
+
+# Configure credentials at runtime (passed via environment variables)
+configure_credentials() {
+  info "Configuring credentials"
+
+  # Configure Moderne tenant if token provided
+  if [ -n "${MODERNE_TOKEN:-}" ] && [ -n "${MODERNE_TENANT:-}" ]; then
+    info "Configuring Moderne tenant: ${MODERNE_TENANT}"
+    mod config moderne edit --token="${MODERNE_TOKEN}" "${MODERNE_TENANT}"
+  fi
+
+  if [ -n "${GIT_CREDENTIALS}" ]; then
+    echo -e "${GIT_CREDENTIALS}" > /root/.git-credentials
+  fi
+
+  if [ -n "${GIT_SSH_CREDENTIALS}" ]; then
+    mkdir -p /root/.ssh
+    echo -e "${GIT_SSH_CREDENTIALS}" > /root/.ssh/private-key
+    chmod 600 /root/.ssh/private-key
+  fi
+
+  # Configure artifact repository
+  if [ -n "${PUBLISH_URL:-}" ] && [ -n "${PUBLISH_USER:-}" ] && [ -n "${PUBLISH_PASSWORD:-}" ]; then
+    info "Configuring artifact repository with username/password"
+    mod config lsts artifacts maven edit "${PUBLISH_URL}" --user "${PUBLISH_USER}" --password "${PUBLISH_PASSWORD}"
+  elif [ -n "${PUBLISH_URL:-}" ] && [ -n "${PUBLISH_TOKEN:-}" ]; then
+    info "Configuring artifact repository with API token"
+    mod config lsts artifacts artifactory edit "${PUBLISH_URL}" --jfrog-api-token "${PUBLISH_TOKEN}"
+  else
+    die "PUBLISH_URL and either PUBLISH_USER/PUBLISH_PASSWORD or PUBLISH_TOKEN must be supplied via environment variables"
+  fi
+}
+
+# Clean any existing files
+prepare_environment() {
+  info "Preparing environment"
+  mkdir -p "$DATA_DIR"
+  rm -rf "${DATA_DIR:?}"/*
+  mkdir -p "$HOME/.moderne/cli/metrics/"
+  rm -rf "$HOME/.moderne/cli/metrics"/*
+}
+
+start_monitoring() {
+  info "Starting monitoring"
+  nohup mod monitor --port 8080 > /dev/null 2>&1 &
+  echo $! > "$DATA_DIR/monitor.pid"
+}
+
+stop_monitoring() {
+  info "Cleaning up monitoring"
+  if [ -f "$DATA_DIR/monitor.pid" ]; then
+    kill -9 $(cat "$DATA_DIR/monitor.pid")
+    rm "$DATA_DIR/monitor.pid"
+  fi
+}
+
+select_repositories() {
+  local csv_file=$1
+
+  if [ ! -f "$csv_file" ]; then
+    die "File $csv_file does not exist"
+  fi
+
+  if [[ -n "${START_INDEX:-}" && -n "${END_INDEX:-}" ]]; then
+    info "Selecting repositories from $csv_file starting at $START_INDEX and ending at $END_INDEX"
+
+    header=$(head -n 1 "$csv_file")
+
+    # select the lines from start_line to end_line from $csv_file
+    selected_lines=$(tail -n +2 "$csv_file" | sed -n "${START_INDEX},${END_INDEX}p")
+
+    ( echo "$header"; echo "$selected_lines" ) > "$DATA_DIR/selected-repos.csv"
+  else
+    info "Selected all repositories from $csv_file"
+
+    cp "$csv_file" "$DATA_DIR/selected-repos.csv"
+  fi
+}
+
+build_and_upload_repos() {
+  local clone_dir="$DATA_DIR/$1"
+  local partition_file=$2
+  info "Building and uploading repositories into $clone_dir from $partition_file"
+
+  # turn off color output and cursor movement in the CLI
+  export NO_COLOR=true
+  export TERM=dumb
+
+  mod git sync csv "$clone_dir" "$partition_file" --with-sources
+
+  # kill a build if it takes over 45 minutes assuming it's hung indefinitely
+  timeout 2700 mod build "$clone_dir" --no-download
+  ret=$?
+  if [ $ret -eq 124 ]; then
+    printf "\n* Build timed out after 45 minutes\n\n"
+  fi
+
+  mod publish "$clone_dir"
+  mod log builds add "$clone_dir" "$DATA_DIR/log.zip" --last-build
+  return $ret
+}
+
+send_logs() {
+  local index=$1
+  local timestamp=$(date +"%Y%m%d%H%M")
+
+  # if PUBLISH_USER and PUBLISH_PASSWORD are set, or PUBLISH_TOKEN is set, publish logs
+  if [[ -n "$PUBLISH_USER" && -n "$PUBLISH_PASSWORD" ]]; then
+    logs_url=$PUBLISH_URL/io/moderne/ingest-log/$index/$timestamp/ingest-log-cli-$timestamp-$index.zip
+    info "Uploading logs to $logs_url"
+    if ! curl -s -S --insecure -u "$PUBLISH_USER":"$PUBLISH_PASSWORD" -X PUT "$logs_url" -T "$DATA_DIR/log.zip"; then
+        info "Failed to publish logs"
+    fi
+  elif [[ -n "$PUBLISH_TOKEN" ]]; then
+    logs_url=$PUBLISH_URL/io/moderne/ingest-log/$index/$timestamp/ingest-log-cli-$timestamp-$index.zip
+    info "Uploading logs to $logs_url"
+    if ! curl -s -S --insecure -H "Authorization: Bearer $PUBLISH_TOKEN" -X PUT "$logs_url" -T "$DATA_DIR/log.zip"; then
+        info "Failed to publish logs"
+    fi
+  else
+    info "No log publishing credentials provided"
+  fi
+}
+
+main "$@"

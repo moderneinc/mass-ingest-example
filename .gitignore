@@ -25,3 +25,11 @@ replay_pid*
 
 # IntelliJ
 .idea/
+
+# Environment files with secrets
+.env
+**/.env
+
+# Git credentials and SSH keys (mount at runtime, never commit)
+.git-credentials
+.ssh/

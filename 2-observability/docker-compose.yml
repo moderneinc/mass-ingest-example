@@ -1,0 +1,55 @@
+services:
+  mass-ingest:
+    build:
+      context: ..
+      args:
+        MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION:-}
+    env_file:
+      - .env
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - data:/var/moderne
+      - ../repos.csv:/app/repos.csv
+      # Uncomment to mount git credentials for private repositories
+      # - ./.git-credentials:/root/.git-credentials:ro
+      # Or mount SSH keys instead:
+      # - ./.ssh:/root/.ssh:ro
+    networks:
+      - monitoring
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    # Uncomment to access Prometheus UI directly (optional - Grafana is the primary interface)
+    # ports:
+    #   - "9090:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./observability/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - monitoring
+    depends_on:
+      - prometheus
+
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  data:

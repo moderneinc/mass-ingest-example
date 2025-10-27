@@ -1,20 +1,15 @@
-FROM eclipse-temurin:8-noble AS jdk8
-FROM eclipse-temurin:11-noble AS jdk11
-FROM eclipse-temurin:17-noble AS jdk17
-FROM eclipse-temurin:21-noble AS jdk21
-FROM eclipse-temurin:25-noble AS jdk25
+FROM eclipse-temurin:8-jdk AS jdk8
+FROM eclipse-temurin:11-jdk AS jdk11
+FROM eclipse-temurin:17-jdk AS jdk17
+FROM eclipse-temurin:21-jdk AS jdk21
+FROM eclipse-temurin:25-jdk AS jdk25
 
 # UNCOMMENT if you use a custom maven image with settings
 # FROM <custom docker image> AS maven
 
-# Import Grafana and Prometheus
-# Comment out the following lines if you don't need Grafana and Prometheus
-FROM grafana/grafana AS grafana
-FROM prom/prometheus AS prometheus
-
 # Install dependencies for `mod` cli
-FROM jdk21 AS dependencies
-RUN apt-get -y update && apt-get install -y git git-lfs jq libxml2-utils unzip zip supervisor vim && git lfs install
+FROM jdk25 AS dependencies
+RUN apt-get -y update && apt-get install -y curl git git-lfs jq libxml2-utils unzip wget zip vim && git lfs install
 
 # Gather various JDK versions
 COPY --from=jdk8 /opt/java/openjdk /usr/lib/jvm/temurin-8-jdk
@@ -23,48 +18,23 @@ COPY --from=jdk17 /opt/java/openjdk /usr/lib/jvm/temurin-17-jdk
 COPY --from=jdk21 /opt/java/openjdk /usr/lib/jvm/temurin-21-jdk
 COPY --from=jdk25 /opt/java/openjdk /usr/lib/jvm/temurin-25-jdk
 
-# Import Grafana and Prometheus into mass-ingest image
-# Comment out the following lines if you don't need Grafana and Prometheus
-COPY --from=grafana /usr/share/grafana /usr/share/grafana
-COPY --from=grafana /etc/grafana /etc/grafana
-COPY --from=prometheus /bin/prometheus /bin/prometheus
-COPY --from=prometheus /etc/prometheus /etc/prometheus
-
-# Copy configs for prometheus and grafana
-# Comment out the following lines if you don't need Grafana and Prometheus
-COPY observability/ /etc/.
-# COPY grafana-datasource.yml /etc/grafana/provisioning/datasources/grafana-datasource.yml
-# COPY grafana-dashboard.yml /etc/grafana/provisioning/dashboards/grafana-dashboard.yml
-# COPY grafana-build-dashboard.json /etc/grafana/dashboards/build.json
-# COPY grafana-run-dashboard.json /etc/grafana/dashboards/run.json
-# COPY prometheus.yml /etc/prometheus/prometheus.yml
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+    unzip awscliv2.zip && \
+    ./aws/install
 
 FROM dependencies AS modcli
 ARG MODERNE_CLI_STAGE=stable
 ARG MODERNE_CLI_VERSION
-ARG MODERNE_TENANT
-ARG MODERNE_DX_HOST
-# Personal access token for Moderne; can be created through https://<tenant>.moderne.io/settings/access-token
-ARG MODERNE_TOKEN
-
-# We recommend a dedicated Artifactory Maven repository, allowing both releases & snapshots; supply the full URL here
-ARG PUBLISH_URL
-ARG PUBLISH_USER
-ARG PUBLISH_PASSWORD
-ARG PUBLISH_TOKEN
-
-# Moderne CLI installation
-# Set the working directory to /usr/local/bin
-WORKDIR /usr/local/bin
-
 # Set the environment variable MODERNE_CLI_VERSION
-# ENV MODERNE_CLI_VERSION=3.26.3
+ENV MODERNE_CLI_VERSION=${MODERNE_CLI_VERSION}
+
+WORKDIR /app
 
 # Download the specified version of moderne-cli JAR file if MODERNE_CLI_VERSION is provided,
 # otherwise download the latest version
 RUN if [ -n "${MODERNE_CLI_VERSION}" ]; then \
         echo "Downloading version: ${MODERNE_CLI_VERSION}"; \
-        curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/${MODERNE_CLI_VERSION}/moderne-cli-${MODERNE_CLI_VERSION}.jar" --output mod.jar; \
+        curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/${MODERNE_CLI_VERSION}/moderne-cli-${MODERNE_CLI_VERSION}.jar" --output /usr/local/bin/mod.jar; \
     elif [ "${MODERNE_CLI_STAGE}" == "staging" ]; then \
         LATEST_VERSION=$(curl -s --insecure --request GET --url "https://api.github.com/repos/moderneinc/moderne-cli-releases/releases" | jq '.[0].tag_name' -r | sed "s/^v//"); \
         if [ -z "${LATEST_VERSION}" ]; then \
@@ -72,7 +42,7 @@ RUN if [ -n "${MODERNE_CLI_VERSION}" ]; then \
             exit 1; \
         fi; \
         echo "Downloading latest staging version: ${LATEST_VERSION}"; \
-        curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/${LATEST_VERSION}/moderne-cli-${LATEST_VERESION}.jar" --output mod.jar; \
+        curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/${LATEST_VERSION}/moderne-cli-${LATEST_VERSION}.jar" --output /usr/local/bin/mod.jar; \
     else \
         LATEST_VERSION=$(curl -s --insecure --request GET --url "https://api.github.com/repos/moderneinc/moderne-cli-releases/releases/latest" | jq '.tag_name' -r | sed "s/^v//"); \
         if [ -z "${LATEST_VERSION}" ]; then \
@@ -80,39 +50,18 @@ RUN if [ -n "${MODERNE_CLI_VERSION}" ]; then \
             exit 1; \
         fi; \
         echo "Downloading latest stable version: ${LATEST_VERSION}"; \
-        curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/${LATEST_VERSION}/moderne-cli-${LATEST_VERSION}.jar" --output mod.jar; \
+        curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/${LATEST_VERSION}/moderne-cli-${LATEST_VERSION}.jar" --output /usr/local/bin/mod.jar; \
     fi
 
 # Create a shell script 'mod' that runs the moderne-cli JAR file
-RUN echo '#!/bin/sh' > mod && \
-    echo 'java -jar /usr/local/bin/mod.jar "$@"' >> mod
+RUN echo -e '#!/bin/sh\njava -jar /usr/local/bin/mod.jar "$@"' > /usr/local/bin/mod
 
 # Make the 'mod' script executable
-RUN chmod +x mod
+RUN chmod +x /usr/local/bin/mod
 
-WORKDIR /app
-
-RUN if [ -n "${MODERNE_TOKEN}" ]; then \
-        mod config moderne edit --token=${MODERNE_TOKEN} https://${MODERNE_TENANT}.moderne.io; \
-        mod config scm moderne sync; \
-    else \
-        echo "MODERNE_TOKEN not supplied, skipping configuration."; \
-        # uncomment to configure an on premise scm. This is not required if the MODERNE_TOKEN is supplied and the above sync is performed. 
-        # See https://docs.moderne.io/user-documentation/moderne-cli/how-to-guides/on-prem-scm-config/ for more details
-        # mod config scm add bitbucket "https://bitbucket.moderne.io/stash" --alternate-url="ssh://bitbucket.moderne.io:7999"; \
-    fi
-
-# Note, artifact repositories such as GitLab's Maven API will accept an access token's name and the
-# access token for PUBLISH_USER and PUBLISH_PASSWORD respectively.
-RUN if [ -n "${PUBLISH_URL}" ] && [ -n "${PUBLISH_USER}" ] && [ -n "${PUBLISH_PASSWORD}" ]; then \
-        mod config lsts artifacts maven edit ${PUBLISH_URL} --user ${PUBLISH_USER} --password ${PUBLISH_PASSWORD}; \
-        # mod config lsts artifacts maven edit ${PUBLISH_URL} --user ${PUBLISH_USER} --password ${PUBLISH_PASSWORD} --skip-ssl; \
-    elif [ -n "${PUBLISH_URL}" ] && [ -n "${PUBLISH_TOKEN}" ]; then \
-        mod config lsts artifacts artifactory edit ${PUBLISH_URL} --jfrog-api-token ${PUBLISH_TOKEN}; \
-        # mod config lsts artifacts artifactory edit ${PUBLISH_URL} --jfrog-api-token ${PUBLISH_TOKEN} --skip-ssl; \
-    else \
-        echo "PUBLISH_URL and either PUBLISH_USER and PUBLISH_PASSWORD or PUBLISH_TOKEN must be supplied."; \
-    fi
+# Credential configuration has been moved to runtime (publish.sh/publish.ps1) to avoid
+# baking sensitive credentials into Docker image layers. Credentials are now passed as
+# environment variables and configured when the container starts.
 
 
 FROM modcli AS language-support
@@ -204,19 +153,27 @@ FROM modcli AS language-support
 
 FROM language-support AS runner
 
-# UNCOMMENT for authentication to git repositories
-# Configure git credentials if they are required to clone; ensure this lines up with your use of https:// or ssh://
-# .git-credentials each line defines credentilas for a host in the format:
-# https://<username>:<password>@host or https://<token-name>:<token>@host
-# COPY .git-credentials /root/.git-credentials
-# RUN git config --global credential.helper "store --file=/root/.git-credentials"
+# Git authentication configuration
+# Git credentials are configured at runtime via volume mounts to avoid baking secrets into the image.
+# Configure git to use the credential store that will be mounted at runtime
+RUN git config --global credential.helper "store --file=/root/.git-credentials"
+# Optionally disable SSL verification if needed
 # RUN git config --global http.sslVerify false
 
-# UNCOMMENT if using ssh keys
-# RUN mkdir /root/.ssh && chmod 755 /root/.ssh
-# COPY .ssh/id_rsa /root/.ssh/id_rsa
-# COPY .ssh/known_hosts /root/.ssh/known_hosts
-# RUN chmod 600 /root/.ssh/id_rsa /root/.ssh/known_hosts
+# Mount git credentials at runtime with:
+# docker run -v $(pwd)/.git-credentials:/root/.git-credentials:ro ...
+#
+# .git-credentials format (one line per host):
+# https://<username>:<password>@github.com
+# https://<token-name>:<token>@gitlab.com
+
+# SSH keys for git authentication (if needed instead of https credentials)
+# Mount at runtime to avoid baking secrets into the image:
+# docker run -v $(pwd)/.ssh:/root/.ssh:ro ...
+#
+# Ensure your .ssh directory contains:
+# - id_rsa (private key with 600 permissions)
+# - known_hosts (with 644 permissions)
 
 # Configure trust store if self-signed certificates are in use for artifact repository, source control, or moderne tenant
 # COPY mycert.crt /root/mycert.crt
@@ -236,17 +193,7 @@ RUN mod config java options edit "-Xmx4g -Xss3m"
 
 # Available ports
 # 8080 - mod CLI monitor
-# 3000 - Grafana
-# 9090 - Prometheus
-EXPOSE 8080 3000 9090
-COPY supervisord.conf /etc/supervisord.conf
-
-WORKDIR /app
-# Set as environment variables for `publish.sh`
-ENV PUBLISH_URL=${PUBLISH_URL}
-ENV PUBLISH_USER=${PUBLISH_USER}
-ENV PUBLISH_PASSWORD=${PUBLISH_PASSWORD}
-ENV PUBLISH_TOKEN=${PUBLISH_TOKEN}
+EXPOSE 8080
 
 # Disables extra formating in the logs
 ENV CUSTOM_CI=true
@@ -254,9 +201,12 @@ ENV CUSTOM_CI=true
 # Set the data directory for the publish script
 ENV DATA_DIR=/var/moderne
 
+# Copy scripts
+# UNCOMMENT for 3-scalability (AWS Batch)
+# COPY --chmod=755 3-scalability/chunk.sh chunk.sh
 COPY --chmod=755 publish.sh publish.sh
 
 # Optional: mount from host
 COPY repos.csv repos.csv
 
-ENTRYPOINT ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
+CMD ["./publish.sh", "repos.csv"]
