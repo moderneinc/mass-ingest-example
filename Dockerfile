@@ -1,3 +1,7 @@
+################################################################################
+# CORE SETUP (Required for all stages)
+################################################################################
+
 FROM eclipse-temurin:8-jdk AS jdk8
 FROM eclipse-temurin:11-jdk AS jdk11
 FROM eclipse-temurin:17-jdk AS jdk17
@@ -18,9 +22,9 @@ COPY --from=jdk17 /opt/java/openjdk /usr/lib/jvm/temurin-17-jdk
 COPY --from=jdk21 /opt/java/openjdk /usr/lib/jvm/temurin-21-jdk
 COPY --from=jdk25 /opt/java/openjdk /usr/lib/jvm/temurin-25-jdk
 
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
-    unzip awscliv2.zip && \
-    ./aws/install
+################################################################################
+# MODERNE CLI SETUP
+################################################################################
 
 FROM dependencies AS modcli
 ARG MODERNE_CLI_STAGE=stable
@@ -63,28 +67,34 @@ RUN chmod +x /usr/local/bin/mod
 # baking sensitive credentials into Docker image layers. Credentials are now passed as
 # environment variables and configured when the container starts.
 
+################################################################################
+# OPTIONAL: Language Support (uncomment as needed)
+################################################################################
+# Most projects use Maven/Gradle wrappers and don't need these installations.
+# Uncomment only if your repositories specifically require them.
 
 FROM modcli AS language-support
-# Gradle support
-# RUN wget --no-check-certificate https://services.gradle.org/distributions/gradle-8.14-bin.zip
-# RUN mkdir /opt/gradle
-# RUN unzip -d /opt/gradle gradle-8.14-bin.zip
-# ENV PATH="${PATH}:/opt/gradle/gradle-8.14/bin"
 
-# Install Maven if some projects do not use the wrapper
+# Gradle (comment if projects don't use Gradle without a wrapper)
+RUN wget --no-check-certificate https://services.gradle.org/distributions/gradle-8.14-bin.zip
+RUN mkdir /opt/gradle
+RUN unzip -d /opt/gradle gradle-8.14-bin.zip
+ENV PATH="${PATH}:/opt/gradle/gradle-8.14/bin"
+
+# Maven (comment if projects don't use Maven without a wrapper)
 # NOTE: This version may be out of date as new versions are continually released. Check here for the latest version: https://repo1.maven.org/maven2/org/apache/maven/apache-maven/
-# ENV MAVEN_VERSION=3.9.11
-# RUN wget --no-check-certificate https://repo1.maven.org/maven2/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz && tar xzvf apache-maven-${MAVEN_VERSION}-bin.tar.gz && rm apache-maven-${MAVEN_VERSION}-bin.tar.gz
-# RUN mv apache-maven-${MAVEN_VERSION} /opt/apache-maven-${MAVEN_VERSION}
-# RUN ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
+ENV MAVEN_VERSION=3.9.11
+RUN wget --no-check-certificate https://repo1.maven.org/maven2/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz && tar xzvf apache-maven-${MAVEN_VERSION}-bin.tar.gz && rm apache-maven-${MAVEN_VERSION}-bin.tar.gz
+RUN mv apache-maven-${MAVEN_VERSION} /opt/apache-maven-${MAVEN_VERSION}
+RUN ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 
-# Install a Maven wrapper external to projects
+# Maven wrapper external to projects (uncomment if needed)
 # RUN /usr/local/bin/mvn -N wrapper:wrapper
 # RUN mkdir -p /opt/maven-wrapper/bin
 # RUN mv mvnw mvnw.cmd .mvn /opt/maven-wrapper/bin/
 # ENV PATH="${PATH}:/opt/maven-wrapper/bin"
 
-# UNCOMMENT for Android support
+# Android SDK (uncomment for Android projects)
 # RUN wget --no-check-certificate https://dl.google.com/android/repository/commandlinetools-linux-8512546_latest.zip
 # RUN unzip commandlinetools-linux-8512546_latest.zip
 # RUN mkdir -p /usr/lib/android-sdk/cmdline-tools/latest/
@@ -102,22 +112,22 @@ FROM modcli AS language-support
 # ENV ANDROID_HOME=/usr/lib/android-sdk/cmdline-tools/latest
 # ENV ANDROID_SDK_ROOT=${ANDROID_HOME}
 
-# UNCOMMENT for Bazel support
+# Bazel (uncomment for Bazel projects)
 # RUN wget --no-check-certificate https://github.com/bazelbuild/bazelisk/releases/download/v1.20.0/bazelisk-linux-amd64
 # RUN cp bazelisk-linux-amd64 /usr/local/bin/bazel
 # RUN chmod +x /usr/local/bin/bazel
 
-# UNCOMMENT for Node support
+# Node.js (uncomment for JavaScript/TypeScript projects)
 # RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
 #     apt-get install -y --no-install-recommends nodejs
 
-# UNCOMMENT for Python support
+# Python 3.11 (uncomment for Python projects)
 # Install prerequisites and COPY the deadsnakes PPA
 # RUN apt-get update && apt-get install -y \
 #     software-properties-common \
 #     && add-apt-repository ppa:deadsnakes/ppa \
 #     && apt-get update
-    
+
 # # Install Python 3.11 and pip
 # RUN apt-get install -y \
 #     python3.11 \
@@ -139,17 +149,25 @@ FROM modcli AS language-support
 
 # RUN python3.11 -m pip install more-itertools cbor2
 
-# UNCOMMENT for .NET
+# .NET SDK (uncomment for .NET projects)
 # RUN apt-get install -y dotnet-sdk-6.0
 # RUN apt-get install -y dotnet-sdk-8.0
 
+################################################################################
+# OPTIONAL: Custom Maven Settings (uncomment if needed)
+################################################################################
+# Most projects don't need custom Maven settings. Only uncomment if your
+# projects require specific Maven configuration.
 
-# UNCOMMENT for custom Maven settings
 # Configure Maven Settings if they are required to build (choose betwween a settings file withing this repo or the docker image variant):
 # COPY maven/settings.xml /root/.m2/settings.xml
 # RUN cp $MAVEN_CONFIG/settings.xml /root/.m2/settings.xml # For custom maven docker imagee
 # COPY maven/settings-security.xml /root/.m2/settings-security.xml
 # RUN mod config build maven settings edit /root/.m2/settings.xml
+
+################################################################################
+# RUNTIME CONFIGURATION
+################################################################################
 
 FROM language-support AS runner
 
@@ -175,6 +193,12 @@ RUN git config --global credential.helper "store --file=/root/.git-credentials"
 # - id_rsa (private key with 600 permissions)
 # - known_hosts (with 644 permissions)
 
+################################################################################
+# OPTIONAL: Self-signed Certificates (uncomment if needed)
+################################################################################
+# Only needed if your artifact repository, source control, or Moderne tenant
+# uses self-signed certificates.
+
 # Configure trust store if self-signed certificates are in use for artifact repository, source control, or moderne tenant
 # COPY mycert.crt /root/mycert.crt
 # RUN /usr/lib/jvm/temurin-8-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-8-jdk/jre/lib/security/cacerts
@@ -187,6 +211,26 @@ RUN git config --global credential.helper "store --file=/root/.git-credentials"
 # mvnw scripts in maven projects may attempt to download maven-wrapper jars using wget.
 # UNCOMMENT the following to set wget's CA certificate
 # RUN echo "ca_certificate = /root/mycert.crt" > /root/.wgetrc
+
+################################################################################
+# OPTIONAL: 3-scalability (AWS Batch) setup
+################################################################################
+
+# AWS CLI for S3 repos.csv support (~300MB)
+# Uncomment when using S3 URLs for repos.csv in AWS Batch deployments.
+# Also useful for 2-observability if fetching repos.csv from S3.
+# HTTP/HTTPS URLs work without this. Comment out if not needed:
+#RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+#    unzip awscliv2.zip && \
+#    ./aws/install
+
+# Chunk script for AWS Batch parallel processing
+# Uncomment to include the chunk.sh script for 3-scalability:
+# COPY --chmod=755 3-scalability/chunk.sh chunk.sh
+
+################################################################################
+# FINAL SETUP
+################################################################################
 
 # OPTIONAL - Customize JVM options
 RUN mod config java options edit "-Xmx4g -Xss3m"
@@ -202,8 +246,6 @@ ENV CUSTOM_CI=true
 ENV DATA_DIR=/var/moderne
 
 # Copy scripts
-# UNCOMMENT for 3-scalability (AWS Batch)
-# COPY --chmod=755 3-scalability/chunk.sh chunk.sh
 COPY --chmod=755 publish.sh publish.sh
 
 # Optional: mount from host
