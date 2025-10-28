@@ -75,18 +75,18 @@ RUN chmod +x /usr/local/bin/mod
 
 FROM modcli AS language-support
 
-# Gradle (uncomment if projects don't use Gradle wrapper)
-# RUN wget --no-check-certificate https://services.gradle.org/distributions/gradle-8.14-bin.zip
-# RUN mkdir /opt/gradle
-# RUN unzip -d /opt/gradle gradle-8.14-bin.zip
-# ENV PATH="${PATH}:/opt/gradle/gradle-8.14/bin"
+# Gradle (comment if projects don't use Gradle without a wrapper)
+RUN wget --no-check-certificate https://services.gradle.org/distributions/gradle-8.14-bin.zip
+RUN mkdir /opt/gradle
+RUN unzip -d /opt/gradle gradle-8.14-bin.zip
+ENV PATH="${PATH}:/opt/gradle/gradle-8.14/bin"
 
-# Maven (uncomment if projects don't use Maven wrapper)
+# Maven (comment if projects don't use Maven without a wrapper)
 # NOTE: This version may be out of date as new versions are continually released. Check here for the latest version: https://repo1.maven.org/maven2/org/apache/maven/apache-maven/
-# ENV MAVEN_VERSION=3.9.11
-# RUN wget --no-check-certificate https://repo1.maven.org/maven2/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz && tar xzvf apache-maven-${MAVEN_VERSION}-bin.tar.gz && rm apache-maven-${MAVEN_VERSION}-bin.tar.gz
-# RUN mv apache-maven-${MAVEN_VERSION} /opt/apache-maven-${MAVEN_VERSION}
-# RUN ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
+ENV MAVEN_VERSION=3.9.11
+RUN wget --no-check-certificate https://repo1.maven.org/maven2/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz && tar xzvf apache-maven-${MAVEN_VERSION}-bin.tar.gz && rm apache-maven-${MAVEN_VERSION}-bin.tar.gz
+RUN mv apache-maven-${MAVEN_VERSION} /opt/apache-maven-${MAVEN_VERSION}
+RUN ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 
 # Maven wrapper external to projects (uncomment if needed)
 # RUN /usr/local/bin/mvn -N wrapper:wrapper
@@ -217,12 +217,12 @@ RUN git config --global credential.helper "store --file=/root/.git-credentials"
 ################################################################################
 
 # AWS CLI for S3 repos.csv support (~300MB)
-# Only needed if using S3 URLs for repos.csv in AWS Batch deployments.
+# Uncomment when using S3 URLs for repos.csv in AWS Batch deployments.
 # Also useful for 2-observability if fetching repos.csv from S3.
 # HTTP/HTTPS URLs work without this. Comment out if not needed:
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
-    unzip awscliv2.zip && \
-    ./aws/install
+#RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+#    unzip awscliv2.zip && \
+#    ./aws/install
 
 # Chunk script for AWS Batch parallel processing
 # Uncomment to include the chunk.sh script for 3-scalability:
