@@ -12,6 +12,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 RED='\033[0;31m'
+GRAY='\033[2m'  # Dim text for subtle appearance
 RESET='\033[0m'
 BOLD='\033[1m'
 
@@ -43,10 +44,10 @@ ENABLE_AWS_BATCH=false
 # Security
 CERT_FILE=""
 
-# Git authentication (using parallel arrays for bash 3.2 compatibility)
-SCM_PROVIDERS=()
-GIT_AUTH_METHODS=()
-GIT_AUTH_FILES=()
+# Git authentication
+ENABLE_GIT_SSH=false
+ENABLE_GIT_HTTPS=false
+CREATE_GIT_CREDENTIALS_TEMPLATE=false
 
 # Maven
 MAVEN_SETTINGS_FILE=""
@@ -62,7 +63,6 @@ OUTPUT_DOCKERFILE="Dockerfile.generated"
 
 # Helper functions
 print_header() {
-    echo -e "\n${BLUE}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     echo -e "${CYAN}${BOLD}$1${RESET}"
     echo -e "${BLUE}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
 }
@@ -72,7 +72,18 @@ print_section() {
 }
 
 print_context() {
-    echo -e "${YELLOW}ℹ  $1${RESET}\n"
+    # Format with indentation: first line with icon, subsequent lines indented
+    local text="$1"
+    local first_line=$(echo "$text" | head -n 1)
+    local rest=$(echo "$text" | tail -n +2)
+
+    echo -e "${GRAY}ℹ  ${first_line}${RESET}"
+    if [ -n "$rest" ]; then
+        echo "$rest" | while IFS= read -r line; do
+            echo -e "   ${GRAY}${line}${RESET}"
+        done
+    fi
+    echo ""
 }
 
 print_success() {
@@ -134,24 +145,39 @@ ask_optional_path() {
 # Welcome message
 show_welcome() {
     clear
-    print_header "Moderne Mass Ingest - Dockerfile Generator"
 
-    echo -e "${BOLD}Welcome!${RESET}"
-    echo ""
-    echo "This interactive questionnaire will help you create a customized Dockerfile for your"
-    echo "mass-ingest environment. We'll ask about your repository landscape to ensure the"
-    echo "container has everything needed to build LSTs successfully."
-    echo ""
-    echo -e "${CYAN}What to expect:${RESET}"
-    echo "  • Questions about JDK versions and build tools"
-    echo "  • Language runtime requirements"
-    echo "  • Security and certificate configuration"
-    echo "  • Maven customization options"
-    echo ""
-    echo -e "${CYAN}Estimated time:${RESET} 2-3 minutes"
+    # Moderne logo
+    echo "   ▛▀▀▚▖  ▗▄▟▜"
+    echo "   ▌   ▜▄▟▀  ▐"
+    echo "   ▛▀▀█▀▛▀▀▀▀▜"
+    echo "   ▌▟▀  ▛▀▀▀▀▜"
+    echo "   ▀▀▀▀▀▀▀▀▀▀▀"
     echo ""
 
-    read -p "$(echo -e "${BOLD}Press Enter to begin...${RESET}")"
+    print_header "Mass Ingest - Dockerfile Generator"
+
+    echo -e "Ready to transform code at scale? This wizard will build a custom Docker"
+    echo -e "environment perfectly matched to your repository landscape."
+    echo ""
+    echo -e "In just a few minutes, you'll have a production-ready container that can:"
+    echo -e "  ${GREEN}✓${RESET} Build LSTs across all your projects"
+    echo -e "  ${GREEN}✓${RESET} Handle diverse build tools and language runtimes"
+    echo -e "  ${GREEN}✓${RESET} Scale with AWS Batch for enterprise workloads"
+    echo ""
+    echo -e "${CYAN}${BOLD}What we'll set up together:${RESET}"
+    echo ""
+    echo -e "  ${CYAN}1.${RESET} ${BOLD}JDK versions${RESET} - support for Java 8 through 25"
+    echo -e "  ${CYAN}2.${RESET} ${BOLD}Moderne CLI${RESET} - the engine for code transformation"
+    echo -e "  ${CYAN}3.${RESET} ${BOLD}Build tools${RESET} - Maven, Gradle, and Bazel support"
+    echo -e "  ${CYAN}4.${RESET} ${BOLD}Language runtimes${RESET} - Android, Node, Python, .NET, and more"
+    echo -e "  ${CYAN}5.${RESET} ${BOLD}Enterprise features${RESET} - AWS Batch integration for scale"
+    echo -e "  ${CYAN}6.${RESET} ${BOLD}Security${RESET} - certificate management and Git authentication"
+    echo -e "  ${CYAN}7.${RESET} ${BOLD}Runtime tuning${RESET} - memory and performance optimization"
+    echo ""
+    echo -e "${CYAN}${BOLD}Time investment:${RESET} Just 2-3 minutes"
+    echo ""
+
+    read -p "$(echo -e "${BOLD}Press Enter to get started!${RESET} ")"
     clear
 }
 
@@ -160,13 +186,14 @@ ask_jdk_versions() {
     while true; do
         print_section "JDK Versions"
 
-        print_context "The Moderne CLI needs access to all JDK versions used by your Java projects to
-successfully build LSTs. We'll install JDK 8, 11, 17, 21, and 25 by default.
+        echo "The Moderne CLI needs access to all JDK versions used by your Java projects to"
+        echo "successfully build LSTs. We'll install JDK 8, 11, 17, 21, and 25 by default."
+        echo ""
 
-${BOLD}Why all versions?${RESET} This ensures compatibility with projects targeting any Java version.
+        print_context "${BOLD}Why all versions?\033[22m${GRAY} This ensures compatibility with projects targeting any Java version.
 The additional disk space (~2GB) is worth avoiding build failures.
 
-${BOLD}Safe to skip:${RESET} If you're certain your projects only use specific JDK versions, you can
+${BOLD}Safe to skip:\033[22m${GRAY} If you're certain your projects only use specific JDK versions, you can
 disable the ones you don't need to save space."
 
         if ask_yes_no "Keep all JDK versions (8, 11, 17, 21, 25)?"; then
@@ -235,8 +262,8 @@ ask_modcli_config() {
 
         print_context "Choose how to provide the Moderne CLI to the container.
 
-${BOLD}Download from Maven Central:${RESET} Automatically fetches the specified version during build.
-${BOLD}Supply JAR directly:${RESET} You provide mod.jar in the build context (faster builds, version control)."
+${BOLD}Download from Maven Central:\033[22m${GRAY} Automatically fetches the specified version during build.
+${BOLD}Supply JAR directly:\033[22m${GRAY} You provide mod.jar in the build context (faster builds, version control)."
 
         ask_choice "How do you want to provide the Moderne CLI?" \
             "Download from Maven Central (recommended)" \
@@ -251,9 +278,9 @@ ${BOLD}Supply JAR directly:${RESET} You provide mod.jar in the build context (fa
             echo ""
             print_context "Select which version to download.
 
-${BOLD}Latest stable:${RESET} Recommended for production use.
-${BOLD}Latest staging:${RESET} Pre-release version with newest features.
-${BOLD}Specific version:${RESET} Pin to a known version for reproducibility."
+${BOLD}Latest stable:\033[22m${GRAY} Recommended for production use.
+${BOLD}Latest staging:\033[22m${GRAY} Pre-release version with newest features.
+${BOLD}Specific version:\033[22m${GRAY} Pin to a known version for reproducibility."
 
             ask_choice "Which version do you want?" \
                 "Latest stable (recommended)" \
@@ -313,10 +340,11 @@ ask_maven_build_config() {
 
         print_section "Maven Configuration"
 
-        print_context "Maven is a popular build tool for Java projects.
+        echo "Maven is a popular build tool for Java projects."
+        echo ""
 
-${BOLD}Maven wrappers (mvnw):${RESET} Many projects include wrapper scripts that don't require Maven to be pre-installed.
-${BOLD}Pre-installed Maven:${RESET} Older projects or specific scenarios may need Maven available globally."
+        print_context "${BOLD}Maven wrappers (mvnw):\033[22m${GRAY} Many projects include wrapper scripts that don't require Maven to be pre-installed.
+${BOLD}Pre-installed Maven:\033[22m${GRAY} Older projects or specific scenarios may need Maven available globally."
 
         if ! ask_yes_no "Do any of your repositories use Maven?"; then
             clear
@@ -327,11 +355,28 @@ ${BOLD}Pre-installed Maven:${RESET} Older projects or specific scenarios may nee
         if ask_yes_no "Do you need Maven pre-installed? (Say 'no' if all projects use mvnw wrapper)"; then
             ENABLE_MAVEN=true
 
-            # Ask for Maven version
-            read -p "$(echo -e "${BOLD}Maven version${RESET} (press Enter for default) [$MAVEN_VERSION]: ")" user_maven_version
-            if [ -n "$user_maven_version" ]; then
-                MAVEN_VERSION="$user_maven_version"
-            fi
+            # Ask for Maven version with validation
+            while true; do
+                read -p "$(echo -e "${BOLD}Maven version${RESET} (press Enter for default) [$MAVEN_VERSION]: ")" user_maven_version
+
+                if [ -z "$user_maven_version" ]; then
+                    # User pressed Enter, use default
+                    break
+                fi
+
+                # Validate semver format (MAJOR.MINOR.PATCH)
+                if [[ "$user_maven_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                    MAVEN_VERSION="$user_maven_version"
+                    break
+                else
+                    echo -e "${RED}Invalid version format. Maven versions must follow semver (e.g., 3.9.11)${RESET}"
+                    if ! ask_yes_no "Try again?"; then
+                        # Keep default version
+                        break
+                    fi
+                fi
+            done
+
             print_success "Maven $MAVEN_VERSION will be installed"
         else
             print_success "Maven will not be installed (projects will use wrappers)"
@@ -343,7 +388,7 @@ ${BOLD}Pre-installed Maven:${RESET} Older projects or specific scenarios may nee
         print_context "If your Maven builds require custom settings (private repositories, mirrors, profiles,
 authentication), you can provide a settings.xml file.
 
-${BOLD}What this does:${RESET} Copies your settings.xml to /root/.m2/ and configures mod CLI to use it."
+${BOLD}What this does:\033[22m${GRAY} Copies your settings.xml to /root/.m2/ and configures mod CLI to use it."
 
         if ask_yes_no "Do you need custom Maven settings.xml?"; then
             while true; do
@@ -404,118 +449,193 @@ ${BOLD}What this does:${RESET} Copies your settings.xml to /root/.m2/ and config
 
 # Gradle configuration page
 ask_gradle_build_config() {
-    print_section "Gradle Configuration"
+    while true; do
+        # Reset for restart
+        ENABLE_GRADLE=false
 
-    print_context "Gradle is a popular build tool for Java and Kotlin projects.
+        print_section "Gradle Configuration"
 
-${BOLD}Gradle wrappers (gradlew):${RESET} Many projects include wrapper scripts that don't require Gradle to be pre-installed.
-${BOLD}Pre-installed Gradle:${RESET} Older projects or specific scenarios may need Gradle 8.14 available globally."
+        echo "Gradle is a popular build tool for Java and Kotlin projects."
+        echo ""
 
-    if ! ask_yes_no "Do any of your repositories use Gradle?"; then
+        print_context "${BOLD}Gradle wrappers (gradlew):\033[22m${GRAY} Many projects include wrapper scripts that don't require Gradle to be pre-installed.
+${BOLD}Pre-installed Gradle:\033[22m${GRAY} Older projects or specific scenarios may need Gradle 8.14 available globally."
+
+        if ! ask_yes_no "Do any of your repositories use Gradle?"; then
+            clear
+            return
+        fi
+
+        echo ""
+        if ask_yes_no "Do you need Gradle pre-installed? (Say 'no' if all projects use gradlew wrapper)"; then
+            ENABLE_GRADLE=true
+        fi
+
+        echo ""
+        echo -e "${BOLD}Selected configuration:${RESET}"
+        if [ "$ENABLE_GRADLE" = true ]; then
+            echo -e "  Gradle: Version 8.14 will be installed"
+        else
+            echo -e "  Gradle: Not installed (projects use wrappers)"
+        fi
+        echo ""
+        if ask_yes_no "Is this correct?"; then
+            break
+        fi
         clear
-        return
-    fi
-
-    echo ""
-    if ask_yes_no "Do you need Gradle pre-installed? (Say 'no' if all projects use gradlew wrapper)"; then
-        ENABLE_GRADLE=true
-        print_success "Gradle 8.14 will be installed"
-    else
-        print_success "Gradle will not be installed (projects will use wrappers)"
-    fi
+    done
 
     clear
 }
 
 # Other build tools
 ask_other_build_tools() {
-    print_section "Other Build Tools"
+    while true; do
+        print_section "Other Build Tools"
 
-    print_context "Some projects use specialized build tools beyond Maven and Gradle."
+        print_context "Some projects use specialized build tools beyond Maven and Gradle."
 
-    # Bazel
-    echo -e "${BOLD}Bazel${RESET}"
-    echo "Google's build system, commonly used in monorepos and large-scale projects."
-    if ask_yes_no "Do you use Bazel?"; then
-        ENABLE_BAZEL=true
-        print_success "Bazel will be installed"
-    fi
+        # Bazel
+        echo -e "${BOLD}Bazel${RESET}"
+        echo "Google's build system, commonly used in monorepos and large-scale projects."
+        if ask_yes_no "Do you use Bazel?"; then
+            ENABLE_BAZEL=true
+        else
+            ENABLE_BAZEL=false
+        fi
+
+        echo ""
+        echo -e "${BOLD}Selected configuration:${RESET}"
+        if [ "$ENABLE_BAZEL" = true ]; then
+            echo -e "  Bazel: Will be installed"
+        else
+            echo -e "  Bazel: Not needed"
+        fi
+        echo ""
+        if ask_yes_no "Is this correct?"; then
+            break
+        fi
+        clear
+    done
 
     clear
 }
 
 # Development platforms & runtimes
 ask_language_runtimes() {
-    print_section "Development Platforms & Runtimes"
+    while true; do
+        # Initialize all to false for restart
+        ENABLE_ANDROID=false
+        ENABLE_NODE=false
+        ENABLE_PYTHON=false
+        ENABLE_DOTNET=false
 
-    print_context "While the Moderne CLI primarily processes Java/Kotlin projects, your repositories
+        print_section "Development Platforms & Runtimes"
+
+        print_context "While the Moderne CLI primarily processes Java/Kotlin projects, your repositories
 may have multi-language components that require additional runtimes for successful builds.
 
 Answer 'yes' if any of your repositories need these runtimes."
 
-    # Android
-    echo -e "${BOLD}Android SDK${RESET}"
-    echo "Required for Android applications. Installs API platforms 25-33 (~5GB)."
-    if ask_yes_no "Do you have Android projects?"; then
-        ENABLE_ANDROID=true
-        print_success "Android SDK will be installed"
-    fi
+        # Android
+        echo -e "${BOLD}Android SDK${RESET}"
+        echo "Required for Android applications. Installs API platforms 25-33 (~5GB)."
+        if ask_yes_no "Do you have Android projects?"; then
+            ENABLE_ANDROID=true
+        fi
 
-    # Node.js
-    echo -e "\n${BOLD}Node.js${RESET}"
-    echo "Required for projects with frontend components or JavaScript/TypeScript code."
-    if ask_yes_no "Do you need Node.js?"; then
-        ENABLE_NODE=true
-        print_success "Node.js 20.x will be installed"
-    fi
+        # Node.js
+        echo -e "\n${BOLD}Node.js${RESET}"
+        echo "Required for projects with frontend components or JavaScript/TypeScript code."
+        if ask_yes_no "Do you need Node.js?"; then
+            ENABLE_NODE=true
+        fi
 
-    # Python
-    echo -e "\n${BOLD}Python 3.11${RESET}"
-    echo "Needed for Python projects or build scripts with Python dependencies."
-    if ask_yes_no "Do you need Python?"; then
-        ENABLE_PYTHON=true
-        print_success "Python 3.11 will be installed"
-    fi
+        # Python
+        echo -e "\n${BOLD}Python 3.11${RESET}"
+        echo "Needed for Python projects or build scripts with Python dependencies."
+        if ask_yes_no "Do you need Python?"; then
+            ENABLE_PYTHON=true
+        fi
 
-    # .NET
-    echo -e "\n${BOLD}.NET SDK${RESET}"
-    echo "Required for .NET/C# projects. Installs .NET 6.0 and 8.0 SDKs."
-    if ask_yes_no "Do you have .NET projects?"; then
-        ENABLE_DOTNET=true
-        print_success ".NET SDK 6.0 and 8.0 will be installed"
-    fi
+        # .NET
+        echo -e "\n${BOLD}.NET SDK${RESET}"
+        echo "Required for .NET/C# projects. Installs .NET 6.0 and 8.0 SDKs."
+        if ask_yes_no "Do you have .NET projects?"; then
+            ENABLE_DOTNET=true
+        fi
+
+        echo ""
+        echo -e "${BOLD}Selected configuration:${RESET}"
+        local any_selected=false
+        [ "$ENABLE_ANDROID" = true ] && echo -e "  Android SDK: Will be installed" && any_selected=true
+        [ "$ENABLE_NODE" = true ] && echo -e "  Node.js 20.x: Will be installed" && any_selected=true
+        [ "$ENABLE_PYTHON" = true ] && echo -e "  Python 3.11: Will be installed" && any_selected=true
+        [ "$ENABLE_DOTNET" = true ] && echo -e "  .NET SDK 6.0/8.0: Will be installed" && any_selected=true
+        [ "$any_selected" = false ] && echo -e "  No additional language runtimes"
+        echo ""
+        if ask_yes_no "Is this correct?"; then
+            break
+        fi
+        clear
+    done
 
     clear
 }
 
 # Scalability options
 ask_scalability_options() {
-    print_section "Scalability Options"
+    while true; do
+        # Reset for restart
+        ENABLE_AWS_CLI=false
+        ENABLE_AWS_BATCH=false
 
-    # AWS CLI for S3 URLs
-    echo -e "\n${BOLD}AWS CLI for S3 URLs${RESET}"
-    print_context "If your repositories are stored in S3 or you need to access S3 resources,
-the AWS CLI can be installed in the container.
+        print_section "Scalability Options"
 
-${BOLD}What this does:${RESET} Installs AWS CLI v2, allowing you to use S3 URLs in your repos.csv
+        # AWS CLI for S3 URLs
+        echo -e "\n${BOLD}AWS CLI for S3 URLs${RESET}"
+        echo "If your repositories are stored in S3 or you need to access S3 resources,"
+        echo "the AWS CLI can be installed in the container."
+        echo ""
+
+        print_context "${BOLD}What this does:\033[22m${GRAY} Installs AWS CLI v2, allowing you to use S3 URLs in your repos.csv
 and access AWS resources during processing."
 
-    if ask_yes_no "Do you need AWS CLI?"; then
-        ENABLE_AWS_CLI=true
-        print_success "AWS CLI will be installed"
-    fi
+        if ask_yes_no "Do you need AWS CLI?"; then
+            ENABLE_AWS_CLI=true
+        fi
 
-    # AWS Batch support
-    echo -e "\n${BOLD}AWS Batch Support${RESET}"
-    print_context "AWS Batch allows you to run containerized jobs at scale. This includes
-the chunk.sh script that helps divide workloads across multiple parallel jobs.
+        # AWS Batch support
+        echo -e "\n${BOLD}AWS Batch Support${RESET}"
+        echo "AWS Batch allows you to run containerized jobs at scale."
+        echo ""
 
-${BOLD}What this does:${RESET} Includes chunk.sh script for job parallelization in AWS Batch environments."
+        print_context "${BOLD}What this does:\033[22m${GRAY} Includes chunk.sh script for job parallelization in AWS Batch environments."
 
-    if ask_yes_no "Do you need AWS Batch support?"; then
-        ENABLE_AWS_BATCH=true
-        print_success "AWS Batch support (chunk.sh) will be included"
-    fi
+        if ask_yes_no "Do you need AWS Batch support?"; then
+            ENABLE_AWS_BATCH=true
+        fi
+
+        echo ""
+        echo -e "${BOLD}Selected configuration:${RESET}"
+        local any_selected=false
+        if [ "$ENABLE_AWS_CLI" = true ]; then
+            echo -e "  AWS CLI: Will be installed"
+            any_selected=true
+        fi
+        if [ "$ENABLE_AWS_BATCH" = true ]; then
+            echo -e "  AWS Batch support: Will be included"
+            any_selected=true
+        fi
+        if [ "$any_selected" = false ]; then
+            echo -e "  No scalability options needed"
+        fi
+        echo ""
+        if ask_yes_no "Is this correct?"; then
+            break
+        fi
+        clear
+    done
 
     clear
 }
@@ -529,10 +649,11 @@ ask_security_config() {
         print_section "Security Configuration"
 
         # Self-signed certificates
-        print_context "If your artifact repository, source control, or Moderne tenant uses self-signed
-certificates, you'll need to import them into the JVM trust stores.
+        echo "If your artifact repository, source control, or Moderne tenant uses self-signed"
+        echo "certificates, you'll need to import them into the JVM trust stores."
+        echo ""
 
-${BOLD}What this does:${RESET} Imports your certificate into all JDK keystores and configures wget
+        print_context "${BOLD}What this does:\033[22m${GRAY} Imports your certificate into all JDK keystores and configures wget
 for Maven wrapper scripts."
 
         if ! ask_yes_no "Do you use self-signed certificates?"; then
@@ -593,119 +714,78 @@ for Maven wrapper scripts."
 # Git authentication
 ask_git_auth() {
     while true; do
-        # Reset arrays for restart
-        SCM_PROVIDERS=()
-        GIT_AUTH_METHODS=()
-        GIT_AUTH_FILES=()
+        # Reset for restart
+        ENABLE_GIT_SSH=false
+        ENABLE_GIT_HTTPS=false
+        CREATE_GIT_CREDENTIALS_TEMPLATE=false
 
         print_section "Git Authentication"
 
-        print_context "Configure Git authentication for your source control providers. You can use HTTPS
-(with personal access tokens) or SSH (with SSH keys) for each provider."
+        echo "Configure Git authentication for accessing private repositories."
+        echo ""
 
-        if ! ask_yes_no "Do you need to configure Git authentication?"; then
-            clear
-            return
+        print_context "${BOLD}SSH authentication:\033[22m${GRAY} Uses SSH keys for Git operations. Place your SSH keys in a .ssh/ directory.
+${BOLD}HTTPS authentication:\033[22m${GRAY} Uses a .git-credentials file with personal access tokens."
+
+        # Ask about SSH
+        if ask_yes_no "Do you need SSH authentication?"; then
+            ENABLE_GIT_SSH=true
+
+            # Create .ssh directory
+            local build_dir=$(dirname "$OUTPUT_DOCKERFILE")
+            local ssh_dir="$build_dir/.ssh"
+            if [ ! -d "$ssh_dir" ]; then
+                mkdir -p "$ssh_dir"
+                print_success "Created .ssh/ directory in build context"
+            fi
         fi
 
-        # Loop to add providers
-        while true; do
+        echo ""
+
+        # Ask about HTTPS
+        if ask_yes_no "Do you need HTTPS authentication?"; then
+            ENABLE_GIT_HTTPS=true
+
             echo ""
-            ask_choice "Which provider would you like to configure?" \
-                "GitHub" \
-                "GitLab" \
-                "Bitbucket Data Center" \
-                "Bitbucket Cloud" \
-                "Azure DevOps"
-
-            local provider=""
-            local provider_name=""
-            case $CHOICE_RESULT in
-                0) provider="github"; provider_name="GitHub" ;;
-                1) provider="gitlab"; provider_name="GitLab" ;;
-                2) provider="bitbucket-dc"; provider_name="Bitbucket Data Center" ;;
-                3) provider="bitbucket-cloud"; provider_name="Bitbucket Cloud" ;;
-                4) provider="azure-devops"; provider_name="Azure DevOps" ;;
-            esac
-
-            # Check if already configured
-            local already_configured=false
-            for configured_provider in "${SCM_PROVIDERS[@]}"; do
-                if [ "$configured_provider" = "$provider" ]; then
-                    already_configured=true
-                    break
-                fi
-            done
-
-            if [ "$already_configured" = true ]; then
-                echo -e "${YELLOW}$provider_name is already configured. Skipping...${RESET}"
+            if ask_yes_no "Do you already have a .git-credentials file?"; then
+                print_success "HTTPS authentication will use your existing .git-credentials file"
             else
-                # Add provider
-                SCM_PROVIDERS+=("$provider")
+                # Create template .git-credentials file
+                local build_dir=$(dirname "$OUTPUT_DOCKERFILE")
+                local creds_file="$build_dir/.git-credentials"
+                cat > "$creds_file" << 'EOF'
+# Git credentials for HTTPS authentication
+# Format: https://username:token@hostname
+#
+# Examples:
+#   https://myuser:ghp_tokenhere@github.com
+#   https://myuser:glpat-tokenhere@gitlab.com
+#   https://myuser:tokenhere@bitbucket.org
+#
+# Add your credentials below (one per line):
 
-                # Ask for authentication method
-                echo ""
-                if ask_yes_no "Use SSH authentication for $provider_name? (No = HTTPS with PAT)"; then
-                    GIT_AUTH_METHODS+=("ssh")
-
-                    # Ask for SSH key file
-                    local ssh_key=""
-                    ssh_key=$(ask_optional_path "Enter path to SSH private key (e.g., ~/.ssh/id_rsa)")
-
-                    if [ -n "$ssh_key" ]; then
-                        GIT_AUTH_FILES+=("$ssh_key")
-                        print_success "Configured $provider_name with SSH key: $ssh_key"
-                    else
-                        GIT_AUTH_FILES+=("")
-                        echo -e "${YELLOW}Note: SSH key configuration for $provider_name will be included as a comment.${RESET}"
-                        echo -e "${YELLOW}      You'll need to customize it manually.${RESET}"
-                    fi
-                else
-                    GIT_AUTH_METHODS+=("https")
-                    GIT_AUTH_FILES+=("")
-                    print_success "Configured $provider_name with HTTPS (.git-credentials file, load at runtime)"
-                fi
+EOF
+                CREATE_GIT_CREDENTIALS_TEMPLATE=true
+                print_success "Created template .git-credentials file in build context"
             fi
+        fi
 
-            # Ask if they want to configure another
-            echo ""
-            if ! ask_yes_no "Configure another provider?"; then
-                break
-            fi
-        done
-
-        # Confirm configuration
         echo ""
         echo -e "${BOLD}Selected configuration:${RESET}"
-        if [ ${#SCM_PROVIDERS[@]} -eq 0 ]; then
-            echo -e "  Git authentication: None configured"
-        else
-            echo -e "  Git authentication:"
-            for i in "${!SCM_PROVIDERS[@]}"; do
-                local provider="${SCM_PROVIDERS[$i]}"
-                local method="${GIT_AUTH_METHODS[$i]}"
-                local file="${GIT_AUTH_FILES[$i]}"
-
-                # Convert provider code to display name
-                local display_name=""
-                case "$provider" in
-                    github) display_name="GitHub" ;;
-                    gitlab) display_name="GitLab" ;;
-                    bitbucket-dc) display_name="Bitbucket Data Center" ;;
-                    bitbucket-cloud) display_name="Bitbucket Cloud" ;;
-                    azure-devops) display_name="Azure DevOps" ;;
-                esac
-
-                if [ "$method" = "ssh" ]; then
-                    if [ -n "$file" ]; then
-                        echo -e "    - $display_name: SSH ($file)"
-                    else
-                        echo -e "    - $display_name: SSH (no key file specified)"
-                    fi
-                else
-                    echo -e "    - $display_name: HTTPS (.git-credentials)"
-                fi
-            done
+        local any_selected=false
+        if [ "$ENABLE_GIT_SSH" = true ]; then
+            echo -e "  SSH authentication: Will be configured"
+            any_selected=true
+        fi
+        if [ "$ENABLE_GIT_HTTPS" = true ]; then
+            echo -e "  HTTPS authentication: Will be configured"
+            if [ "$CREATE_GIT_CREDENTIALS_TEMPLATE" = true ]; then
+                echo -e "    Template .git-credentials file created"
+            fi
+            any_selected=true
+        fi
+        if [ "$any_selected" = false ]; then
+            echo -e "  No Git authentication needed"
         fi
         echo ""
         if ask_yes_no "Is this correct?"; then
@@ -719,41 +799,49 @@ ask_git_auth() {
 
 # Runtime configuration
 ask_runtime_config() {
-    print_section "Runtime Configuration"
+    while true; do
+        print_section "Runtime Configuration"
 
-    # Java options
-    echo -e "${BOLD}JVM Options${RESET}"
-    print_context "Configure JVM options for the Moderne CLI runtime. These affect memory allocation
-and stack size for LST processing.
+        # Java options
+        echo -e "${BOLD}JVM Options${RESET}"
+        print_context "Configure JVM options for the Moderne CLI runtime. These affect memory allocation
+and stack size for LST processing."
+        echo "Default: -Xmx4g -Xss3m (4GB max heap, 3MB stack size)"
+        echo ""
 
-${BOLD}Default:${RESET} -Xmx4g -Xss3m (4GB max heap, 3MB stack size)"
+        local default_java_opts="-Xmx4g -Xss3m"
+        read -p "$(echo -e "${BOLD}Java options${RESET} (press Enter for default) [${default_java_opts}]: ")" user_java_opts
+        if [ -n "$user_java_opts" ]; then
+            JAVA_OPTIONS="$user_java_opts"
+        else
+            JAVA_OPTIONS="$default_java_opts"
+        fi
 
-    local default_java_opts="-Xmx4g -Xss3m"
-    read -p "$(echo -e "${BOLD}Java options${RESET} (press Enter for default) [${default_java_opts}]: ")" user_java_opts
-    if [ -n "$user_java_opts" ]; then
-        JAVA_OPTIONS="$user_java_opts"
-        print_success "Using custom Java options: $JAVA_OPTIONS"
-    else
-        JAVA_OPTIONS="$default_java_opts"
-        print_success "Using default Java options: $JAVA_OPTIONS"
-    fi
+        # Data directory
+        echo -e "\n${BOLD}Data Directory${RESET}"
+        print_context "The directory where Moderne CLI stores its data, including LST artifacts
+and temporary files."
+        echo "Default: /var/moderne"
+        echo ""
 
-    # Data directory
-    echo -e "\n${BOLD}Data Directory${RESET}"
-    print_context "The directory where Moderne CLI stores its data, including LST artifacts
-and temporary files.
+        local default_data_dir="/var/moderne"
+        read -p "$(echo -e "${BOLD}Data directory${RESET} (press Enter for default) [${default_data_dir}]: ")" user_data_dir
+        if [ -n "$user_data_dir" ]; then
+            DATA_DIR="$user_data_dir"
+        else
+            DATA_DIR="$default_data_dir"
+        fi
 
-${BOLD}Default:${RESET} /var/moderne"
-
-    local default_data_dir="/var/moderne"
-    read -p "$(echo -e "${BOLD}Data directory${RESET} (press Enter for default) [${default_data_dir}]: ")" user_data_dir
-    if [ -n "$user_data_dir" ]; then
-        DATA_DIR="$user_data_dir"
-        print_success "Using custom data directory: $DATA_DIR"
-    else
-        DATA_DIR="$default_data_dir"
-        print_success "Using default data directory: $DATA_DIR"
-    fi
+        echo ""
+        echo -e "${BOLD}Selected configuration:${RESET}"
+        echo -e "  JVM options: $JAVA_OPTIONS"
+        echo -e "  Data directory: $DATA_DIR"
+        echo ""
+        if ask_yes_no "Is this correct?"; then
+            break
+        fi
+        clear
+    done
 
     clear
 }
@@ -804,8 +892,11 @@ show_summary() {
     fi
 
     # Git authentication
-    if [ ${#SCM_PROVIDERS[@]} -gt 0 ]; then
-        echo -e "${GREEN}✓${RESET} Git authentication for: ${SCM_PROVIDERS[*]}"
+    if [ "$ENABLE_GIT_SSH" = true ] || [ "$ENABLE_GIT_HTTPS" = true ]; then
+        local auth_types=()
+        [ "$ENABLE_GIT_SSH" = true ] && auth_types+=("SSH")
+        [ "$ENABLE_GIT_HTTPS" = true ] && auth_types+=("HTTPS")
+        echo -e "${GREEN}✓${RESET} Git authentication: ${auth_types[*]}"
     fi
 
     # Maven
@@ -989,25 +1080,19 @@ generate_dockerfile() {
     fi
 
     # Add Git authentication configuration
-    if [ ${#SCM_PROVIDERS[@]} -gt 0 ]; then
-        echo "# Git authentication for SCM providers" >> "$output"
-        for i in "${!SCM_PROVIDERS[@]}"; do
-            local provider="${SCM_PROVIDERS[$i]}"
-            local auth_method="${GIT_AUTH_METHODS[$i]}"
-            if [ "$auth_method" = "ssh" ]; then
-                local ssh_key_file="${GIT_AUTH_FILES[$i]}"
-                if [ -n "$ssh_key_file" ]; then
-                    local key_basename=$(basename "$ssh_key_file")
-                    echo "# SSH authentication for $provider" >> "$output"
-                    echo "# COPY $key_basename /root/.ssh/id_rsa" >> "$output"
-                    echo "# RUN chmod 600 /root/.ssh/id_rsa" >> "$output"
-                else
-                    echo "# TODO: Configure SSH key for $provider" >> "$output"
-                fi
-            else
-                echo "# HTTPS authentication for $provider (configure via environment variables)" >> "$output"
-            fi
-        done
+    if [ "$ENABLE_GIT_SSH" = true ] || [ "$ENABLE_GIT_HTTPS" = true ]; then
+        echo "# Git authentication" >> "$output"
+
+        if [ "$ENABLE_GIT_SSH" = true ]; then
+            echo "COPY .ssh/ /root/.ssh/" >> "$output"
+            echo "RUN chmod 700 /root/.ssh && chmod 600 /root/.ssh/*" >> "$output"
+        fi
+
+        if [ "$ENABLE_GIT_HTTPS" = true ]; then
+            echo "COPY .git-credentials /root/.git-credentials" >> "$output"
+            echo "RUN chmod 600 /root/.git-credentials && git config --global credential.helper store" >> "$output"
+        fi
+
         echo "" >> "$output"
     fi
 
@@ -1048,14 +1133,48 @@ show_next_steps() {
         ((step++))
     fi
 
+    # Git authentication setup
+    if [ "$ENABLE_GIT_SSH" = true ]; then
+        echo -e "$step. ${YELLOW}Add SSH keys to .ssh/ directory:${RESET}"
+        echo -e "   Copy your SSH private keys to $(dirname $OUTPUT_DOCKERFILE)/.ssh/"
+        echo -e "   ${GRAY}Example: cp ~/.ssh/id_rsa $(dirname $OUTPUT_DOCKERFILE)/.ssh/${RESET}"
+        echo ""
+        ((step++))
+    fi
+
+    if [ "$CREATE_GIT_CREDENTIALS_TEMPLATE" = true ]; then
+        echo -e "$step. ${YELLOW}Fill in .git-credentials file:${RESET}"
+        echo -e "   Edit $(dirname $OUTPUT_DOCKERFILE)/.git-credentials and add your credentials"
+        echo -e "   ${GRAY}Format: https://username:token@hostname${RESET}"
+        echo ""
+        ((step++))
+    elif [ "$ENABLE_GIT_HTTPS" = true ]; then
+        echo -e "$step. ${YELLOW}Copy .git-credentials file:${RESET}"
+        echo -e "   ${CYAN}cp /path/to/your/.git-credentials $(dirname $OUTPUT_DOCKERFILE)/${RESET}"
+        echo ""
+        ((step++))
+    fi
+
     echo -e "$step. ${BOLD}Build your container image:${RESET}"
     echo -e "   ${CYAN}docker build -f $OUTPUT_DOCKERFILE -t moderne/mass-ingest:latest .${RESET}"
     echo ""
     ((step++))
 
     echo -e "$step. ${BOLD}Run the container:${RESET}"
-    echo "   See the mass-ingest-example documentation for detailed run instructions"
-    echo -e "   ${CYAN}https://github.com/moderneinc/mass-ingest-example${RESET}"
+    echo ""
+    echo "   ${BOLD}For Moderne SaaS:${RESET}"
+    echo -e "   ${CYAN}docker run --rm \\"
+    echo "     -e MODERNE_TOKEN=your_token \\"
+    echo "     -e MODERNE_TENANT=your_tenant \\"
+    echo -e "     moderne/mass-ingest:latest${RESET}"
+    echo ""
+    echo "   ${BOLD}For artifact repository:${RESET}"
+    echo -e "   ${CYAN}docker run --rm \\"
+    echo "     -e PUBLISH_URL=https://your-artifactory.com \\"
+    echo "     -e PUBLISH_TOKEN=your_token \\"
+    echo -e "     moderne/mass-ingest:latest${RESET}"
+    echo ""
+    echo "   ${GRAY}See documentation for additional options (volumes, networking, etc.)${RESET}"
     echo ""
 
     echo -e "${BOLD}Documentation:${RESET}"
