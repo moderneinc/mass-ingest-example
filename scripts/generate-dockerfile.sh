@@ -29,6 +29,7 @@ CLI_JAR_PATH=""
 ENABLE_MAVEN=false
 MAVEN_VERSION="3.9.11"
 ENABLE_GRADLE=false
+GRADLE_VERSION="8.14"
 ENABLE_BAZEL=false
 
 # Development platforms & runtimes
@@ -59,7 +60,12 @@ DATA_DIR="/var/moderne"
 # Helper
 CHOICE_RESULT=0
 
+# Output files
 OUTPUT_DOCKERFILE="Dockerfile.generated"
+GENERATE_DOCKER_COMPOSE=false
+OUTPUT_DOCKER_COMPOSE="docker-compose.yml"
+OUTPUT_ENV_EXAMPLE=".env.example"
+DATA_MOUNT_DIR=""
 
 # Helper functions
 print_header() {
@@ -452,6 +458,7 @@ ask_gradle_build_config() {
     while true; do
         # Reset for restart
         ENABLE_GRADLE=false
+        GRADLE_VERSION="8.14"
 
         print_section "Gradle Configuration"
 
@@ -459,7 +466,7 @@ ask_gradle_build_config() {
         echo ""
 
         print_context "${BOLD}Gradle wrappers (gradlew):\033[22m${GRAY} Many projects include wrapper scripts that don't require Gradle to be pre-installed.
-${BOLD}Pre-installed Gradle:\033[22m${GRAY} Older projects or specific scenarios may need Gradle 8.14 available globally."
+${BOLD}Pre-installed Gradle:\033[22m${GRAY} Older projects or specific scenarios may need Gradle available globally."
 
         if ! ask_yes_no "Do any of your repositories use Gradle?"; then
             clear
@@ -469,12 +476,19 @@ ${BOLD}Pre-installed Gradle:\033[22m${GRAY} Older projects or specific scenarios
         echo ""
         if ask_yes_no "Do you need Gradle pre-installed? (Say 'no' if all projects use gradlew wrapper)"; then
             ENABLE_GRADLE=true
+
+            echo ""
+            echo -e "${BOLD}Enter Gradle version (default: 8.14):${RESET}"
+            read -r version_input
+            if [ -n "$version_input" ]; then
+                GRADLE_VERSION="$version_input"
+            fi
         fi
 
         echo ""
         echo -e "${BOLD}Selected configuration:${RESET}"
         if [ "$ENABLE_GRADLE" = true ]; then
-            echo -e "  Gradle: Version 8.14 will be installed"
+            echo -e "  Gradle: Version $GRADLE_VERSION will be installed"
         else
             echo -e "  Gradle: Not installed (projects use wrappers)"
         fi
@@ -846,6 +860,55 @@ and temporary files."
     clear
 }
 
+# Docker Compose configuration
+ask_docker_compose() {
+    print_section "Docker Compose"
+
+    echo "Docker Compose simplifies container management with configuration files."
+    echo ""
+
+    print_context "${BOLD}What you get:\033[22m${GRAY} A docker-compose.yml and .env.example file for easier startup.
+Just edit .env with your credentials and run 'docker compose up'."
+
+    if ask_yes_no "Generate Docker Compose files?"; then
+        GENERATE_DOCKER_COMPOSE=true
+        print_success "Docker Compose files will be generated"
+    else
+        print_success "Will use manual docker commands instead"
+    fi
+
+    echo ""
+    echo ""
+
+    # Ask about data persistence
+    print_section "Data Persistence"
+
+    echo "The mass-ingest process generates LST artifacts and metadata during processing."
+    echo ""
+
+    print_context "${BOLD}Persist data:\033[22m${GRAY} Mount a local directory to save generated LSTs and processing state.
+This allows you to stop and restart the container without losing progress.
+
+${BOLD}No persistence:\033[22m${GRAY} Data stays inside the container. Useful for testing or one-time runs."
+
+    if ask_yes_no "Mount a data directory for persistence?"; then
+        echo ""
+        echo -e "${BOLD}Enter data directory path (default: ./data):${RESET}"
+        read -r dir_input
+        if [ -z "$dir_input" ]; then
+            DATA_MOUNT_DIR="./data"
+        else
+            DATA_MOUNT_DIR="$dir_input"
+        fi
+        print_success "Will mount $DATA_MOUNT_DIR to /var/moderne"
+    else
+        DATA_MOUNT_DIR=""
+        print_success "No data directory mount (ephemeral storage)"
+    fi
+
+    clear
+}
+
 # Show configuration summary
 show_summary() {
     print_section "Configuration Summary"
@@ -871,7 +934,7 @@ show_summary() {
 
     # Build tools
     [ "$ENABLE_MAVEN" = true ] && echo -e "${GREEN}✓${RESET} Apache Maven $MAVEN_VERSION"
-    [ "$ENABLE_GRADLE" = true ] && echo -e "${GREEN}✓${RESET} Gradle 8.14"
+    [ "$ENABLE_GRADLE" = true ] && echo -e "${GREEN}✓${RESET} Gradle $GRADLE_VERSION"
     [ "$ENABLE_BAZEL" = true ] && echo -e "${GREEN}✓${RESET} Bazel build system"
 
     # Development platforms & runtimes
@@ -909,6 +972,24 @@ show_summary() {
     # Runtime
     echo -e "${GREEN}✓${RESET} Java options: $JAVA_OPTIONS"
     echo -e "${GREEN}✓${RESET} Data directory: $DATA_DIR"
+
+    echo ""
+    echo -e "${BOLD}Deployment configuration:${RESET}"
+    echo ""
+
+    # Docker Compose
+    if [ "$GENERATE_DOCKER_COMPOSE" = true ]; then
+        echo -e "${GREEN}✓${RESET} Docker Compose files will be generated"
+    else
+        echo -e "${CYAN}○${RESET} Docker Compose: Manual docker commands"
+    fi
+
+    # Data persistence
+    if [ -n "$DATA_MOUNT_DIR" ]; then
+        echo -e "${GREEN}✓${RESET} Data mount: $DATA_MOUNT_DIR → /var/moderne"
+    else
+        echo -e "${CYAN}○${RESET} Data persistence: Ephemeral (no volume mount)"
+    fi
 
     echo ""
 }
@@ -1015,7 +1096,8 @@ generate_dockerfile() {
 
     # Add build tools
     if [ "$ENABLE_GRADLE" = true ]; then
-        cat "$TEMPLATES_DIR/10-gradle.Dockerfile" >> "$output"
+        # Replace hardcoded Gradle version with user's chosen version
+        sed "s/8\.14/$GRADLE_VERSION/g" "$TEMPLATES_DIR/10-gradle.Dockerfile" >> "$output"
         echo "" >> "$output"
     fi
 
@@ -1155,27 +1237,57 @@ show_next_steps() {
         ((step++))
     fi
 
-    echo -e "$step. ${BOLD}Build your container image:${RESET}"
-    echo -e "   ${CYAN}docker build -f $OUTPUT_DOCKERFILE -t moderne/mass-ingest:latest .${RESET}"
-    echo ""
-    ((step++))
+    # Different instructions based on whether docker-compose was generated
+    if [ "$GENERATE_DOCKER_COMPOSE" = true ]; then
+        # Docker Compose workflow
+        local output_dir=$(dirname "$OUTPUT_DOCKERFILE")
+        echo -e "$step. ${BOLD}Configure environment:${RESET}"
+        echo -e "   ${CYAN}cp $output_dir/.env.example $output_dir/.env${RESET}"
+        echo -e "   Edit $output_dir/.env and fill in your credentials"
+        echo ""
+        ((step++))
 
-    echo -e "$step. ${BOLD}Run the container:${RESET}"
-    echo ""
-    echo "   ${BOLD}For Moderne SaaS:${RESET}"
-    echo -e "   ${CYAN}docker run --rm \\"
-    echo "     -e MODERNE_TOKEN=your_token \\"
-    echo "     -e MODERNE_TENANT=your_tenant \\"
-    echo -e "     moderne/mass-ingest:latest${RESET}"
-    echo ""
-    echo "   ${BOLD}For artifact repository:${RESET}"
-    echo -e "   ${CYAN}docker run --rm \\"
-    echo "     -e PUBLISH_URL=https://your-artifactory.com \\"
-    echo "     -e PUBLISH_TOKEN=your_token \\"
-    echo -e "     moderne/mass-ingest:latest${RESET}"
-    echo ""
-    echo "   ${GRAY}See documentation for additional options (volumes, networking, etc.)${RESET}"
-    echo ""
+        echo -e "$step. ${BOLD}Start the container:${RESET}"
+        echo -e "   ${CYAN}docker compose up${RESET}"
+        echo ""
+        echo "   ${GRAY}The container will build automatically and start processing${RESET}"
+        echo ""
+    else
+        # Manual docker workflow
+        echo -e "$step. ${BOLD}Build your container image:${RESET}"
+        echo -e "   ${CYAN}docker build -f $OUTPUT_DOCKERFILE -t moderne/mass-ingest:latest .${RESET}"
+        echo ""
+        ((step++))
+
+        echo -e "$step. ${BOLD}Run the container:${RESET}"
+        echo ""
+        echo -e "   ${CYAN}docker run --rm"
+        echo "     -p 8080:8080"
+
+        # Add data volume mount if configured
+        if [ -n "$DATA_MOUNT_DIR" ]; then
+            echo "     -v $DATA_MOUNT_DIR:/var/moderne"
+        fi
+
+        echo "     -e PUBLISH_URL=https://your-artifactory.com/artifactory/moderne-ingest/"
+        echo "     -e PUBLISH_USER=your-username"
+        echo "     -e PUBLISH_PASSWORD=your-password"
+
+        # Add Git authentication volume mounts if configured
+        if [ "$ENABLE_GIT_SSH" = true ]; then
+            echo "     -v \$(pwd)/.ssh:/root/.ssh:ro"
+        fi
+        if [ "$ENABLE_GIT_HTTPS" = true ]; then
+            echo "     -v \$(pwd)/.git-credentials:/root/.git-credentials:ro"
+        fi
+
+        echo -e "     moderne/mass-ingest:latest${RESET}"
+        echo ""
+        echo "   ${GRAY}Optional: Add Moderne platform integration${RESET}"
+        echo -e "   ${GRAY}  -e MODERNE_TENANT=https://app.moderne.io${RESET}"
+        echo -e "   ${GRAY}  -e MODERNE_TOKEN=your-token${RESET}"
+        echo ""
+    fi
 
     echo -e "${BOLD}Documentation:${RESET}"
     echo "  • Moderne CLI: https://docs.moderne.io/user-documentation/moderne-cli"
@@ -1183,6 +1295,103 @@ show_next_steps() {
     echo ""
 
     echo -e "${GREEN}${BOLD}Happy ingesting! 🚀${RESET}\n"
+}
+
+# Generate docker-compose.yml and .env.example files
+generate_docker_compose() {
+    local output_dir=$(dirname "$OUTPUT_DOCKERFILE")
+    local compose_file="$output_dir/$OUTPUT_DOCKER_COMPOSE"
+    local env_file="$output_dir/$OUTPUT_ENV_EXAMPLE"
+
+    echo ""
+    echo -e "${CYAN}${BOLD}Generating Docker Compose files...${RESET}"
+    echo ""
+
+    # Generate docker-compose.yml
+    cat > "$compose_file" << 'EOF'
+services:
+  mass-ingest:
+    build:
+      context: .
+EOF
+
+    # Add build args if downloading CLI from Maven
+    if [ "$MODCLI_SOURCE" = "maven" ]; then
+        cat >> "$compose_file" << 'EOF'
+      args:
+        MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION:-}
+EOF
+    fi
+
+    cat >> "$compose_file" << 'EOF'
+    env_file:
+      - .env
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+EOF
+
+    # Add data volume mount if configured
+    if [ -n "$DATA_MOUNT_DIR" ]; then
+        cat >> "$compose_file" << EOF
+    volumes:
+      - $DATA_MOUNT_DIR:/var/moderne
+EOF
+    else
+        cat >> "$compose_file" << 'EOF'
+    volumes:
+EOF
+    fi
+
+    # Add Git authentication volume mounts
+    if [ "$ENABLE_GIT_HTTPS" = true ]; then
+        cat >> "$compose_file" << 'EOF'
+      # Git HTTPS credentials (ensure .git-credentials exists)
+      - ./.git-credentials:/root/.git-credentials:ro
+EOF
+    fi
+
+    if [ "$ENABLE_GIT_SSH" = true ]; then
+        cat >> "$compose_file" << 'EOF'
+      # Git SSH keys (ensure .ssh directory exists)
+      - ./.ssh:/root/.ssh:ro
+EOF
+    fi
+
+    # Generate .env.example
+    cat > "$env_file" << 'EOF'
+# ==============================================================================
+# Mass-ingest configuration
+# Copy this file to '.env' and fill in your actual values
+# ==============================================================================
+
+# Required: Artifact repository configuration
+PUBLISH_URL=https://your-artifactory.com/artifactory/moderne-ingest/
+
+# Option 1: Username/password authentication
+PUBLISH_USER=your-username
+PUBLISH_PASSWORD=your-password
+
+# Option 2: Token authentication (uncomment to use instead of user/password)
+# PUBLISH_TOKEN=your-jfrog-api-token
+
+# Optional: Moderne platform configuration
+# MODERNE_TENANT=https://app.moderne.io
+# MODERNE_TOKEN=your-moderne-token
+EOF
+
+    # Add CLI version option if downloading from Maven
+    if [ "$MODCLI_SOURCE" = "maven" ]; then
+        cat >> "$env_file" << 'EOF'
+
+# Optional: CLI version (defaults to latest stable if not set)
+# MODERNE_CLI_VERSION=3.50.0
+EOF
+    fi
+
+    echo -e "${GREEN}✓ Generated $compose_file${RESET}"
+    echo -e "${GREEN}✓ Generated $env_file${RESET}"
+    echo ""
 }
 
 # Main flow
@@ -1198,11 +1407,17 @@ main() {
     ask_security_config
     ask_git_auth
     ask_runtime_config
+    ask_docker_compose
     show_summary
 
     echo ""
     if ask_yes_no "Generate Dockerfile with this configuration?"; then
         generate_dockerfile
+
+        if [ "$GENERATE_DOCKER_COMPOSE" = true ]; then
+            generate_docker_compose
+        fi
+
         show_next_steps
     else
         echo -e "\n${YELLOW}Dockerfile generation cancelled.${RESET}\n"
