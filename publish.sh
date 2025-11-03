@@ -125,11 +125,11 @@ configure_credentials() {
     mod config moderne edit --token="${MODERNE_TOKEN}" "${MODERNE_TENANT}"
   fi
 
-  if [ -n "${GIT_CREDENTIALS}" ]; then
+  if [ -n "${GIT_CREDENTIALS:-}" ]; then
     echo -e "${GIT_CREDENTIALS}" > /root/.git-credentials
   fi
 
-  if [ -n "${GIT_SSH_CREDENTIALS}" ]; then
+  if [ -n "${GIT_SSH_CREDENTIALS:-}" ]; then
     mkdir -p /root/.ssh
     echo -e "${GIT_SSH_CREDENTIALS}" > /root/.ssh/private-key
     chmod 600 /root/.ssh/private-key
