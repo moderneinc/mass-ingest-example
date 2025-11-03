@@ -257,58 +257,98 @@ configure_github() {
     clear
     print_section "GitHub Configuration"
 
-    print_context "We'll fetch all repositories from a GitHub organization.
-
-GitHub CLI (gh) will be used for authentication.
-Make sure you've already run 'gh auth login'.
-Learn more: https://cli.github.com/manual/gh_auth_login"
+    print_context "We'll fetch all repositories from a GitHub organization."
 
     ask_choice "Which GitHub service?" "GitHub.com (cloud)" "GitHub Enterprise Server (on-prem)"
 
     local github_url="https://github.com"
+    local api_url="https://api.github.com"
     if [ "$CHOICE_RESULT" -eq 1 ]; then
         github_url=$(ask_input "GitHub Enterprise Server URL")
+        api_url="${github_url}/api/v3"
     fi
 
     local org=$(ask_input "Organization or user name")
+
+    # Check if gh CLI is available (FORCE_GITHUB_API_MODE can be set for testing)
+    local token=""
+    if [ "$FORCE_GITHUB_API_MODE" = "true" ]; then
+        echo ""
+        print_warning "API mode forced (FORCE_GITHUB_API_MODE=true)"
+        print_context "You'll need a Personal Access Token with 'repo' scope.
+Create one at: ${github_url}/settings/tokens"
+        token=$(ask_secret "GitHub Personal Access Token")
+    elif command -v gh &> /dev/null; then
+        echo ""
+        print_context "GitHub CLI (gh) detected. We'll use it for authentication.
+Make sure you've already run 'gh auth login'.
+Learn more: https://cli.github.com/manual/gh_auth_login"
+    else
+        echo ""
+        print_warning "GitHub CLI (gh) not found. Falling back to API mode."
+        print_context "You'll need a Personal Access Token with 'repo' scope.
+Create one at: ${github_url}/settings/tokens"
+        token=$(ask_secret "GitHub Personal Access Token")
+    fi
 
     echo ""
     print_success "GitHub configuration complete"
 
     # Fetch immediately
-    fetch_from_github "$github_url" "$org"
+    fetch_from_github "$github_url" "$org" "$token" "$api_url"
 }
 
 fetch_from_github() {
     local github_url="$1"
     local org="$2"
+    local token="$3"
+    local api_url="$4"
 
     print_section "Fetching from GitHub: $org"
 
     local csv_file="$TEMP_DIR/github_${org}.csv"
 
-    if [[ "$github_url" != "https://github.com" ]]; then
-        export GH_HOST="${github_url#https://}"
+    # Build command arguments
+    local cmd_args=(bash "$FETCHERS_DIR/github.sh" "$org")
+
+    if [ -n "$token" ]; then
+        # API mode - pass token and api_url
+        cmd_args+=("$token" "$api_url")
+    else
+        # CLI mode - set GH_HOST for enterprise
+        if [[ "$github_url" != "https://github.com" ]]; then
+            export GH_HOST="${github_url#https://}"
+        fi
     fi
 
-    if run_with_progress "Fetching repositories" bash "$FETCHERS_DIR/github.sh" "$org" "$csv_file"; then
+    if run_with_progress "Fetching repositories" "${cmd_args[@]}" "$csv_file"; then
         local count=$(tail -n +2 "$csv_file" 2>/dev/null | wc -l | tr -d ' ')
-        print_success "Fetched $count repositories from GitHub"
 
-        # Show formatted preview
-        echo ""
-        echo -e "${CYAN}Preview (first 2 repos):${RESET}"
-        tail -n +2 "$csv_file" | head -2 | while IFS=, read -r cloneUrl branch origin path; do
-            # Remove quotes for display
-            cloneUrl=$(echo "$cloneUrl" | sed 's/^"//;s/"$//')
-            branch=$(echo "$branch" | sed 's/^"//;s/"$//')
-            origin=$(echo "$origin" | sed 's/^"//;s/"$//')
-            path=$(echo "$path" | sed 's/^"//;s/"$//')
-            echo -e "${GRAY}  • $path${RESET} ${CYAN}($branch)${RESET}"
-        done
+        if [ "$count" -eq 0 ]; then
+            print_error "No repositories found in GitHub organization: $org"
+            FETCH_RESULTS+=("GitHub|failure|0")
+        else
+            print_success "Fetched $count repositories from GitHub"
 
-        REPO_SOURCES+=("$csv_file")
-        FETCH_RESULTS+=("GitHub:success:$count")
+            # Show formatted preview
+            echo ""
+            if [ "$count" -eq 1 ]; then
+                echo -e "${CYAN}Preview:${RESET}"
+            else
+                echo -e "${CYAN}Preview (first 2 repos):${RESET}"
+            fi
+            tail -n +2 "$csv_file" | head -2 | while IFS=, read -r cloneUrl branch origin path; do
+                # Remove quotes for display
+                cloneUrl=$(echo "$cloneUrl" | sed 's/^"//;s/"$//')
+                branch=$(echo "$branch" | sed 's/^"//;s/"$//')
+                origin=$(echo "$origin" | sed 's/^"//;s/"$//')
+                path=$(echo "$path" | sed 's/^"//;s/"$//')
+                echo -e "${GRAY}  • $path${RESET} ${CYAN}($branch)${RESET}"
+            done
+
+            REPO_SOURCES+=("$csv_file")
+            FETCH_RESULTS+=("GitHub|success|$count")
+        fi
     else
         local error_detail=$(parse_error_message "$csv_file")
         print_error "Failed to fetch repositories from GitHub"
@@ -317,7 +357,7 @@ fetch_from_github() {
         else
             print_warning "Make sure 'gh auth login' is configured correctly"
         fi
-        FETCH_RESULTS+=("GitHub:failure:0")
+        FETCH_RESULTS+=("GitHub|failure|0")
     fi
 
     if [[ "$github_url" != "https://github.com" ]]; then
@@ -344,11 +384,11 @@ You can fetch from a specific group or all accessible repositories."
 
     local group=""
     if ask_yes_no "Fetch from a specific group?"; then
-        group=$(ask_input "Group path (e.g., moderneinc/nested)")
+        group=$(ask_input "Group path (e.g., openrewrite/recipes)")
     fi
 
     print_context "You'll need a GitLab Personal Access Token with 'read_api' scope.
-Create one at: ${gitlab_url}/-/profile/personal_access_tokens"
+Create one at: ${gitlab_url}/-/user_settings/personal_access_tokens"
 
     local token=$(ask_secret "GitLab access token")
 
@@ -380,22 +420,32 @@ fetch_from_gitlab() {
 
     if run_with_progress "Fetching repositories" "${cmd_args[@]}" "$csv_file"; then
         local count=$(tail -n +2 "$csv_file" 2>/dev/null | wc -l | tr -d ' ')
-        print_success "Fetched $count repositories from GitLab"
 
-        # Show formatted preview
-        echo ""
-        echo -e "${CYAN}Preview (first 2 repos):${RESET}"
-        tail -n +2 "$csv_file" | head -2 | while IFS=, read -r cloneUrl branch origin path; do
-            # Remove quotes for display
-            cloneUrl=$(echo "$cloneUrl" | sed 's/^"//;s/"$//')
-            branch=$(echo "$branch" | sed 's/^"//;s/"$//')
-            origin=$(echo "$origin" | sed 's/^"//;s/"$//')
-            path=$(echo "$path" | sed 's/^"//;s/"$//')
-            echo -e "${GRAY}  • $path${RESET} ${CYAN}($branch)${RESET}"
-        done
+        if [ "$count" -eq 0 ]; then
+            print_error "No repositories found in $display_name"
+            FETCH_RESULTS+=("$display_name|failure|0")
+        else
+            print_success "Fetched $count repositories from GitLab"
 
-        REPO_SOURCES+=("$csv_file")
-        FETCH_RESULTS+=("$display_name:success:$count")
+            # Show formatted preview
+            echo ""
+            if [ "$count" -eq 1 ]; then
+                echo -e "${CYAN}Preview:${RESET}"
+            else
+                echo -e "${CYAN}Preview (first 2 repos):${RESET}"
+            fi
+            tail -n +2 "$csv_file" | head -2 | while IFS=, read -r cloneUrl branch origin path; do
+                # Remove quotes for display
+                cloneUrl=$(echo "$cloneUrl" | sed 's/^"//;s/"$//')
+                branch=$(echo "$branch" | sed 's/^"//;s/"$//')
+                origin=$(echo "$origin" | sed 's/^"//;s/"$//')
+                path=$(echo "$path" | sed 's/^"//;s/"$//')
+                echo -e "${GRAY}  • $path${RESET} ${CYAN}($branch)${RESET}"
+            done
+
+            REPO_SOURCES+=("$csv_file")
+            FETCH_RESULTS+=("$display_name|success|$count")
+        fi
     else
         local error_detail=$(parse_error_message "$csv_file")
         print_error "Failed to fetch repositories from GitLab"
@@ -404,7 +454,7 @@ fetch_from_gitlab() {
         else
             print_warning "Check that your token has 'read_api' scope and is valid"
         fi
-        FETCH_RESULTS+=("$display_name:failure:0")
+        FETCH_RESULTS+=("$display_name|failure|0")
     fi
 
     unset AUTH_TOKEN
@@ -416,11 +466,7 @@ configure_azure() {
     clear
     print_section "Azure DevOps Configuration"
 
-    print_context "We'll fetch repositories from an Azure DevOps project.
-The Azure CLI (az) will be used for authentication.
-
-Make sure you've already run 'az login' to authenticate.
-Learn more: https://learn.microsoft.com/en-us/cli/azure/authenticate-azure-cli"
+    print_context "We'll fetch repositories from an Azure DevOps project."
 
     local organization=$(ask_input "Organization name")
     local project=$(ask_input "Project name")
@@ -430,17 +476,39 @@ Learn more: https://learn.microsoft.com/en-us/cli/azure/authenticate-azure-cli"
         use_ssh=true
     fi
 
+    # Check if az CLI is available (FORCE_AZURE_API_MODE can be set for testing)
+    local pat=""
+    if [ "$FORCE_AZURE_API_MODE" = "true" ]; then
+        echo ""
+        print_warning "API mode forced (FORCE_AZURE_API_MODE=true)"
+        print_context "You'll need a Personal Access Token with 'Code (read)' scope.
+Create one at: https://dev.azure.com/$organization/_usersSettings/tokens"
+        pat=$(ask_secret "Azure DevOps Personal Access Token")
+    elif command -v az &> /dev/null; then
+        echo ""
+        print_context "Azure CLI (az) detected. We'll use it for authentication.
+Make sure you've already run 'az login' to authenticate.
+Learn more: https://learn.microsoft.com/en-us/cli/azure/authenticate-azure-cli"
+    else
+        echo ""
+        print_warning "Azure CLI (az) not found. Falling back to API mode."
+        print_context "You'll need a Personal Access Token with 'Code (read)' scope.
+Create one at: https://dev.azure.com/$organization/_usersSettings/tokens"
+        pat=$(ask_secret "Azure DevOps Personal Access Token")
+    fi
+
     echo ""
     print_success "Azure DevOps configuration complete"
 
     # Fetch immediately
-    fetch_from_azure "$organization" "$project" "$use_ssh"
+    fetch_from_azure "$organization" "$project" "$use_ssh" "$pat"
 }
 
 fetch_from_azure() {
     local organization="$1"
     local project="$2"
     local use_ssh="$3"
+    local pat="$4"
 
     print_section "Fetching from Azure DevOps: $organization/$project"
 
@@ -450,25 +518,38 @@ fetch_from_azure() {
     if [ "$use_ssh" = true ]; then
         cmd_args+=(-s)
     fi
+    if [ -n "$pat" ]; then
+        cmd_args+=(-t "$pat")
+    fi
 
     if run_with_progress "Fetching repositories" "${cmd_args[@]}" "$csv_file"; then
         local count=$(tail -n +2 "$csv_file" 2>/dev/null | wc -l | tr -d ' ')
-        print_success "Fetched $count repositories from Azure DevOps"
 
-        # Show formatted preview
-        echo ""
-        echo -e "${CYAN}Preview (first 2 repos):${RESET}"
-        tail -n +2 "$csv_file" | head -2 | while IFS=, read -r cloneUrl branch origin path; do
-            # Remove quotes for display
-            cloneUrl=$(echo "$cloneUrl" | sed 's/^"//;s/"$//')
-            branch=$(echo "$branch" | sed 's/^"//;s/"$//')
-            origin=$(echo "$origin" | sed 's/^"//;s/"$//')
-            path=$(echo "$path" | sed 's/^"//;s/"$//')
-            echo -e "${GRAY}  • $path${RESET} ${CYAN}($branch)${RESET}"
-        done
+        if [ "$count" -eq 0 ]; then
+            print_error "No repositories found in Azure DevOps project: $organization/$project"
+            FETCH_RESULTS+=("Azure DevOps|failure|0")
+        else
+            print_success "Fetched $count repositories from Azure DevOps"
 
-        REPO_SOURCES+=("$csv_file")
-        FETCH_RESULTS+=("Azure DevOps:success:$count")
+            # Show formatted preview
+            echo ""
+            if [ "$count" -eq 1 ]; then
+                echo -e "${CYAN}Preview:${RESET}"
+            else
+                echo -e "${CYAN}Preview (first 2 repos):${RESET}"
+            fi
+            tail -n +2 "$csv_file" | head -2 | while IFS=, read -r cloneUrl branch origin path; do
+                # Remove quotes for display
+                cloneUrl=$(echo "$cloneUrl" | sed 's/^"//;s/"$//')
+                branch=$(echo "$branch" | sed 's/^"//;s/"$//')
+                origin=$(echo "$origin" | sed 's/^"//;s/"$//')
+                path=$(echo "$path" | sed 's/^"//;s/"$//')
+                echo -e "${GRAY}  • $path${RESET} ${CYAN}($branch)${RESET}"
+            done
+
+            REPO_SOURCES+=("$csv_file")
+            FETCH_RESULTS+=("Azure DevOps|success|$count")
+        fi
     else
         local error_detail=$(parse_error_message "$csv_file")
         print_error "Failed to fetch repositories from Azure DevOps"
@@ -477,7 +558,7 @@ fetch_from_azure() {
         else
             print_warning "Make sure 'az login' is configured correctly"
         fi
-        FETCH_RESULTS+=("Azure DevOps:failure:0")
+        FETCH_RESULTS+=("Azure DevOps|failure|0")
     fi
 
     echo ""
@@ -526,22 +607,32 @@ fetch_from_bitbucket_datacenter() {
 
     if run_with_progress "Fetching repositories" bash "$FETCHERS_DIR/bitbucket-data-center.sh" "$bitbucket_url" "$token" "$protocol" "$csv_file"; then
         local count=$(tail -n +2 "$csv_file" 2>/dev/null | wc -l | tr -d ' ')
-        print_success "Fetched $count repositories from Bitbucket"
 
-        # Show formatted preview
-        echo ""
-        echo -e "${CYAN}Preview (first 2 repos):${RESET}"
-        tail -n +2 "$csv_file" | head -2 | while IFS=, read -r cloneUrl branch origin path; do
-            # Remove quotes for display
-            cloneUrl=$(echo "$cloneUrl" | sed 's/^"//;s/"$//')
-            branch=$(echo "$branch" | sed 's/^"//;s/"$//')
-            origin=$(echo "$origin" | sed 's/^"//;s/"$//')
-            path=$(echo "$path" | sed 's/^"//;s/"$//')
-            echo -e "${GRAY}  • $path${RESET} ${CYAN}($branch)${RESET}"
-        done
+        if [ "$count" -eq 0 ]; then
+            print_error "No repositories found in Bitbucket Data Center"
+            FETCH_RESULTS+=("Bitbucket Data Center|failure|0")
+        else
+            print_success "Fetched $count repositories from Bitbucket"
 
-        REPO_SOURCES+=("$csv_file")
-        FETCH_RESULTS+=("Bitbucket Data Center:success:$count")
+            # Show formatted preview
+            echo ""
+            if [ "$count" -eq 1 ]; then
+                echo -e "${CYAN}Preview:${RESET}"
+            else
+                echo -e "${CYAN}Preview (first 2 repos):${RESET}"
+            fi
+            tail -n +2 "$csv_file" | head -2 | while IFS=, read -r cloneUrl branch origin path; do
+                # Remove quotes for display
+                cloneUrl=$(echo "$cloneUrl" | sed 's/^"//;s/"$//')
+                branch=$(echo "$branch" | sed 's/^"//;s/"$//')
+                origin=$(echo "$origin" | sed 's/^"//;s/"$//')
+                path=$(echo "$path" | sed 's/^"//;s/"$//')
+                echo -e "${GRAY}  • $path${RESET} ${CYAN}($branch)${RESET}"
+            done
+
+            REPO_SOURCES+=("$csv_file")
+            FETCH_RESULTS+=("Bitbucket Data Center|success|$count")
+        fi
     else
         local error_detail=$(parse_error_message "$csv_file")
         print_error "Failed to fetch repositories from Bitbucket"
@@ -550,7 +641,7 @@ fetch_from_bitbucket_datacenter() {
         else
             print_warning "Check that your HTTP Access Token has repository read permissions"
         fi
-        FETCH_RESULTS+=("Bitbucket Data Center:failure:0")
+        FETCH_RESULTS+=("Bitbucket Data Center|failure|0")
     fi
 
     unset AUTH_TOKEN
@@ -602,22 +693,32 @@ fetch_from_bitbucket_cloud() {
 
     if run_with_progress "Fetching repositories" bash "$FETCHERS_DIR/bitbucket-cloud.sh" -u "$username" -p "$api_token" -c "$protocol" "$workspace" "$csv_file"; then
         local count=$(tail -n +2 "$csv_file" 2>/dev/null | wc -l | tr -d ' ')
-        print_success "Fetched $count repositories from Bitbucket Cloud"
 
-        # Show formatted preview
-        echo ""
-        echo -e "${CYAN}Preview (first 2 repos):${RESET}"
-        tail -n +2 "$csv_file" | head -2 | while IFS=, read -r cloneUrl branch origin path; do
-            # Remove quotes for display
-            cloneUrl=$(echo "$cloneUrl" | sed 's/^"//;s/"$//')
-            branch=$(echo "$branch" | sed 's/^"//;s/"$//')
-            origin=$(echo "$origin" | sed 's/^"//;s/"$//')
-            path=$(echo "$path" | sed 's/^"//;s/"$//')
-            echo -e "${GRAY}  • $path${RESET} ${CYAN}($branch)${RESET}"
-        done
+        if [ "$count" -eq 0 ]; then
+            print_error "No repositories found in Bitbucket Cloud workspace: $workspace"
+            FETCH_RESULTS+=("Bitbucket Cloud|failure|0")
+        else
+            print_success "Fetched $count repositories from Bitbucket Cloud"
 
-        REPO_SOURCES+=("$csv_file")
-        FETCH_RESULTS+=("Bitbucket Cloud:success:$count")
+            # Show formatted preview
+            echo ""
+            if [ "$count" -eq 1 ]; then
+                echo -e "${CYAN}Preview:${RESET}"
+            else
+                echo -e "${CYAN}Preview (first 2 repos):${RESET}"
+            fi
+            tail -n +2 "$csv_file" | head -2 | while IFS=, read -r cloneUrl branch origin path; do
+                # Remove quotes for display
+                cloneUrl=$(echo "$cloneUrl" | sed 's/^"//;s/"$//')
+                branch=$(echo "$branch" | sed 's/^"//;s/"$//')
+                origin=$(echo "$origin" | sed 's/^"//;s/"$//')
+                path=$(echo "$path" | sed 's/^"//;s/"$//')
+                echo -e "${GRAY}  • $path${RESET} ${CYAN}($branch)${RESET}"
+            done
+
+            REPO_SOURCES+=("$csv_file")
+            FETCH_RESULTS+=("Bitbucket Cloud|success|$count")
+        fi
     else
         local error_detail=$(parse_error_message "$csv_file")
         print_error "Failed to fetch repositories from Bitbucket Cloud"
@@ -626,7 +727,7 @@ fetch_from_bitbucket_cloud() {
         else
             print_warning "Check that your API token has repository read permissions and username is correct"
         fi
-        FETCH_RESULTS+=("Bitbucket Cloud:failure:0")
+        FETCH_RESULTS+=("Bitbucket Cloud|failure|0")
     fi
 
     unset CLONE_PROTOCOL
@@ -673,10 +774,13 @@ configure_org_structure() {
 
     print_context "Repositories can be organized using org columns:
   - Simple: Use 'ALL' for a flat structure
-  - Hierarchical: Extract org hierarchy from repository paths
+  - Hierarchical: Extract org hierarchy from repository paths (excluding repo name)
 
-Example hierarchical org columns for 'moderneinc/nested/sub/repo':
-  org1=sub, org2=nested, org3=moderneinc, org4=ALL"
+Example hierarchical org columns for 'openrewrite/recipes/java/security':
+  org1=java, org2=recipes, org3=openrewrite, org4=ALL
+
+For GitHub (e.g., 'openrewrite/rewrite'):
+  org1=openrewrite, org2=ALL"
 
     if ask_yes_no "Use hierarchical organization structure?"; then
         USE_HIERARCHICAL_ORGS=true
@@ -713,7 +817,7 @@ show_fetch_summary() {
 
     echo ""
     for result in "${FETCH_RESULTS[@]}"; do
-        IFS=':' read -r provider status count <<< "$result"
+        IFS='|' read -r provider status count <<< "$result"
         if [ "$status" = "success" ]; then
             echo -e "${GREEN}✓${RESET} ${BOLD}$provider${RESET}: $count repositories"
             ((total_success++))
@@ -761,11 +865,13 @@ generate_repos_csv() {
 
             if [ "$USE_HIERARCHICAL_ORGS" = true ]; then
                 # Extract org hierarchy from path (deepest to shallowest)
+                # Exclude the last segment (repository name)
                 IFS='/' read -ra parts <<< "$path"
                 local org_columns=()
 
-                # Add path components in reverse (deepest first)
-                for ((j=${#parts[@]}-1; j>=0; j--)); do
+                # Add path components in reverse (deepest first), excluding the repo name
+                # Start from second-to-last element (${#parts[@]}-2) to exclude repo name
+                for ((j=${#parts[@]}-2; j>=0; j--)); do
                     if [ -n "${parts[j]}" ]; then
                         org_columns+=("${parts[j]}")
                     fi

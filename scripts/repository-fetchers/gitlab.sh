@@ -30,7 +30,9 @@ GITLAB_DOMAIN=${GITLAB_DOMAIN:-https://gitlab.com}
 if [[ -z $GROUP ]]; then
     base_request_url="$GITLAB_DOMAIN/api/v4/projects?membership=true&simple=true&archived=false"
 else
-    base_request_url="$GITLAB_DOMAIN/api/v4/groups/$GROUP/projects?include_subgroups=true&simple=true&archived=false"
+    # URL-encode the group path (replace / with %2F)
+    encoded_group=$(echo "$GROUP" | sed 's/\//%2F/g')
+    base_request_url="$GITLAB_DOMAIN/api/v4/groups/$encoded_group/projects?include_subgroups=true&simple=true&archived=false"
 fi
 
 page=1
@@ -58,6 +60,13 @@ while :; do
         exit 1
     fi
 
+    # Check if response is an error message (not an array)
+    if echo "$response" | jq -e 'if type == "array" then false else true end' >/dev/null 2>&1; then
+        error_msg=$(echo "$response" | jq -r '.message // "Unknown error"')
+        echo "Error: GitLab API error - $error_msg" 1>&2
+        exit 1
+    fi
+
     # Check if the response is empty, if so, break the loop
     if [[ $(echo "$response" | jq '. | length') -eq 0 ]]; then
         break
@@ -73,3 +82,5 @@ while :; do
     # Increment page counter
     ((page++))
 done
+
+exit 0

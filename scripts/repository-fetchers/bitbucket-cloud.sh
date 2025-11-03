@@ -69,3 +69,5 @@ while [ "$next_page" ]; do
 
   next_page=$(echo $response | sed -e "s:${username}@::g" | jq -r '.next // empty')
 done
+
+exit 0

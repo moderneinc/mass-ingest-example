@@ -125,3 +125,5 @@ function fetch_repos() {
 echo "cloneUrl,branch,origin,path"
 fetch_repos
 
+
+exit 0
