@@ -268,7 +268,7 @@ configure_github() {
         api_url="${github_url}/api/v3"
     fi
 
-    local org=$(ask_input "Organization or user name")
+    local org=$(ask_input "Organization name (or GitHub username for personal repos)")
 
     # Check if gh CLI is available (FORCE_GITHUB_API_MODE can be set for testing)
     local token=""
@@ -793,6 +793,7 @@ For GitHub (e.g., 'openrewrite/rewrite'):
     echo ""
 
     print_context "CSV normalization pads all rows with empty columns to match the maximum depth.
+Empty columns are added at the beginning so 'ALL' appears in the same column for filtering.
 This ensures Excel and other tools can properly parse the file."
 
     if ask_yes_no "Normalize CSV for Excel compatibility?" "n"; then
@@ -908,17 +909,21 @@ generate_repos_csv() {
     while IFS='|' read -r cloneUrl branch origin path org_data; do
         IFS=' ' read -ra org_columns <<< "$org_data"
 
-        # Build org column string
+        # Build org column string with padding at beginning
         local org_string=""
-        for ((j=0; j<num_org_cols; j++)); do
-            if [ $j -lt ${#org_columns[@]} ]; then
-                org_string="$org_string,\"${org_columns[$j]}\""
-            else
-                # Only add empty columns if normalizing
-                if [ "$NORMALIZE_CSV" = true ]; then
-                    org_string="$org_string,"
-                fi
-            fi
+        local num_actual_orgs=${#org_columns[@]}
+        local padding_needed=$((num_org_cols - num_actual_orgs))
+
+        # Add padding at the beginning (empty columns)
+        if [ "$NORMALIZE_CSV" = true ]; then
+            for ((j=0; j<padding_needed; j++)); do
+                org_string="$org_string,"
+            done
+        fi
+
+        # Add actual org values
+        for ((j=0; j<num_actual_orgs; j++)); do
+            org_string="$org_string,\"${org_columns[$j]}\""
         done
 
         echo "\"$cloneUrl\",\"$branch\",\"$origin\",\"$path\"$org_string" >> "$temp_merged"
@@ -947,9 +952,9 @@ show_next_steps() {
     echo -e "     ${GRAY}head $OUTPUT_FILE${RESET}"
     echo ""
     echo -e "  ${CYAN}2.${RESET} Use with Moderne CLI mass-ingest:"
-    echo -e "     ${GRAY}docker run -v \$(pwd):/workspace moderne/moderne-cli:latest \\${RESET}"
-    echo -e "     ${GRAY}  mass-ingest --repos /workspace/$OUTPUT_FILE \\${RESET}"
-    echo -e "     ${GRAY}  --output /workspace/output${RESET}"
+    echo -e "     ${GRAY}docker run -v \$(pwd):/workspace moderne/moderne-cli:latest${RESET} \\"
+    echo -e "       ${GRAY}mass-ingest --repos /workspace/$OUTPUT_FILE${RESET} \\"
+    echo -e "       ${GRAY}--output /workspace/output${RESET}"
     echo ""
     echo -e "${CYAN}${BOLD}Learn more:${RESET}"
     echo -e "  https://docs.moderne.io/user-documentation/moderne-cli/how-to-guides/mass-ingest"
