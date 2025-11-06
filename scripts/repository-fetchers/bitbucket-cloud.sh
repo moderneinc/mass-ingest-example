@@ -38,7 +38,7 @@ echo "cloneUrl,branch,origin,path"
 next_page="https://api.bitbucket.org/2.0/repositories/$workspace"
 
 while [ "$next_page" ]; do
-  response=$(curl -s --max-time 30 -u "$username:$api_token" "$next_page")
+  response=$(curl -s --max-time 10 -u "$username:$api_token" "$next_page")
 
   # Check if curl failed
   if [ $? -ne 0 ]; then

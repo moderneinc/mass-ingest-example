@@ -11,7 +11,7 @@ WORKDIR /app
 RUN if [ -n "${MODERNE_CLI_VERSION}" ]; then \
         echo "Downloading version: ${MODERNE_CLI_VERSION}"; \
         curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/${MODERNE_CLI_VERSION}/moderne-cli-${MODERNE_CLI_VERSION}.jar" --output /usr/local/bin/mod.jar; \
-    elif [ "${MODERNE_CLI_STAGE}" == "staging" ]; then \
+    elif [ "${MODERNE_CLI_STAGE}" = "staging" ]; then \
         LATEST_VERSION=$(curl -s --insecure --request GET --url "https://api.github.com/repos/moderneinc/moderne-cli-releases/releases" | jq '.[0].tag_name' -r | sed "s/^v//"); \
         if [ -z "${LATEST_VERSION}" ]; then \
             echo "Failed to get latest staging version"; \
@@ -30,7 +30,7 @@ RUN if [ -n "${MODERNE_CLI_VERSION}" ]; then \
     fi
 
 # Create a shell script 'mod' that runs the moderne-cli JAR file
-RUN echo -e '#!/bin/sh\njava -jar /usr/local/bin/mod.jar "$@"' > /usr/local/bin/mod
+RUN printf '#!/bin/sh\njava -jar /usr/local/bin/mod.jar "$@"\n' > /usr/local/bin/mod
 
 # Make the 'mod' script executable
 RUN chmod +x /usr/local/bin/mod

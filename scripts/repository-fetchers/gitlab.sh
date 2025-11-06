@@ -44,7 +44,7 @@ while :; do
     request_url="${base_request_url}&page=${page}&per_page=${per_page}"
 
     # Fetch the data (with 30 second timeout per request)
-    response=$(curl --silent --max-time 30 --header "Authorization: Bearer $AUTH_TOKEN" "$request_url")
+    response=$(curl --silent --max-time 10 --header "Authorization: Bearer $AUTH_TOKEN" "$request_url")
 
     # Check if curl failed
     if [ $? -ne 0 ]; then
@@ -57,6 +57,11 @@ while :; do
         echo "Error: Invalid JSON response from GitLab API." 1>&2
         echo "Response saved to: gitlab-fetch-error.html" 1>&2
         echo "$response" > gitlab-fetch-error.html
+        echo "Response length: $(echo "$response" | wc -c | tr -d ' ') bytes" 1>&2
+        echo "First 200 chars: $(echo "$response" | head -c 200)" 1>&2
+        echo "" 1>&2
+        echo "To debug, run this command manually:" 1>&2
+        echo "curl -v --header 'Authorization: Bearer ***' '$request_url'" 1>&2
         exit 1
     fi
 

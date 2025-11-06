@@ -4,7 +4,7 @@ WORKDIR /app
 COPY {{CLI_JAR_PATH}} /usr/local/bin/mod.jar
 
 # Create a shell script 'mod' that runs the moderne-cli JAR file
-RUN echo -e '#!/bin/sh\njava -jar /usr/local/bin/mod.jar "$@"' > /usr/local/bin/mod
+RUN printf '#!/bin/sh\njava -jar /usr/local/bin/mod.jar "$@"\n' > /usr/local/bin/mod
 
 # Make the 'mod' script executable
 RUN chmod +x /usr/local/bin/mod

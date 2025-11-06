@@ -1,0 +1,3301 @@
+#!/bin/bash
+
+set -e
+
+# TODO: Future enhancement - Session resume capability
+# Save wizard state to .wizard-session file and allow resuming from checkpoints
+# Delete session file on successful completion
+# On startup, detect and offer to resume from saved session
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_FETCHERS_DIR="$SCRIPT_DIR/repository-fetchers"
+TEMPLATES_DIR="$SCRIPT_DIR/dockerfile-templates"
+
+# Colors for better UX
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+RED='\033[0;31m'
+GRAY='\033[2m'  # Dim text for subtle appearance
+RESET='\033[0m'
+BOLD='\033[1m'
+
+# ============================================================================
+# Configuration storage - repos.csv wizard
+# ============================================================================
+
+# Output file
+OUTPUT_FILE="repos.csv"
+USE_HIERARCHICAL_ORGS=false
+NORMALIZE_CSV=false
+
+# Temp directory for CSV files
+TEMP_DIR=""
+
+# SCM provider selection
+ENABLE_GITHUB=false
+ENABLE_GITLAB=false
+ENABLE_AZURE_DEVOPS=false
+ENABLE_BITBUCKET_CLOUD=false
+ENABLE_BITBUCKET_DATA_CENTER=false
+
+# GitHub configuration
+GITHUB_ORGS=()
+GITHUB_URL="https://github.com"
+
+# GitLab configuration
+GITLAB_GROUPS=()
+GITLAB_DOMAIN="https://gitlab.com"
+
+# Azure DevOps configuration
+AZURE_ORGS=()
+AZURE_PROJECTS=()
+
+# Bitbucket Cloud configuration
+BITBUCKET_CLOUD_WORKSPACES=()
+
+# Bitbucket Data Center configuration
+BITBUCKET_DC_PROJECTS=()
+BITBUCKET_DC_URL=""
+
+# Track fetch results and repository sources
+declare -a FETCH_RESULTS
+declare -a REPO_SOURCES
+
+# ============================================================================
+# Configuration storage - Dockerfile wizard
+# ============================================================================
+
+# Enabled JDKs
+ENABLED_JDKS=("8" "11" "17" "21" "25")
+
+# Moderne CLI
+# Preserve existing environment variables, set defaults only if not set
+CLI_SOURCE="${CLI_SOURCE:-download}"  # or "local"
+CLI_VERSION_TYPE="${CLI_VERSION_TYPE:-stable}"  # or "staging" or "specific"
+CLI_SPECIFIC_VERSION="${CLI_SPECIFIC_VERSION:-}"
+CLI_JAR_PATH="${CLI_JAR_PATH:-}"
+MODERNE_TENANT="${MODERNE_TENANT:-}"
+MODERNE_TOKEN="${MODERNE_TOKEN:-}"
+
+# Artifact repository (preserve environment variables)
+PUBLISH_URL="${PUBLISH_URL:-}"
+PUBLISH_AUTH_METHOD="${PUBLISH_AUTH_METHOD:-userpass}"  # or "token"
+PUBLISH_USER="${PUBLISH_USER:-}"
+PUBLISH_PASSWORD="${PUBLISH_PASSWORD:-}"
+PUBLISH_TOKEN="${PUBLISH_TOKEN:-}"
+
+# Build tools
+ENABLE_MAVEN=false
+MAVEN_VERSION="3.9.11"
+ENABLE_GRADLE=false
+GRADLE_VERSION="8.14"
+ENABLE_BAZEL=false
+
+# Development platforms & runtimes
+ENABLE_ANDROID=false
+ENABLE_NODE=false
+ENABLE_PYTHON=false
+ENABLE_DOTNET=false
+
+# Scalability
+ENABLE_AWS_CLI=false
+ENABLE_AWS_BATCH=false
+
+# Security
+CERT_FILE=""
+
+# Git authentication
+ENABLE_GIT_SSH=false
+ENABLE_GIT_HTTPS=false
+CREATE_GIT_CREDENTIALS_TEMPLATE=false
+
+# Maven
+MAVEN_SETTINGS_FILE=""
+
+# Runtime config
+JAVA_OPTIONS="-Xmx4g -Xss3m"
+DATA_DIR="/var/moderne"
+
+# Helper
+CHOICE_RESULT=0
+
+# Output files
+OUTPUT_DOCKERFILE="Dockerfile.generated"
+GENERATE_DOCKER_COMPOSE=false
+OUTPUT_DOCKER_COMPOSE="docker-compose.yml"
+OUTPUT_ENV=".env"
+DATA_MOUNT_DIR=""
+
+# ============================================================================
+# Helper functions (merged from both scripts)
+# ============================================================================
+
+print_header() {
+    echo -e "${CYAN}${BOLD}$1${RESET}"
+    echo -e "${BLUE}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
+}
+
+print_section() {
+    echo -e "\n${CYAN}${BOLD}▶ $1${RESET}\n"
+}
+
+print_context() {
+    # Format with indentation: first line with icon, subsequent lines indented
+    local text="$1"
+    local first_line=$(echo "$text" | head -n 1)
+    local rest=$(echo "$text" | tail -n +2)
+
+    echo -e "${GRAY}ℹ  ${first_line}${RESET}"
+    if [ -n "$rest" ]; then
+        echo "$rest" | while IFS= read -r line; do
+            echo -e "   ${GRAY}${line}${RESET}"
+        done
+    fi
+    echo ""
+}
+
+print_success() {
+    echo -e "${GREEN}✓ $1${RESET}"
+}
+
+print_error() {
+    echo -e "${RED}✗ $1${RESET}"
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠ $1${RESET}"
+}
+
+ask_yes_no() {
+    local prompt="$1"
+    local response
+
+    # Add (y/n) to prompt if not already present
+    if [[ ! "$prompt" =~ \(y/n\) ]]; then
+        prompt="$prompt (y/n)"
+    fi
+
+    while true; do
+        read -p "$(echo -e "${BOLD}$prompt${RESET}: ")" response
+        case "$response" in
+            [Yy]* ) return 0;;
+            [Nn]* ) return 1;;
+            * ) echo "Please answer y or n." >&2;;
+        esac
+    done
+}
+
+ask_question() {
+    local prompt="$1"
+    local response
+
+    read -p "$(echo -e "${BOLD}$prompt${RESET}: ")" response
+    response=$(clean_value "$response")
+    echo "$response"
+}
+
+# Check if a value is an environment variable reference
+is_env_var_reference() {
+    local value="$1"
+    [[ "$value" =~ ^\$\{[A-Z_][A-Z0-9_]*\}$ ]]
+}
+
+# Expand environment variable reference to its actual value
+expand_env_var() {
+    local value="$1"
+    if is_env_var_reference "$value"; then
+        # Extract the variable name from ${VAR_NAME}
+        # Remove ${ from start and } from end
+        local var_name="${value#\$\{}"
+        var_name="${var_name%\}}"
+        # Use printenv to get the actual environment variable (not shadowed by shell vars)
+        printenv "$var_name"
+    else
+        echo "$value"
+    fi
+}
+
+# Ask for secret or env var reference (returns literal ${VAR} without expanding)
+ask_secret_or_env_var_ref() {
+    local prompt="$1"
+    local value
+
+    echo "" >&2
+    if ask_yes_no "Use an environment variable?"; then
+        # Ask for env var name (unmasked)
+        while true; do
+            read -p "$(echo -e "${BOLD}Environment variable name${RESET}: ")" value
+            value=$(clean_value "$value")
+
+            if [ -z "$value" ]; then
+                echo -e "${RED}Environment variable name cannot be empty.${RESET}" >&2
+                continue
+            fi
+
+            # Normalize to ${VAR_NAME} format
+            # Remove any $ or ${ or } to get just the var name
+            local var_name=$(echo "$value" | sed 's/^\${\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)}\{0,1\}$/\1/')
+
+            if [ -n "$var_name" ]; then
+                echo "\${$var_name}"
+                return
+            fi
+            echo -e "${RED}Invalid environment variable name. Use alphanumeric characters and underscores.${RESET}" >&2
+        done
+    else
+        # Ask for actual secret (masked)
+        while true; do
+            read -s -p "$(echo -e "${BOLD}$prompt${RESET}: ")" value
+            echo "" >&2  # newline after hidden input
+            value=$(clean_value "$value")
+            if [ -n "$value" ]; then
+                echo "$value"
+                return
+            fi
+            echo -e "${RED}$prompt cannot be empty.${RESET}" >&2
+        done
+    fi
+}
+
+# Ask for secret or env var, clean and expand it (most common usage)
+ask_secret_or_env_var() {
+    local prompt="$1"
+    local value
+    value=$(ask_secret_or_env_var_ref "$prompt")
+    value=$(clean_value "$value")
+    value=$(expand_env_var "$value")
+    echo "$value"
+}
+
+# Ask for input or environment variable reference (non-secret fields)
+ask_input_or_env_var() {
+    local prompt="$1"
+    local value
+
+    echo "" >&2
+    if ask_yes_no "Use an environment variable?"; then
+        # Ask for env var name (unmasked)
+        while true; do
+            read -p "$(echo -e "${BOLD}Environment variable name${RESET}: ")" value
+            value=$(clean_value "$value")
+
+            if [ -z "$value" ]; then
+                echo -e "${RED}Environment variable name cannot be empty.${RESET}" >&2
+                continue
+            fi
+
+            # Normalize to ${VAR_NAME} format
+            local var_name=$(echo "$value" | sed 's/^\${\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)}\{0,1\}$/\1/')
+
+            if [ -n "$var_name" ]; then
+                echo "\${$var_name}"
+                return
+            fi
+            echo -e "${RED}Invalid environment variable name. Use alphanumeric characters and underscores.${RESET}" >&2
+        done
+    else
+        # Ask for actual input (unmasked)
+        while true; do
+            read -p "$(echo -e "${BOLD}$prompt${RESET}: ")" value
+            value=$(clean_value "$value")
+            if [ -n "$value" ]; then
+                echo "$value"
+                return
+            fi
+            echo -e "${RED}$prompt cannot be empty.${RESET}" >&2
+        done
+    fi
+}
+
+ask_input() {
+    local prompt="$1"
+    local default="$2"
+    local value
+
+    if [ -n "$default" ]; then
+        read -p "$(echo -e "${BOLD}$prompt${RESET} [$default]: ")" value
+        value=$(clean_value "$value")
+        echo "${value:-$default}"
+    else
+        while true; do
+            read -p "$(echo -e "${BOLD}$prompt${RESET}: ")" value
+            value=$(clean_value "$value")
+            if [ -n "$value" ]; then
+                echo "$value"
+                return
+            fi
+            echo -e "${RED}This field cannot be empty. Please enter a value.${RESET}" >&2
+        done
+    fi
+}
+
+ask_secret() {
+    local prompt="$1"
+    local value
+
+    while true; do
+        read -s -p "$(echo -e "${BOLD}$prompt${RESET}: ")" value
+        echo "" >&2  # newline after hidden input (to stderr, not return value)
+        value=$(clean_value "$value")
+        if [ -n "$value" ]; then
+            echo "$value"
+            return
+        fi
+        echo -e "${RED}This field cannot be empty. Please enter a value.${RESET}" >&2
+    done
+}
+
+# Clean value by removing newlines, carriage returns, and trimming whitespace
+clean_value() {
+    local value="$1"
+    echo "$value" | tr -d '\n\r' | xargs
+}
+
+ask_choice() {
+    local prompt="$1"
+    shift
+    local options=("$@")
+    local choice
+
+    echo -e "${BOLD}$prompt${RESET}"
+    for i in "${!options[@]}"; do
+        echo "  $((i+1)). ${options[$i]}"
+    done
+
+    while true; do
+        read -p "$(echo -e "\n${BOLD}Enter your choice${RESET} [1-${#options[@]}]: ")" choice
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#options[@]}" ]; then
+            CHOICE_RESULT=$((choice-1))
+            return 0
+        fi
+        echo "Invalid choice. Please enter a number between 1 and ${#options[@]}." >&2
+    done
+}
+
+ask_optional_path() {
+    local prompt="$1"
+    local path
+
+    read -p "$(echo -e "${BOLD}$prompt${RESET} (or press Enter to skip): ")" path
+    echo "$path"
+}
+
+ask_optional_input() {
+    local prompt="$1"
+    local value
+
+    read -p "$(echo -e "${BOLD}$prompt${RESET} (or press Enter to skip): ")" value
+    value=$(clean_value "$value")
+    echo "$value"
+}
+
+# Validate Moderne token
+validate_moderne_token() {
+    local api_url="$1"  # Should be https://api.{tenant}.moderne.io
+    local token="$2"
+
+    if [ -z "$token" ]; then
+        return 1
+    fi
+
+    # Make a simple GraphQL query to validate the token
+    local graphql_url="${api_url}/graphql"
+    local query='{"query":"query test { accessTokens { id } }"}'
+
+    local response=$(curl -s -w "\n%{http_code}" -X POST "$graphql_url" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $token" \
+        -d "$query" 2>/dev/null)
+
+    local http_code=$(echo "$response" | tail -n1)
+    local body=$(echo "$response" | sed '$d')
+
+    # Check if the request was successful
+    if [ "$http_code" = "200" ] && echo "$body" | grep -q '"accessTokens"'; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Validate artifact repository credentials
+validate_artifact_repository() {
+    local url="$1"
+    local auth_method="$2"
+    local username="$3"
+    local password="$4"
+    local token="$5"
+
+    if [ -z "$url" ]; then
+        return 1
+    fi
+
+    # Make a HEAD request to the repository to test authentication
+    local http_code
+    if [ "$auth_method" = "userpass" ]; then
+        http_code=$(curl -s -L -o /dev/null -w "%{http_code}" -u "$username:$password" "$url" 2>/dev/null)
+    else
+        http_code=$(curl -s -L -o /dev/null -w "%{http_code}" -H "X-JFrog-Art-Api: $token" "$url" 2>/dev/null)
+    fi
+
+    # Check if the request was successful (200, 201, 204)
+    if [ "$http_code" = "200" ] || [ "$http_code" = "201" ] || [ "$http_code" = "204" ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Parse error messages from output file
+parse_error_message() {
+    local output_file="$1"
+    local error_msg=""
+
+    if [ ! -f "$output_file" ]; then
+        return
+    fi
+
+    # Check for common error patterns
+    if grep -q "Error.*Invalid JSON" "$output_file" 2>/dev/null; then
+        error_msg="Invalid API response - check your URL and network connection"
+    elif grep -q "Error.*Failed to fetch" "$output_file" 2>/dev/null; then
+        error_msg="Network timeout or connection error"
+    elif grep -q "401\|Unauthorized\|Authentication failed" "$output_file" 2>/dev/null; then
+        error_msg="Authentication failed - check your credentials"
+    elif grep -q "403\|Forbidden\|Permission denied" "$output_file" 2>/dev/null; then
+        error_msg="Permission denied - check token/credentials have required permissions"
+    elif grep -q "404\|Not found" "$output_file" 2>/dev/null; then
+        error_msg="Resource not found - check your URL, organization, or project name"
+    elif grep -q "Error:" "$output_file" 2>/dev/null; then
+        # Extract first error line
+        error_msg=$(grep -m 1 "Error:" "$output_file" | sed 's/^Error: //')
+    fi
+
+    if [ -n "$error_msg" ]; then
+        echo "$error_msg"
+    fi
+}
+
+# Show progress while a command runs
+run_with_progress() {
+    local message="$1"
+    shift
+    local output_file="${@:$#}"  # Last argument
+
+    # All arguments except last - copy all but last to new array
+    local cmd_args=()
+    local last_idx=$(($# - 1))
+    local i=0
+    for arg in "$@"; do
+        if [ $i -lt $last_idx ]; then
+            cmd_args+=("$arg")
+        fi
+        ((i++))
+    done
+
+    # Run command in background
+    "${cmd_args[@]}" > "$output_file" 2>&1 &
+    local pid=$!
+
+    # Show spinner while running (no total timeout - individual curl requests have their own timeout)
+    local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local i=0
+    echo -n "  "
+    while kill -0 $pid 2>/dev/null; do
+        i=$(( (i+1) % 10 ))
+        printf "\r${CYAN}${spin:$i:1}${RESET} $message..."
+        sleep 0.1
+    done
+
+    # Wait for completion and get exit code
+    wait $pid
+    local exit_code=$?
+
+    # Clear spinner line
+    printf "\r  "
+    printf "\033[K" # Clear to end of line
+
+    return $exit_code
+}
+
+# Cleanup function
+cleanup() {
+    if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
+        rm -rf "$TEMP_DIR"
+    fi
+}
+
+trap cleanup EXIT
+
+# ============================================================================
+# Welcome message
+# ============================================================================
+
+show_welcome() {
+    clear
+
+    # Moderne logo
+    echo "   ▛▀▀▚▖  ▗▄▟▜"
+    echo "   ▌   ▜▄▟▀  ▐"
+    echo "   ▛▀▀█▀▛▀▀▀▀▜"
+    echo "   ▌▟▀  ▛▀▀▀▀▜"
+    echo "   ▀▀▀▀▀▀▀▀▀▀▀"
+    echo ""
+
+    print_header "Mass Ingest - Complete Setup Wizard"
+
+    echo -e "Ready to ingest your repositories into Moderne? This wizard will set up everything"
+    echo -e "you need to run mass-ingest: from repository discovery to Docker environment."
+    echo ""
+    echo -e "${CYAN}${BOLD}What we'll create:${RESET}"
+    echo ""
+    echo -e "  ${CYAN}•${RESET} ${BOLD}repos.csv${RESET} - A catalog listing all repositories to analyze"
+    echo -e "  ${CYAN}•${RESET} ${BOLD}Dockerfile${RESET} - Custom Docker image with all required tools"
+    echo -e "  ${CYAN}•${RESET} ${BOLD}docker-compose.yml${RESET} - Easy container management (optional)"
+    echo -e "  ${CYAN}•${RESET} ${BOLD}.env${RESET} - Environment configuration with your credentials"
+    echo ""
+    echo -e "${CYAN}${BOLD}Setup steps:${RESET}"
+    echo ""
+    echo -e "  ${CYAN}Phase 1: Repository Discovery${RESET}"
+    echo -e "    1. Choose SCM providers (GitHub, GitLab, Azure DevOps, Bitbucket)"
+    echo -e "    2. Authenticate with access tokens or credentials"
+    echo -e "    3. Fetch repositories automatically"
+    echo -e "    4. Generate repos.csv"
+    echo ""
+    echo -e "  ${CYAN}Phase 2: Docker Environment${RESET}"
+    echo -e "    5. Select JDK versions (8, 11, 17, 21, 25)"
+    echo -e "    6. Configure Moderne CLI"
+    echo -e "    7. Choose build tools (Maven, Gradle, Bazel)"
+    echo -e "    8. Add language runtimes (Android, Node, Python, .NET)"
+    echo -e "    9. Configure security and Git authentication"
+    echo -e "   10. Generate Dockerfile and docker-compose.yml"
+    echo ""
+    echo -e "${CYAN}${BOLD}Time investment:${RESET} 5-10 minutes"
+    echo ""
+
+    read -p "$(echo -e "${BOLD}Press Enter to continue...${RESET}")"
+    clear
+}
+
+# ============================================================================
+# Phase 1: Repository Discovery (repos.csv)
+# ============================================================================
+
+# Combined introduction and existing file check
+show_repos_csv_introduction() {
+    clear
+    print_section "Repository Discovery - repos.csv"
+
+    echo "The repos.csv file tells Moderne which repositories to process."
+    echo ""
+    echo -e "${CYAN}${BOLD}What is repos.csv?${RESET}"
+    echo ""
+    echo "A CSV file listing all repositories you want to ingest into Moderne."
+    echo "Each row describes a single repository with its clone URL, branch, and"
+    echo "organizational structure."
+    echo ""
+    echo -e "${BOLD}Required columns:${RESET}"
+    echo -e "  ${CYAN}•${RESET} cloneUrl - Full Git URL to clone the repository"
+    echo -e "  ${CYAN}•${RESET} branch - Branch to build LST artifacts from"
+    echo -e "  ${CYAN}•${RESET} origin - Source identifier (e.g., github.com, gitlab.com)"
+    echo -e "  ${CYAN}•${RESET} path - Repository identifier/path (e.g., org/repo-name)"
+    echo ""
+    echo -e "${BOLD}Optional columns:${RESET}"
+    echo -e "  ${CYAN}•${RESET} org1, org2, ... - Organizational hierarchy for grouping repositories"
+    echo ""
+
+    # Show either example or existing file
+    if [ -f "$OUTPUT_FILE" ]; then
+        echo -e "${CYAN}${BOLD}Your existing repos.csv:${RESET}"
+        echo ""
+        echo -e "${GRAY}$(head -n 10 "$OUTPUT_FILE")${RESET}"
+        echo ""
+
+        if ask_yes_no "Use this existing repos.csv?"; then
+            print_success "Using existing repos.csv"
+            return 0  # Skip repos.csv generation
+        else
+            print_warning "Will regenerate repos.csv"
+            echo ""
+        fi
+    else
+        echo -e "${CYAN}${BOLD}Example repos.csv:${RESET}"
+        echo ""
+        echo -e "${GRAY}  cloneUrl,branch,origin,path,org1,org2${RESET}"
+        echo -e "${GRAY}  https://github.com/openrewrite/rewrite,main,github.com,openrewrite/rewrite,openrewrite,ALL${RESET}"
+        echo -e "${GRAY}  https://github.com/openrewrite/rewrite-spring,main,github.com,openrewrite/rewrite-spring,openrewrite,ALL${RESET}"
+        echo ""
+    fi
+
+    echo -e "${CYAN}${BOLD}How we'll generate it:${RESET}"
+    echo ""
+    echo -e "  ${CYAN}1.${RESET} Choose SCM providers (GitHub, GitLab, Azure DevOps, Bitbucket)"
+    echo -e "  ${CYAN}2.${RESET} Authenticate with access tokens or credentials"
+    echo -e "  ${CYAN}3.${RESET} Fetch repositories automatically from each provider"
+    echo -e "  ${CYAN}4.${RESET} Generate repos.csv with all discovered repositories"
+    echo ""
+
+    read -p "$(echo -e "${BOLD}Press Enter to continue...${RESET}")"
+    return 1  # Need to generate repos.csv
+}
+
+# SCM provider selection (loop with menu)
+add_scm_providers() {
+    while true; do
+        clear
+        print_section "SCM Provider Selection"
+
+        ask_choice "Select an SCM provider to add:" \
+            "GitHub" \
+            "GitLab" \
+            "Azure DevOps" \
+            "Bitbucket Data Center / Server" \
+            "Bitbucket Cloud"
+
+        local continue_adding
+        case $CHOICE_RESULT in
+            0)
+                configure_github && continue_adding=0 || continue_adding=1
+                ENABLE_GITHUB=true
+                ;;
+            1)
+                configure_gitlab && continue_adding=0 || continue_adding=1
+                ENABLE_GITLAB=true
+                ;;
+            2)
+                configure_azure_devops && continue_adding=0 || continue_adding=1
+                ENABLE_AZURE_DEVOPS=true
+                ;;
+            3)
+                configure_bitbucket_data_center && continue_adding=0 || continue_adding=1
+                ENABLE_BITBUCKET_DATA_CENTER=true
+                ;;
+            4)
+                configure_bitbucket_cloud && continue_adding=0 || continue_adding=1
+                ENABLE_BITBUCKET_CLOUD=true
+                ;;
+        esac
+
+        # Check if user wants to continue (return 0) or stop (return 1)
+        if [ $continue_adding -ne 0 ]; then
+            break
+        fi
+    done
+
+    # Validate at least one provider was configured
+    if [ "$ENABLE_GITHUB" = false ] && [ "$ENABLE_GITLAB" = false ] && \
+       [ "$ENABLE_AZURE_DEVOPS" = false ] && [ "$ENABLE_BITBUCKET_CLOUD" = false ] && \
+       [ "$ENABLE_BITBUCKET_DATA_CENTER" = false ]; then
+        echo ""
+        print_error "Error: No SCM providers were configured. Exiting."
+        exit 1
+    fi
+}
+
+# GitHub configuration
+configure_github() {
+    clear
+    print_section "GitHub Configuration"
+
+    print_context "We'll fetch all repositories from GitHub organization(s) or user account(s)."
+
+    ask_choice "Which GitHub service?" "GitHub.com (cloud)" "GitHub Enterprise Server (on-prem)"
+
+    local github_url="https://github.com"
+    local api_url="https://api.github.com"
+    if [ "$CHOICE_RESULT" -eq 1 ]; then
+        github_url=$(ask_input "GitHub Enterprise Server URL")
+        api_url="${github_url}/api/v3"
+    fi
+
+    GITHUB_URL="$github_url"
+
+    echo ""
+    echo -e "${BOLD}Organization Configuration${RESET}"
+    print_context "You can fetch repositories from one or more GitHub organizations or users.
+We'll fetch all repositories from each organization you specify."
+
+    # CLI detection and API fallback
+    echo ""
+    echo -e "${BOLD}Authentication Method${RESET}"
+
+    local token=""
+    if [ "$FORCE_GITHUB_API_MODE" = "true" ]; then
+        echo ""
+        print_warning "API mode forced (FORCE_GITHUB_API_MODE=true)"
+        echo ""
+        echo -e "${BOLD}Supply a GitHub Personal Access Token.${RESET}"
+        echo ""
+        print_context "You'll need a Personal Access Token with 'repo' scope.
+Create one at: ${github_url}/settings/tokens"
+        token=$(ask_secret_or_env_var "GitHub Personal Access Token")
+    elif command -v gh &> /dev/null; then
+        echo ""
+        print_context "GitHub CLI (gh) detected. We'll use it for authentication.
+Make sure you've already run 'gh auth login'.
+Learn more: https://cli.github.com/manual/gh_auth_login"
+    else
+        echo ""
+        print_warning "GitHub CLI (gh) not found. Falling back to API mode."
+        echo ""
+        echo -e "${BOLD}Supply a GitHub Personal Access Token.${RESET}"
+        echo ""
+        print_context "You'll need a Personal Access Token with 'repo' scope.
+Create one at: ${GITHUB_URL}/settings/tokens"
+        token=$(ask_secret_or_env_var "GitHub Personal Access Token")
+    fi
+
+    # Store token and API URL in environment if provided
+    if [ -n "$token" ]; then
+        export GITHUB_TOKEN="$token"
+        export GITHUB_API_URL="$api_url"
+    fi
+
+    # Collect organizations and fetch immediately
+    while true; do
+        echo ""
+        local org=$(ask_input "Organization name (or GitHub username for personal repos)")
+        GITHUB_ORGS+=("$org")
+
+        # Fetch immediately
+        fetch_from_github "$github_url" "$org" "$token" "$api_url"
+
+        if ! ask_yes_no "Add another GitHub organization?"; then
+            break
+        fi
+    done
+
+    # Ask if user wants to add another SCM provider
+    echo ""
+    if ask_yes_no "Do you want to add another SCM provider?"; then
+        clear
+        return 0  # Continue to next provider
+    else
+        clear
+        return 1  # Done with SCM configuration
+    fi
+}
+
+# Fetch from GitHub
+fetch_from_github() {
+    local github_url="$1"
+    local org="$2"
+    local token="$3"
+    local api_url="$4"
+
+    print_section "Fetching from GitHub: $org"
+
+    local csv_file="$TEMP_DIR/github_${org}.csv"
+
+    # Build command arguments
+    local cmd_args=(bash "$REPO_FETCHERS_DIR/github.sh" "$org")
+
+    if [ -n "$token" ]; then
+        cmd_args+=("$token" "$api_url")
+    else
+        if [[ "$github_url" != "https://github.com" ]]; then
+            export GH_HOST="${github_url#https://}"
+        fi
+    fi
+
+    if run_with_progress "Fetching repositories" "${cmd_args[@]}" "$csv_file"; then
+        local count=$(tail -n +2 "$csv_file" 2>/dev/null | wc -l | tr -d ' ')
+
+        if [ "$count" -eq 0 ]; then
+            print_error "No repositories found in GitHub organization: $org"
+            FETCH_RESULTS+=("GitHub ($org)|Failed|0")
+        else
+            print_success "Fetched $count repositories from GitHub"
+
+            # Show preview
+            echo ""
+            if [ "$count" -eq 1 ]; then
+                echo -e "${CYAN}Preview:${RESET}"
+            else
+                echo -e "${CYAN}Preview (first 2 repos):${RESET}"
+            fi
+            tail -n +2 "$csv_file" | head -2 | while IFS=, read -r cloneUrl branch origin path; do
+                cloneUrl=$(echo "$cloneUrl" | sed 's/^"//;s/"$//')
+                branch=$(echo "$branch" | sed 's/^"//;s/"$//')
+                origin=$(echo "$origin" | sed 's/^"//;s/"$//')
+                path=$(echo "$path" | sed 's/^"//;s/"$//')
+                echo -e "${GRAY}  • $path${RESET} ${CYAN}($branch)${RESET}"
+            done
+
+            REPO_SOURCES+=("$csv_file")
+            FETCH_RESULTS+=("GitHub ($org)|Success|$count")
+        fi
+    else
+        local error_detail=$(parse_error_message "$csv_file")
+        print_error "Failed to fetch from GitHub"
+        if [ -n "$error_detail" ]; then
+            print_warning "$error_detail"
+        else
+            print_warning "Make sure your credentials are configured correctly"
+        fi
+        FETCH_RESULTS+=("GitHub ($org)|Failed|0")
+    fi
+
+    if [[ "$github_url" != "https://github.com" ]]; then
+        unset GH_HOST
+    fi
+
+    echo ""
+}
+
+# GitLab configuration
+configure_gitlab() {
+    clear
+    print_section "GitLab Configuration"
+
+    print_context "We'll fetch repositories from GitLab group(s) or all accessible repositories."
+
+    ask_choice "Which GitLab service?" "GitLab.com (cloud)" "Self-hosted GitLab"
+
+    local gitlab_domain="https://gitlab.com"
+    if [ "$CHOICE_RESULT" -eq 1 ]; then
+        gitlab_domain=$(ask_input "GitLab Server URL")
+    fi
+
+    GITLAB_DOMAIN="$gitlab_domain"
+
+    # Personal Access Token
+    echo ""
+    echo -e "${BOLD}Supply a GitLab Personal Access Token.${RESET}"
+    echo ""
+    print_context "GitLab requires a Personal Access Token with 'read_api' scope.
+Create one at: ${gitlab_domain}/-/user_settings/personal_access_tokens"
+
+    local token=$(ask_secret_or_env_var "GitLab Personal Access Token")
+    export GITLAB_TOKEN="$token"
+
+    # Decide: all accessible repos or specific groups?
+    echo ""
+    echo -e "${BOLD}Group Configuration${RESET}"
+    if ask_yes_no "Fetch from specific groups? (say 'no' to fetch all accessible repositories)"; then
+        echo ""
+        print_context "You can specify GitLab groups (including subgroups).
+Example: openrewrite/recipes"
+
+        # Collect groups and fetch immediately
+        while true; do
+            echo ""
+            local group=$(ask_input "Group path (e.g., openrewrite/recipes)")
+            GITLAB_GROUPS+=("$group")
+
+            # Fetch immediately
+            fetch_from_gitlab "$gitlab_domain" "$group" "$token"
+
+            if ! ask_yes_no "Add another GitLab group?"; then
+                break
+            fi
+        done
+    else
+        # Fetch all accessible repositories
+        fetch_from_gitlab "$gitlab_domain" "" "$token"
+    fi
+
+    unset GITLAB_TOKEN
+
+    # Ask if user wants to add another SCM provider
+    echo ""
+    if ask_yes_no "Do you want to add another SCM provider?"; then
+        clear
+        return 0  # Continue to next provider
+    else
+        clear
+        return 1  # Done with SCM configuration
+    fi
+}
+
+# Fetch from GitLab
+fetch_from_gitlab() {
+    local gitlab_url="$1"
+    local group="$2"
+    local token="$3"
+
+    local display_name="GitLab"
+    if [ -n "$group" ]; then
+        display_name="GitLab ($group)"
+    else
+        display_name="GitLab (all accessible)"
+    fi
+
+    print_section "Fetching from $display_name"
+
+    local csv_file="$TEMP_DIR/gitlab_$(echo "$group" | tr '/' '_').csv"
+    [ -z "$group" ] && csv_file="$TEMP_DIR/gitlab_all.csv"
+
+    local cmd_args=(bash "$REPO_FETCHERS_DIR/gitlab.sh" -t "$token" -h "$gitlab_url")
+    if [ -n "$group" ]; then
+        cmd_args+=(-g "$group")
+    fi
+
+    if run_with_progress "Fetching repositories" "${cmd_args[@]}" "$csv_file"; then
+        local count=$(tail -n +2 "$csv_file" 2>/dev/null | wc -l | tr -d ' ')
+
+        if [ "$count" -eq 0 ]; then
+            print_error "No repositories found in $display_name"
+            FETCH_RESULTS+=("$display_name|Failed|0")
+        else
+            print_success "Fetched $count repositories from GitLab"
+
+            # Show preview
+            echo ""
+            if [ "$count" -eq 1 ]; then
+                echo -e "${CYAN}Preview:${RESET}"
+            else
+                echo -e "${CYAN}Preview (first 2 repos):${RESET}"
+            fi
+            tail -n +2 "$csv_file" | head -2 | while IFS=, read -r cloneUrl branch origin path; do
+                cloneUrl=$(echo "$cloneUrl" | sed 's/^"//;s/"$//')
+                branch=$(echo "$branch" | sed 's/^"//;s/"$//')
+                origin=$(echo "$origin" | sed 's/^"//;s/"$//')
+                path=$(echo "$path" | sed 's/^"//;s/"$//')
+                echo -e "${GRAY}  • $path${RESET} ${CYAN}($branch)${RESET}"
+            done
+
+            REPO_SOURCES+=("$csv_file")
+            FETCH_RESULTS+=("$display_name|Success|$count")
+        fi
+    else
+        local error_detail=$(parse_error_message "$csv_file")
+        print_error "Failed to fetch from GitLab"
+        if [ -n "$error_detail" ]; then
+            print_warning "$error_detail"
+        else
+            print_warning "Check that your token has 'read_api' scope and is valid"
+        fi
+        echo ""
+        FETCH_RESULTS+=("$display_name|Failed|0")
+    fi
+
+    echo ""
+}
+
+# Azure DevOps configuration
+configure_azure_devops() {
+    clear
+    print_section "Azure DevOps Configuration"
+
+    print_context "Azure DevOps organizes repositories into Organizations and Projects.
+You'll need to specify both."
+
+    # CLI detection and PAT fallback
+    echo ""
+    echo -e "${BOLD}Authentication Method${RESET}"
+
+    local pat=""
+    if [ "$FORCE_AZURE_API_MODE" = "true" ]; then
+        echo ""
+        print_warning "API mode forced (FORCE_AZURE_API_MODE=true)"
+        echo ""
+        echo -e "${BOLD}Supply an Azure DevOps Personal Access Token.${RESET}"
+        echo ""
+        print_context "You'll need a Personal Access Token (PAT) with 'Code (Read)' scope.
+Create one at: https://dev.azure.com/{org}/_usersSettings/tokens"
+        pat=$(ask_secret_or_env_var "Azure DevOps Personal Access Token")
+    elif command -v az &> /dev/null; then
+        echo ""
+        print_context "Azure CLI (az) detected. We'll use it for authentication.
+Make sure you've already run 'az login' and 'az devops configure --defaults organization=...'."
+    else
+        echo ""
+        print_warning "Azure CLI (az) not found. Falling back to API mode."
+        echo ""
+        echo -e "${BOLD}Supply an Azure DevOps Personal Access Token.${RESET}"
+        echo ""
+        print_context "You'll need a Personal Access Token (PAT) with 'Code (Read)' scope.
+Create one at: https://dev.azure.com/{org}/_usersSettings/tokens"
+        pat=$(ask_secret_or_env_var "Azure DevOps Personal Access Token")
+    fi
+
+    # Store PAT in environment if provided
+    if [ -n "$pat" ]; then
+        export AZURE_DEVOPS_PAT="$pat"
+    fi
+
+    # Collect organization and project pairs and fetch immediately
+    while true; do
+        echo ""
+        local org=$(ask_input "Organization name")
+        local project=$(ask_input "Project name")
+
+        AZURE_ORGS+=("$org")
+        AZURE_PROJECTS+=("$project")
+
+        # Fetch immediately
+        fetch_from_azure "$org" "$project" "$pat"
+
+        if ! ask_yes_no "Add another Azure DevOps organization/project?"; then
+            break
+        fi
+    done
+
+    unset AZURE_DEVOPS_PAT
+
+    # Ask if user wants to add another SCM provider
+    echo ""
+    if ask_yes_no "Do you want to add another SCM provider?"; then
+        clear
+        return 0  # Continue to next provider
+    else
+        clear
+        return 1  # Done with SCM configuration
+    fi
+}
+
+# Fetch from Azure DevOps
+fetch_from_azure() {
+    local org="$1"
+    local project="$2"
+    local pat="$3"
+
+    print_section "Fetching from Azure DevOps: $org/$project"
+
+    local csv_file="$TEMP_DIR/azure_${org}_${project}.csv"
+
+    local cmd_args=(bash "$REPO_FETCHERS_DIR/azure-devops.sh" -o "$org" -p "$project")
+    if [ -n "$pat" ]; then
+        cmd_args+=(-t "$pat")
+    fi
+
+    if run_with_progress "Fetching repositories" "${cmd_args[@]}" "$csv_file"; then
+        local count=$(tail -n +2 "$csv_file" 2>/dev/null | wc -l | tr -d ' ')
+
+        if [ "$count" -eq 0 ]; then
+            print_error "No repositories found in Azure DevOps: $org/$project"
+            FETCH_RESULTS+=("Azure DevOps ($org/$project)|Failed|0")
+        else
+            print_success "Fetched $count repositories from Azure DevOps"
+
+            # Show preview
+            echo ""
+            if [ "$count" -eq 1 ]; then
+                echo -e "${CYAN}Preview:${RESET}"
+            else
+                echo -e "${CYAN}Preview (first 2 repos):${RESET}"
+            fi
+            tail -n +2 "$csv_file" | head -2 | while IFS=, read -r cloneUrl branch origin path; do
+                cloneUrl=$(echo "$cloneUrl" | sed 's/^"//;s/"$//')
+                branch=$(echo "$branch" | sed 's/^"//;s/"$//')
+                origin=$(echo "$origin" | sed 's/^"//;s/"$//')
+                path=$(echo "$path" | sed 's/^"//;s/"$//')
+                echo -e "${GRAY}  • $path${RESET} ${CYAN}($branch)${RESET}"
+            done
+
+            REPO_SOURCES+=("$csv_file")
+            FETCH_RESULTS+=("Azure DevOps ($org/$project)|Success|$count")
+        fi
+    else
+        local error_detail=$(parse_error_message "$csv_file")
+        print_error "Failed to fetch from Azure DevOps"
+        if [ -n "$error_detail" ]; then
+            print_warning "$error_detail"
+        else
+            print_warning "Make sure your credentials are configured correctly"
+        fi
+        FETCH_RESULTS+=("Azure DevOps ($org/$project)|Failed|0")
+    fi
+
+    echo ""
+}
+
+# Bitbucket Cloud configuration
+configure_bitbucket_cloud() {
+    clear
+    print_section "Bitbucket Cloud Configuration"
+
+    print_context "Bitbucket Cloud requires an App Password with 'repository:read' scope.
+Create one at: https://bitbucket.org/account/settings/app-passwords/"
+
+    local username=$(ask_input "Bitbucket username")
+
+    echo ""
+    echo -e "${BOLD}Supply a Bitbucket App Password.${RESET}"
+    echo ""
+    print_context "Bitbucket Cloud requires an App Password with 'repository:read' scope.
+Create one at: https://bitbucket.org/account/settings/app-passwords/"
+
+    local app_password=$(ask_secret_or_env_var "Bitbucket App Password")
+
+    export BITBUCKET_CLOUD_USERNAME="$username"
+    export BITBUCKET_CLOUD_APP_PASSWORD="$app_password"
+
+    echo ""
+    print_context "Workspaces are the top-level containers for repositories in Bitbucket Cloud."
+
+    # Collect workspaces and fetch immediately
+    while true; do
+        echo ""
+        local workspace=$(ask_input "Workspace name")
+        BITBUCKET_CLOUD_WORKSPACES+=("$workspace")
+
+        # Fetch immediately
+        fetch_from_bitbucket_cloud "$workspace" "$username" "$app_password"
+
+        if ! ask_yes_no "Add another Bitbucket Cloud workspace?"; then
+            break
+        fi
+    done
+
+    unset BITBUCKET_CLOUD_USERNAME
+    unset BITBUCKET_CLOUD_APP_PASSWORD
+
+    # Ask if user wants to add another SCM provider
+    echo ""
+    if ask_yes_no "Do you want to add another SCM provider?"; then
+        clear
+        return 0  # Continue to next provider
+    else
+        clear
+        return 1  # Done with SCM configuration
+    fi
+}
+
+# Fetch from Bitbucket Cloud
+fetch_from_bitbucket_cloud() {
+    local workspace="$1"
+    local username="$2"
+    local app_password="$3"
+
+    print_section "Fetching from Bitbucket Cloud: $workspace"
+
+    local csv_file="$TEMP_DIR/bitbucket_cloud_${workspace}.csv"
+
+    if run_with_progress "Fetching repositories" bash "$REPO_FETCHERS_DIR/bitbucket-cloud.sh" "$username" "$app_password" "$workspace" "$csv_file"; then
+        local count=$(tail -n +2 "$csv_file" 2>/dev/null | wc -l | tr -d ' ')
+
+        if [ "$count" -eq 0 ]; then
+            print_error "No repositories found in Bitbucket Cloud: $workspace"
+            FETCH_RESULTS+=("Bitbucket Cloud ($workspace)|Failed|0")
+        else
+            print_success "Fetched $count repositories from Bitbucket Cloud"
+
+            # Show preview
+            echo ""
+            if [ "$count" -eq 1 ]; then
+                echo -e "${CYAN}Preview:${RESET}"
+            else
+                echo -e "${CYAN}Preview (first 2 repos):${RESET}"
+            fi
+            tail -n +2 "$csv_file" | head -2 | while IFS=, read -r cloneUrl branch origin path; do
+                cloneUrl=$(echo "$cloneUrl" | sed 's/^"//;s/"$//')
+                branch=$(echo "$branch" | sed 's/^"//;s/"$//')
+                origin=$(echo "$origin" | sed 's/^"//;s/"$//')
+                path=$(echo "$path" | sed 's/^"//;s/"$//')
+                echo -e "${GRAY}  • $path${RESET} ${CYAN}($branch)${RESET}"
+            done
+
+            REPO_SOURCES+=("$csv_file")
+            FETCH_RESULTS+=("Bitbucket Cloud ($workspace)|Success|$count")
+        fi
+    else
+        local error_detail=$(parse_error_message "$csv_file")
+        print_error "Failed to fetch from Bitbucket Cloud"
+        if [ -n "$error_detail" ]; then
+            print_warning "$error_detail"
+        else
+            print_warning "Check that your App Password has repository read permissions"
+        fi
+        echo ""
+        FETCH_RESULTS+=("Bitbucket Cloud ($workspace)|Failed|0")
+    fi
+
+    echo ""
+}
+
+# Bitbucket Data Center configuration
+configure_bitbucket_data_center() {
+    clear
+    print_section "Bitbucket Data Center Configuration"
+
+    print_context "We'll fetch repositories from your Bitbucket Server/Data Center instance."
+
+    # Server URL
+    BITBUCKET_DC_URL=$(ask_input "Bitbucket Data Center URL (e.g., https://bitbucket.company.com)")
+
+    # Personal Access Token
+    echo ""
+    echo -e "${BOLD}Supply a Bitbucket Data Center Personal Access Token.${RESET}"
+    echo ""
+    print_context "Bitbucket Data Center requires a Personal Access Token with 'repository:read' scope.
+Create one at: ${BITBUCKET_DC_URL}/plugins/servlet/access-tokens/manage"
+
+    local token=$(ask_secret_or_env_var "Bitbucket Data Center Personal Access Token")
+    export BITBUCKET_DC_TOKEN="$token"
+
+    echo ""
+    print_context "Projects are the top-level containers for repositories in Bitbucket Data Center."
+
+    # Collect projects and fetch immediately
+    while true; do
+        echo ""
+        local project=$(ask_input "Project key (e.g., PROJ)")
+        BITBUCKET_DC_PROJECTS+=("$project")
+
+        # Fetch immediately
+        fetch_from_bitbucket_data_center "$BITBUCKET_DC_URL" "$token" "$project"
+
+        if ! ask_yes_no "Add another Bitbucket Data Center project?"; then
+            break
+        fi
+    done
+
+    unset BITBUCKET_DC_TOKEN
+
+    # Ask if user wants to add another SCM provider
+    echo ""
+    if ask_yes_no "Do you want to add another SCM provider?"; then
+        clear
+        return 0  # Continue to next provider
+    else
+        clear
+        return 1  # Done with SCM configuration
+    fi
+}
+
+# Fetch from Bitbucket Data Center
+fetch_from_bitbucket_data_center() {
+    local bitbucket_url="$1"
+    local token="$2"
+    local project="$3"
+
+    print_section "Fetching from Bitbucket Data Center: $project"
+
+    local csv_file="$TEMP_DIR/bitbucket_dc_${project}.csv"
+
+    if run_with_progress "Fetching repositories" bash "$REPO_FETCHERS_DIR/bitbucket-data-center.sh" "$bitbucket_url" "$token" "http" "$project" "$csv_file"; then
+        local count=$(tail -n +2 "$csv_file" 2>/dev/null | wc -l | tr -d ' ')
+
+        if [ "$count" -eq 0 ]; then
+            print_error "No repositories found in Bitbucket Data Center: $project"
+            FETCH_RESULTS+=("Bitbucket DC ($project)|Failed|0")
+        else
+            print_success "Fetched $count repositories from Bitbucket Data Center"
+
+            # Show preview
+            echo ""
+            if [ "$count" -eq 1 ]; then
+                echo -e "${CYAN}Preview:${RESET}"
+            else
+                echo -e "${CYAN}Preview (first 2 repos):${RESET}"
+            fi
+            tail -n +2 "$csv_file" | head -2 | while IFS=, read -r cloneUrl branch origin path; do
+                cloneUrl=$(echo "$cloneUrl" | sed 's/^"//;s/"$//')
+                branch=$(echo "$branch" | sed 's/^"//;s/"$//')
+                origin=$(echo "$origin" | sed 's/^"//;s/"$//')
+                path=$(echo "$path" | sed 's/^"//;s/"$//')
+                echo -e "${GRAY}  • $path${RESET} ${CYAN}($branch)${RESET}"
+            done
+
+            REPO_SOURCES+=("$csv_file")
+            FETCH_RESULTS+=("Bitbucket DC ($project)|Success|$count")
+        fi
+    else
+        local error_detail=$(parse_error_message "$csv_file")
+        print_error "Failed to fetch from Bitbucket Data Center"
+        if [ -n "$error_detail" ]; then
+            print_warning "$error_detail"
+        else
+            print_warning "Check that your token has repository read permissions"
+        fi
+        echo ""
+        FETCH_RESULTS+=("Bitbucket DC ($project)|Failed|0")
+    fi
+
+    echo ""
+}
+
+# Organization structure configuration
+ask_csv_normalization() {
+    clear
+    print_section "Organization Structure"
+
+    print_context "Repositories can be organized using org columns:
+  - Simple: Use 'ALL' for a flat structure
+  - Hierarchical: Extract org hierarchy from repository paths (excluding repo name)
+
+Example hierarchical org columns for 'openrewrite/recipes/java/security':
+  org1=java, org2=recipes, org3=openrewrite, org4=ALL
+
+For GitHub (e.g., 'openrewrite/rewrite'):
+  org1=openrewrite, org2=ALL"
+
+    if ask_yes_no "Use hierarchical organization structure?"; then
+        USE_HIERARCHICAL_ORGS=true
+        print_success "Using hierarchical organization structure"
+    else
+        USE_HIERARCHICAL_ORGS=false
+        print_success "Using simple organization structure (ALL)"
+    fi
+
+    echo ""
+
+    print_context "CSV normalization pads all rows with empty columns to match the maximum depth.
+Empty columns are added at the beginning so 'ALL' appears in the same column for filtering.
+This ensures Excel and other tools can properly parse the file."
+
+    if ask_yes_no "Normalize CSV for Excel compatibility?"; then
+        NORMALIZE_CSV=true
+        print_success "CSV will be normalized"
+    else
+        NORMALIZE_CSV=false
+        print_success "CSV will not be normalized"
+    fi
+
+    clear
+}
+
+# Normalize CSV with organization hierarchy
+normalize_csv() {
+    local input_csv="$1"
+    local temp_output=$(mktemp)
+
+    # Find maximum depth
+    local max_depth=0
+    while IFS=',' read -r cloneUrl branch origin path; do
+        # Skip header
+        if [ "$cloneUrl" = "\"cloneUrl\"" ]; then
+            continue
+        fi
+
+        # Remove quotes
+        path=$(echo "$path" | tr -d '"')
+
+        # Count depth
+        local depth=$(echo "$path" | tr -cd '/' | wc -c | tr -d ' ')
+        depth=$((depth + 1))  # Number of segments = slashes + 1
+
+        if [ $depth -gt $max_depth ]; then
+            max_depth=$depth
+        fi
+    done < "$input_csv"
+
+    # Account for excluding repo name and adding ALL
+    # If max_depth is 2 (org/repo), we have 1 org + ALL = 2 org columns
+    # If max_depth is 3 (org/sub/repo), we have 2 orgs + ALL = 3 org columns
+    local num_org_cols=$max_depth
+
+    # Write header with org columns
+    local header="\"cloneUrl\",\"branch\",\"origin\",\"path\""
+    for ((i=1; i<=num_org_cols; i++)); do
+        header="$header,\"org$i\""
+    done
+    echo "$header" > "$temp_output"
+
+    # Process each repository
+    while IFS=',' read -r cloneUrl branch origin path; do
+        # Skip header
+        if [ "$cloneUrl" = "\"cloneUrl\"" ]; then
+            continue
+        fi
+
+        # Remove quotes from path for processing
+        local clean_path=$(echo "$path" | tr -d '"')
+
+        # Split path into segments
+        IFS='/' read -ra parts <<< "$clean_path"
+
+        # Build org columns (deepest first, excluding repo name)
+        local org_columns=()
+
+        # Add path components in reverse (deepest first), excluding the repo name
+        # Start from second-to-last element (${#parts[@]}-2) to exclude repo name
+        for ((j=${#parts[@]}-2; j>=0; j--)); do
+            if [ -n "${parts[j]}" ]; then
+                org_columns+=("${parts[j]}")
+            fi
+        done
+
+        # Always end with ALL
+        org_columns+=("ALL")
+
+        # Build org column string with padding at beginning
+        local org_string=""
+        local num_actual_orgs=${#org_columns[@]}
+        local padding_needed=$((num_org_cols - num_actual_orgs))
+
+        # Add padding at the beginning (empty columns)
+        if [ "$NORMALIZE_CSV" = true ]; then
+            for ((j=0; j<padding_needed; j++)); do
+                org_string="$org_string,"
+            done
+        fi
+
+        # Add actual org values
+        for ((j=0; j<num_actual_orgs; j++)); do
+            org_string="$org_string,\"${org_columns[$j]}\""
+        done
+
+        # Write the row
+        echo "$cloneUrl,$branch,$origin,$path$org_string" >> "$temp_output"
+
+    done < "$input_csv"
+
+    mv "$temp_output" "$OUTPUT_FILE"
+}
+
+# Generate repos.csv from collected sources
+generate_repos_csv() {
+    # Check if any repositories were fetched
+    if [ ${#REPO_SOURCES[@]} -eq 0 ]; then
+        print_error "No repositories were fetched"
+        exit 1
+    fi
+
+    local temp_merged="$TEMP_DIR/merged.csv"
+    local temp_data="$TEMP_DIR/data_with_orgs.txt"
+
+    # First pass: Generate all data rows and track max org depth
+    local max_org_depth=1
+    > "$temp_data"
+
+    for csv_file in "${REPO_SOURCES[@]}"; do
+        if [ ! -f "$csv_file" ]; then
+            continue
+        fi
+
+        while IFS=, read -r cloneUrl branch origin path; do
+            # Clean up quotes
+            cloneUrl=$(echo "$cloneUrl" | sed 's/^"//;s/"$//')
+            branch=$(echo "$branch" | sed 's/^"//;s/"$//')
+            origin=$(echo "$origin" | sed 's/^"//;s/"$//')
+            path=$(echo "$path" | sed 's/^"//;s/"$//')
+
+            if [ "$USE_HIERARCHICAL_ORGS" = true ]; then
+                # Extract org hierarchy from path (deepest to shallowest)
+                # Exclude the last segment (repository name)
+                IFS='/' read -ra parts <<< "$path"
+                local org_columns=()
+
+                # Add path components in reverse (deepest first), excluding the repo name
+                # Start from second-to-last element (${#parts[@]}-2) to exclude repo name
+                for ((j=${#parts[@]}-2; j>=0; j--)); do
+                    if [ -n "${parts[j]}" ]; then
+                        org_columns+=("${parts[j]}")
+                    fi
+                done
+
+                # Always end with ALL
+                org_columns+=("ALL")
+
+                # Track max depth
+                local depth=${#org_columns[@]}
+                if [ $depth -gt $max_org_depth ]; then
+                    max_org_depth=$depth
+                fi
+
+                # Store row data with org columns separated by |
+                echo "$cloneUrl|$branch|$origin|$path|${org_columns[*]}" >> "$temp_data"
+            else
+                echo "$cloneUrl|$branch|$origin|$path|ALL" >> "$temp_data"
+            fi
+        done < <(tail -n +2 "$csv_file")
+    done
+
+    # Determine number of org columns to use
+    local num_org_cols=$max_org_depth
+
+    # Generate header with correct number of org columns
+    local header="cloneUrl,branch,origin,path"
+    for ((i=1; i<=num_org_cols; i++)); do
+        header="$header,org$i"
+    done
+    echo "$header" > "$temp_merged"
+
+    # Second pass: Write data rows with appropriate padding
+    while IFS='|' read -r cloneUrl branch origin path org_data; do
+        IFS=' ' read -ra org_columns <<< "$org_data"
+
+        # Build org column string with padding at beginning
+        local org_string=""
+        local num_actual_orgs=${#org_columns[@]}
+        local padding_needed=$((num_org_cols - num_actual_orgs))
+
+        # Add padding at the beginning (empty columns)
+        if [ "$NORMALIZE_CSV" = true ]; then
+            for ((j=0; j<padding_needed; j++)); do
+                org_string="$org_string,"
+            done
+        fi
+
+        # Add actual org values
+        for ((j=0; j<num_actual_orgs; j++)); do
+            org_string="$org_string,\"${org_columns[$j]}\""
+        done
+
+        echo "\"$cloneUrl\",\"$branch\",\"$origin\",\"$path\"$org_string" >> "$temp_merged"
+    done < "$temp_data"
+
+    # Copy to output file
+    cp "$temp_merged" "$OUTPUT_FILE"
+}
+
+# Show fetch summary
+show_repos_summary() {
+    clear
+    print_section "Generating repos.csv"
+    echo ""
+
+    # Show spinner while generating repos.csv in background
+    (generate_repos_csv) &
+    local pid=$!
+
+    local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local i=0
+    echo -n "  "
+    while kill -0 $pid 2>/dev/null; do
+        i=$(( (i+1) % 10 ))
+        printf "\r${CYAN}${spin:$i:1}${RESET} Processing repositories and generating CSV..."
+        sleep 0.1
+    done
+    wait $pid
+
+    # Clear spinner line
+    printf "\r  "
+    printf "\033[K"
+
+    print_success "repos.csv generated successfully"
+    echo ""
+    sleep 0.5
+
+    clear
+    print_section "Repository Discovery Complete"
+
+    # Show summary
+    local total_repos=0
+    for result in "${FETCH_RESULTS[@]}"; do
+        IFS='|' read -r provider status count <<< "$result"
+
+        if [ "$status" = "Success" ]; then
+            echo -e "${GREEN}✓${RESET} $provider: $count repositories"
+            total_repos=$((total_repos + count))
+        else
+            echo -e "${RED}✗${RESET} $provider: Failed"
+        fi
+    done
+
+    echo ""
+    echo -e "${BOLD}Total repositories:${RESET} $total_repos"
+    print_success "Generated: $OUTPUT_FILE"
+    echo ""
+
+    # Show preview and ask if it looks OK
+    echo "Here are the first 10 lines of the generated repos.csv:"
+    echo ""
+    echo -e "${GRAY}$(head -n 10 "$OUTPUT_FILE")${RESET}"
+    echo ""
+
+    if ! ask_yes_no "Does this look correct?"; then
+        print_error "repos.csv generation issues detected"
+        echo ""
+        echo "Please review the file and re-run the wizard if needed."
+        exit 1
+    fi
+
+    clear
+}
+
+# ============================================================================
+# Phase 2: Docker Environment (Dockerfile wizard)
+# ============================================================================
+
+# Introduction page for Docker environment
+show_phase2_introduction() {
+    clear
+    print_section "Docker Environment - Configuration"
+
+    echo "Now we'll configure your Docker environment for running Moderne CLI's mass-ingest."
+    echo ""
+    echo -e "${CYAN}${BOLD}What we'll create:${RESET}"
+    echo ""
+    echo -e "  ${CYAN}•${RESET} ${BOLD}Dockerfile${RESET} - Custom Docker image with all required tools and runtimes"
+    echo -e "  ${CYAN}•${RESET} ${BOLD}docker-compose.yml${RESET} - Easy container management (optional)"
+    echo -e "  ${CYAN}•${RESET} ${BOLD}.env${RESET} - Environment configuration with your credentials"
+    echo ""
+    echo -e "${CYAN}${BOLD}What we'll configure:${RESET}"
+    echo ""
+    echo -e "  ${CYAN}1.${RESET} ${BOLD}JDK versions${RESET} - Java Development Kits (8, 11, 17, 21, 25)"
+    echo -e "  ${CYAN}2.${RESET} ${BOLD}Moderne CLI${RESET} - Version and authentication"
+    echo -e "  ${CYAN}3.${RESET} ${BOLD}Artifact repository${RESET} - Where to publish LST artifacts (Artifactory, etc.)"
+    echo -e "  ${CYAN}4.${RESET} ${BOLD}Build tools${RESET} - Maven, Gradle, Bazel"
+    echo -e "  ${CYAN}5.${RESET} ${BOLD}Language runtimes${RESET} - Node.js, Python, .NET, Android SDK"
+    echo -e "  ${CYAN}6.${RESET} ${BOLD}Security${RESET} - SAST scanning with ShiftLeft"
+    echo -e "  ${CYAN}7.${RESET} ${BOLD}Git authentication${RESET} - For cloning private repositories"
+    echo -e "  ${CYAN}8.${RESET} ${BOLD}Performance${RESET} - CPU and memory settings"
+    echo ""
+    echo -e "${CYAN}${BOLD}Why Docker?${RESET}"
+    echo ""
+    echo "Docker ensures consistent builds across environments and includes all dependencies"
+    echo "needed to analyze your repositories. The container runs mass-ingest with your"
+    echo "repos.csv to generate Lossless Semantic Trees (LSTs) for all your code."
+    echo ""
+
+    read -p "$(echo -e "${BOLD}Press Enter to continue...${RESET}")"
+    clear
+}
+
+# JDK selection
+ask_jdk_versions() {
+    while true; do
+        print_section "JDK Versions"
+
+        echo "The Moderne CLI needs access to all JDK versions used by your Java projects to"
+        echo "successfully build LSTs. We'll install JDK 8, 11, 17, 21, and 25 by default."
+        echo ""
+
+        print_context "${BOLD}Why all versions?\033[22m${GRAY} This ensures compatibility with projects targeting any Java version.
+The additional disk space (~2GB) is worth avoiding build failures.
+
+${BOLD}Safe to skip:\033[22m${GRAY} If you're certain your projects only use specific JDK versions, you can
+disable the ones you don't need to save space."
+
+        if ask_yes_no "Keep all JDK versions (8, 11, 17, 21, 25)?"; then
+            ENABLED_JDKS=("8" "11" "17" "21" "25")
+            print_success "All JDK versions will be installed"
+        else
+            echo ""
+            echo -e "${BOLD}Select which JDK versions to include:${RESET}"
+
+            local selected_jdks=()
+
+            if ask_yes_no "  Include JDK 8?"; then
+                selected_jdks+=("8")
+            fi
+
+            if ask_yes_no "  Include JDK 11?"; then
+                selected_jdks+=("11")
+            fi
+
+            if ask_yes_no "  Include JDK 17?"; then
+                selected_jdks+=("17")
+            fi
+
+            if ask_yes_no "  Include JDK 21?"; then
+                selected_jdks+=("21")
+            fi
+
+            if ask_yes_no "  Include JDK 25?"; then
+                selected_jdks+=("25")
+            fi
+
+            if [ ${#selected_jdks[@]} -eq 0 ]; then
+                echo -e "\n${RED}Error: At least one JDK version must be selected!${RESET}"
+                echo -e "${YELLOW}Defaulting to all JDK versions.${RESET}"
+                ENABLED_JDKS=("8" "11" "17" "21" "25")
+            else
+                ENABLED_JDKS=("${selected_jdks[@]}")
+                print_success "Selected JDK versions: ${ENABLED_JDKS[*]}"
+            fi
+        fi
+
+        # Confirm selection
+        echo ""
+        echo -e "${BOLD}Selected configuration:${RESET}"
+        echo -e "  JDK versions: ${ENABLED_JDKS[*]}"
+        echo ""
+        if ask_yes_no "Is this correct?"; then
+            break
+        fi
+        clear
+    done
+
+    clear
+}
+
+# Moderne CLI configuration
+ask_modcli_config() {
+    while true; do
+        # Reset for restart (preserve environment variables)
+        CLI_SOURCE="${CLI_SOURCE:-download}"
+        CLI_VERSION_TYPE="${CLI_VERSION_TYPE:-stable}"
+        CLI_SPECIFIC_VERSION="${CLI_SPECIFIC_VERSION:-}"
+        CLI_JAR_PATH="${CLI_JAR_PATH:-}"
+        MODERNE_TENANT="${MODERNE_TENANT:-}"
+        MODERNE_TOKEN="${MODERNE_TOKEN:-}"
+
+        print_section "Moderne CLI Configuration"
+
+        print_context "Choose how to provide the Moderne CLI to the container.
+
+${BOLD}Download from Maven Central:\033[22m${GRAY} Automatically fetches the specified version during build.
+${BOLD}Supply JAR directly:\033[22m${GRAY} You provide mod.jar in the build context (faster builds, version control)."
+
+        ask_choice "How do you want to provide the Moderne CLI?" \
+            "Download from Maven Central (recommended)" \
+            "Supply JAR directly (mod.jar in build context)"
+
+        case $CHOICE_RESULT in
+            0) CLI_SOURCE="download";;
+            1) CLI_SOURCE="local";;
+        esac
+
+        if [ "$CLI_SOURCE" = "download" ]; then
+            echo ""
+            print_context "Select which version to download.
+
+${BOLD}Latest stable:\033[22m${GRAY} Recommended for production use.
+${BOLD}Latest staging:\033[22m${GRAY} Pre-release version with newest features.
+${BOLD}Specific version:\033[22m${GRAY} Pin to a known version for reproducibility."
+
+            ask_choice "Which version do you want?" \
+                "Latest stable (recommended)" \
+                "Latest staging" \
+                "Specific version"
+
+            case $CHOICE_RESULT in
+                0) CLI_VERSION_TYPE="stable";;
+                1) CLI_VERSION_TYPE="staging";;
+                2)
+                    CLI_VERSION_TYPE="specific"
+                    read -p "$(echo -e "${BOLD}Enter version number${RESET} (e.g., 3.0.0): ")" CLI_SPECIFIC_VERSION
+                    if [ -z "$CLI_SPECIFIC_VERSION" ]; then
+                        echo -e "${YELLOW}No version specified, defaulting to latest stable${RESET}"
+                        CLI_VERSION_TYPE="stable"
+                    fi
+                    ;;
+            esac
+
+            print_success "Will download: $CLI_VERSION_TYPE$([ "$CLI_VERSION_TYPE" = "specific" ] && echo " ($CLI_SPECIFIC_VERSION)")"
+        else
+            echo ""
+            CLI_JAR_PATH=$(ask_optional_path "Enter path to mod.jar file (default: mod.jar in build context)")
+            if [ -z "$CLI_JAR_PATH" ]; then
+                CLI_JAR_PATH="mod.jar"
+                print_success "Will use mod.jar from build context"
+            else
+                print_success "Will use JAR from: $CLI_JAR_PATH"
+            fi
+        fi
+
+        # Ask for Moderne tenant configuration
+        echo ""
+        echo -e "${BOLD}Moderne Platform Configuration (Optional)${RESET}"
+        echo ""
+        print_context "If you want to connect to the Moderne platform (to publish LSTs or access
+recipes), provide your tenant name."
+        echo ""
+
+        MODERNE_TENANT=$(ask_optional_input "Moderne tenant name (e.g., 'acme' for acme.moderne.io)")
+
+        if [ -n "$MODERNE_TENANT" ]; then
+            local tenant_url="https://${MODERNE_TENANT}.moderne.io"
+            local api_url="https://api.${MODERNE_TENANT}.moderne.io"
+            print_success "Tenant URL: $tenant_url"
+            echo ""
+
+            if ask_yes_no "Do you want to supply a Moderne API token now?"; then
+                echo ""
+                echo -e "${BOLD}Supply a Moderne API token.${RESET}"
+                echo ""
+                echo -e "${CYAN}You can create a token at:${RESET}"
+                echo -e "  ${tenant_url}/settings/access-token"
+                echo ""
+
+                while true; do
+                    # Use a temp variable to avoid shadowing environment variables
+                    local token_input=$(ask_secret_or_env_var_ref "Moderne API token")
+                    token_input=$(clean_value "$token_input")
+
+                    if [ -n "$token_input" ]; then
+                        # Validate the token (expand env var references first for validation)
+                        local token_to_validate="$token_input"
+                        local is_env_var=false
+
+                        if is_env_var_reference "$token_input"; then
+                            is_env_var=true
+                            # Expand BEFORE assigning to MODERNE_TOKEN to avoid shadowing
+                            token_to_validate=$(expand_env_var "$token_input")
+
+                            if [ -z "$token_to_validate" ]; then
+                                # Env var not set - that's okay, they can set it later
+                                print_warning "Environment variable $token_input is not currently set"
+                                print_success "Will use $token_input (set this before running docker-compose)"
+                                MODERNE_TOKEN="$token_input"
+                                break
+                            else
+                                echo ""
+                                echo -e "${CYAN}Found $token_input in environment, validating...${RESET}"
+                            fi
+                        fi
+
+                        # Validate the token
+                        if ! $is_env_var; then
+                            echo ""
+                            echo -e "${CYAN}Validating token...${RESET}"
+                        fi
+
+                        if validate_moderne_token "$api_url" "$token_to_validate"; then
+                            if $is_env_var; then
+                                print_success "Token from $token_input validated successfully"
+                            else
+                                print_success "Token validated successfully"
+                            fi
+                            MODERNE_TOKEN="$token_input"
+                            break
+                        else
+                            if $is_env_var; then
+                                print_error "Token validation failed for $token_input"
+                                print_warning "The token in $token_input may be invalid or expired"
+                                echo -e "${GRAY}Current value: ${token_to_validate:0:20}...${RESET}"
+                            else
+                                print_error "Token validation failed"
+                                print_warning "The token may be invalid or the tenant URL may be incorrect"
+                            fi
+                            echo ""
+                            if ask_yes_no "Try again?"; then
+                                continue
+                            else
+                                MODERNE_TOKEN=""
+                                print_warning "You can add the token to .env later"
+                                break
+                            fi
+                        fi
+                    else
+                        MODERNE_TOKEN=""
+                        print_warning "You can add the token to .env later"
+                        break
+                    fi
+                done
+            else
+                MODERNE_TOKEN=""
+                print_success "You can add a token to .env later if needed"
+            fi
+        else
+            MODERNE_TOKEN=""
+            print_success "Skipping Moderne platform configuration"
+        fi
+
+        # Confirm configuration
+        echo ""
+        echo -e "${BOLD}Selected configuration:${RESET}"
+        if [ "$CLI_SOURCE" = "download" ]; then
+            echo -e "  Moderne CLI: Download from Maven Central ($CLI_VERSION_TYPE$([ "$CLI_VERSION_TYPE" = "specific" ] && echo " - $CLI_SPECIFIC_VERSION"))"
+        else
+            echo -e "  Moderne CLI: Local JAR file ($CLI_JAR_PATH)"
+        fi
+
+        if [ -n "$MODERNE_TENANT" ]; then
+            echo -e "  Tenant: https://${MODERNE_TENANT}.moderne.io"
+            if [ -n "$MODERNE_TOKEN" ]; then
+                if is_env_var_reference "$MODERNE_TOKEN"; then
+                    local token_value=$(expand_env_var "$MODERNE_TOKEN")
+                    if [ -n "$token_value" ]; then
+                        echo -e "  Token: ${GREEN}✓${RESET} ${MODERNE_TOKEN} (set)"
+                    else
+                        echo -e "  Token: ${GREEN}✓${RESET} ${MODERNE_TOKEN} (not yet set)"
+                    fi
+                else
+                    echo -e "  Token: ${GREEN}✓${RESET} Validated"
+                fi
+            else
+                echo -e "  Token: ${GRAY}(not configured)${RESET}"
+            fi
+        fi
+
+        echo ""
+        if ask_yes_no "Is this correct?"; then
+            break
+        fi
+        clear
+    done
+
+    clear
+}
+
+# Artifact repository configuration
+ask_artifact_repository_config() {
+    while true; do
+        # Reset for restart
+        PUBLISH_URL=""
+        PUBLISH_AUTH_METHOD="userpass"
+        PUBLISH_USER=""
+        PUBLISH_PASSWORD=""
+        PUBLISH_TOKEN=""
+
+        print_section "Artifact Repository Configuration"
+
+        print_context "Configure where Moderne CLI will publish the generated LST artifacts.
+This must be a ${BOLD}Maven 2 format/layout${RESET} repository (e.g., JFrog Artifactory with Maven 2 layout)."
+
+        echo ""
+        echo -e "${BOLD}Supply Maven 2 repository URL.${RESET}"
+        echo ""
+        print_context "Example: https://artifactory.company.com/artifactory/moderne-ingest/"
+
+        local url_input=$(ask_input_or_env_var "Maven 2 repository URL")
+        url_input=$(clean_value "$url_input")
+
+        if [ -z "$url_input" ]; then
+            print_error "Artifact repository URL is required"
+            echo ""
+            if ! ask_yes_no "Try again?"; then
+                print_warning "Skipping artifact repository configuration - you'll need to configure .env manually"
+                break
+            fi
+            clear
+            continue
+        fi
+
+        PUBLISH_URL="$url_input"
+        if is_env_var_reference "$PUBLISH_URL"; then
+            print_success "Using repository URL: $PUBLISH_URL"
+        else
+            print_success "Using repository: $PUBLISH_URL"
+        fi
+
+        # Ask for authentication method
+        echo ""
+        print_context "Choose authentication method for the artifact repository.
+
+${BOLD}Username/Password:\033[22m${GRAY} Standard authentication with credentials.
+${BOLD}Token:\033[22m${GRAY} API token or access token (e.g., JFrog API key)."
+
+        ask_choice "Authentication method" \
+            "Username and password" \
+            "Token (API key)"
+
+        case $CHOICE_RESULT in
+            0)
+                PUBLISH_AUTH_METHOD="userpass"
+                echo ""
+                echo -e "${BOLD}Supply artifact repository username.${RESET}"
+
+                local user_input=$(ask_input_or_env_var "Username")
+                user_input=$(clean_value "$user_input")
+
+                if [ -z "$user_input" ]; then
+                    print_error "Username is required"
+                    echo ""
+                    if ! ask_yes_no "Try again?"; then
+                        print_warning "Skipping artifact repository configuration"
+                        break
+                    fi
+                    clear
+                    continue
+                fi
+
+                PUBLISH_USER="$user_input"
+                echo ""
+                echo -e "${BOLD}Supply artifact repository password.${RESET}"
+
+                local password_input=$(ask_secret_or_env_var_ref "Password")
+                password_input=$(clean_value "$password_input")
+
+                if [ -z "$password_input" ]; then
+                    print_error "Password is required"
+                    echo ""
+                    if ! ask_yes_no "Try again?"; then
+                        print_warning "Skipping artifact repository configuration"
+                        break
+                    fi
+                    clear
+                    continue
+                fi
+
+                PUBLISH_PASSWORD="$password_input"
+
+                # Test connection (don't fail on errors, just log)
+                echo ""
+                echo -e "${CYAN}Testing connection...${RESET}"
+
+                # Expand env vars for testing
+                local test_url=$(expand_env_var "$PUBLISH_URL")
+                local test_user=$(expand_env_var "$PUBLISH_USER")
+                local test_password=$(expand_env_var "$PUBLISH_PASSWORD")
+
+                if [ -n "$test_url" ] && [ -n "$test_user" ] && [ -n "$test_password" ]; then
+                    if validate_artifact_repository "$test_url" "userpass" "$test_user" "$test_password" ""; then
+                        print_success "Connection test successful"
+                    else
+                        print_warning "Connection test failed - please verify credentials before running"
+                    fi
+                else
+                    print_warning "Environment variables not set - skipping connection test"
+                fi
+                ;;
+            1)
+                PUBLISH_AUTH_METHOD="token"
+                echo ""
+                echo -e "${BOLD}Supply artifact repository API token.${RESET}"
+                echo ""
+                local token_input=$(ask_secret_or_env_var_ref "API token")
+                token_input=$(clean_value "$token_input")
+
+                if [ -z "$token_input" ]; then
+                    print_error "Token is required"
+                    echo ""
+                    if ! ask_yes_no "Try again?"; then
+                        print_warning "Skipping artifact repository configuration"
+                        break
+                    fi
+                    clear
+                    continue
+                fi
+
+                PUBLISH_TOKEN="$token_input"
+
+                # Test connection (don't fail on errors, just log)
+                echo ""
+                echo -e "${CYAN}Testing connection...${RESET}"
+
+                # Expand env vars for testing
+                local test_url=$(expand_env_var "$PUBLISH_URL")
+                local test_token=$(expand_env_var "$PUBLISH_TOKEN")
+
+                if [ -n "$test_url" ] && [ -n "$test_token" ]; then
+                    if validate_artifact_repository "$test_url" "token" "" "" "$test_token"; then
+                        print_success "Connection test successful"
+                    else
+                        print_warning "Connection test failed - please verify credentials before running"
+                    fi
+                else
+                    print_warning "Environment variables not set - skipping connection test"
+                fi
+                ;;
+        esac
+
+        # Confirm configuration
+        echo ""
+        echo -e "${BOLD}Selected configuration:${RESET}"
+        echo -e "  Repository URL: $PUBLISH_URL"
+        if [ "$PUBLISH_AUTH_METHOD" = "userpass" ]; then
+            echo -e "  Authentication: Username/Password"
+            echo -e "  Username: $PUBLISH_USER"
+        else
+            echo -e "  Authentication: Token"
+        fi
+        echo ""
+
+        if ask_yes_no "Is this correct?"; then
+            break
+        fi
+        clear
+    done
+
+    clear
+}
+
+# Maven configuration page
+ask_maven_build_config() {
+    while true; do
+        # Reset for restart
+        ENABLE_MAVEN=false
+        MAVEN_SETTINGS_FILE=""
+        MAVEN_VERSION="3.9.11"
+
+        print_section "Maven Configuration"
+
+        echo "Maven is a popular build tool for Java projects."
+        echo ""
+
+        print_context "${BOLD}Maven wrappers (mvnw):\033[22m${GRAY} Many projects include wrapper scripts that don't require Maven to be pre-installed.
+${BOLD}Pre-installed Maven:\033[22m${GRAY} Older projects or specific scenarios may need Maven available globally."
+
+        if ! ask_yes_no "Do any of your repositories use Maven?"; then
+            clear
+            return
+        fi
+
+        echo ""
+        if ask_yes_no "Do you need Maven pre-installed? (Say 'no' if all projects use mvnw wrapper)"; then
+            ENABLE_MAVEN=true
+
+            # Ask for Maven version with validation
+            while true; do
+                read -p "$(echo -e "${BOLD}Maven version${RESET} (press Enter for default) [$MAVEN_VERSION]: ")" user_maven_version
+
+                if [ -z "$user_maven_version" ]; then
+                    # User pressed Enter, use default
+                    break
+                fi
+
+                # Validate semver format (MAJOR.MINOR.PATCH)
+                if [[ "$user_maven_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                    MAVEN_VERSION="$user_maven_version"
+                    break
+                else
+                    echo -e "${RED}Invalid version format. Maven versions must follow semver (e.g., 3.9.11)${RESET}"
+                    if ! ask_yes_no "Try again?"; then
+                        # Keep default version
+                        break
+                    fi
+                fi
+            done
+
+            print_success "Maven $MAVEN_VERSION will be installed"
+        else
+            print_success "Maven will not be installed (projects will use wrappers)"
+        fi
+
+        # Maven settings.xml configuration
+        echo ""
+        echo -e "${BOLD}Maven Settings${RESET}"
+        print_context "If your Maven builds require custom settings (private repositories, mirrors, profiles,
+authentication), you can provide a settings.xml file.
+
+${BOLD}What this does:\033[22m${GRAY} Copies your settings.xml to /root/.m2/ and configures mod CLI to use it."
+
+        if ask_yes_no "Do you need custom Maven settings.xml?"; then
+            while true; do
+                MAVEN_SETTINGS_FILE=$(ask_optional_path "Enter path to your settings.xml file")
+
+                if [ -z "$MAVEN_SETTINGS_FILE" ]; then
+                    echo -e "\n${YELLOW}Note: Maven settings sections will be included as comments."
+                    echo -e "      You'll need to uncomment and customize them manually.${RESET}"
+                    break
+                fi
+
+                # Validate file extension
+                if [[ ! "$MAVEN_SETTINGS_FILE" =~ \.xml$ ]]; then
+                    echo -e "${RED}Error: Maven settings must be an XML file (expected .xml extension)${RESET}"
+                    echo -e "${YELLOW}You provided: $(basename "$MAVEN_SETTINGS_FILE")${RESET}"
+                    if ! ask_yes_no "Try again?"; then
+                        MAVEN_SETTINGS_FILE=""
+                        break
+                    fi
+                    continue
+                fi
+
+                if [ -f "$MAVEN_SETTINGS_FILE" ]; then
+                    print_success "Maven settings file found: $MAVEN_SETTINGS_FILE"
+                    break
+                else
+                    print_error "Warning: File not found, but will include in Dockerfile anyway"
+                    echo -e "${YELLOW}        Make sure to provide the settings.xml before building.${RESET}"
+                    if ask_yes_no "Use this path anyway?"; then
+                        break
+                    fi
+                fi
+            done
+        fi
+
+        # Confirm configuration
+        echo ""
+        echo -e "${BOLD}Selected configuration:${RESET}"
+        if [ "$ENABLE_MAVEN" = true ]; then
+            echo -e "  Maven: Version $MAVEN_VERSION will be installed"
+        else
+            echo -e "  Maven: Not installed (projects use wrappers)"
+        fi
+        if [ -n "$MAVEN_SETTINGS_FILE" ]; then
+            echo -e "  Maven settings: $MAVEN_SETTINGS_FILE"
+        else
+            echo -e "  Maven settings: None configured"
+        fi
+        echo ""
+        if ask_yes_no "Is this correct?"; then
+            break
+        fi
+        clear
+    done
+
+    clear
+}
+
+# Gradle configuration page
+ask_gradle_build_config() {
+    while true; do
+        # Reset for restart
+        ENABLE_GRADLE=false
+        GRADLE_VERSION="8.14"
+
+        print_section "Gradle Configuration"
+
+        echo "Gradle is a popular build tool for Java and Kotlin projects."
+        echo ""
+
+        print_context "${BOLD}Gradle wrappers (gradlew):\033[22m${GRAY} Many projects include wrapper scripts that don't require Gradle to be pre-installed.
+${BOLD}Pre-installed Gradle:\033[22m${GRAY} Older projects or specific scenarios may need Gradle available globally."
+
+        if ! ask_yes_no "Do any of your repositories use Gradle?"; then
+            clear
+            return
+        fi
+
+        echo ""
+        if ask_yes_no "Do you need Gradle pre-installed? (Say 'no' if all projects use gradlew wrapper)"; then
+            ENABLE_GRADLE=true
+
+            echo ""
+            echo -e "${BOLD}Enter Gradle version (default: 8.14):${RESET}"
+            read -r version_input
+            if [ -n "$version_input" ]; then
+                GRADLE_VERSION="$version_input"
+            fi
+        fi
+
+        echo ""
+        echo -e "${BOLD}Selected configuration:${RESET}"
+        if [ "$ENABLE_GRADLE" = true ]; then
+            echo -e "  Gradle: Version $GRADLE_VERSION will be installed"
+        else
+            echo -e "  Gradle: Not installed (projects use wrappers)"
+        fi
+        echo ""
+        if ask_yes_no "Is this correct?"; then
+            break
+        fi
+        clear
+    done
+
+    clear
+}
+
+# Other build tools
+ask_other_build_tools() {
+    while true; do
+        print_section "Other Build Tools"
+
+        print_context "Some projects use specialized build tools beyond Maven and Gradle."
+
+        # Bazel
+        echo -e "${BOLD}Bazel${RESET}"
+        echo "Google's build system, commonly used in monorepos and large-scale projects."
+        if ask_yes_no "Do you use Bazel?"; then
+            ENABLE_BAZEL=true
+        else
+            ENABLE_BAZEL=false
+        fi
+
+        echo ""
+        echo -e "${BOLD}Selected configuration:${RESET}"
+        if [ "$ENABLE_BAZEL" = true ]; then
+            echo -e "  Bazel: Will be installed"
+        else
+            echo -e "  Bazel: Not needed"
+        fi
+        echo ""
+        if ask_yes_no "Is this correct?"; then
+            break
+        fi
+        clear
+    done
+
+    clear
+}
+
+# Development platforms & runtimes
+ask_language_runtimes() {
+    while true; do
+        # Initialize all to false for restart
+        ENABLE_ANDROID=false
+        ENABLE_NODE=false
+        ENABLE_PYTHON=false
+        ENABLE_DOTNET=false
+
+        print_section "Development Platforms & Runtimes"
+
+        print_context "While the Moderne CLI primarily processes Java/Kotlin projects, your repositories
+may have multi-language components that require additional runtimes for successful builds.
+
+Answer 'yes' if any of your repositories need these runtimes."
+
+        # Android
+        echo -e "${BOLD}Android SDK${RESET}"
+        echo "Required for Android applications. Installs API platforms 25-33 (~5GB)."
+        if ask_yes_no "Do you have Android projects?"; then
+            ENABLE_ANDROID=true
+        fi
+
+        # Node.js
+        echo -e "\n${BOLD}Node.js${RESET}"
+        echo "Required for projects with frontend components or JavaScript/TypeScript code."
+        if ask_yes_no "Do you need Node.js?"; then
+            ENABLE_NODE=true
+        fi
+
+        # Python
+        echo -e "\n${BOLD}Python 3.11${RESET}"
+        echo "Needed for Python projects or build scripts with Python dependencies."
+        if ask_yes_no "Do you need Python?"; then
+            ENABLE_PYTHON=true
+        fi
+
+        # .NET
+        echo -e "\n${BOLD}.NET SDK${RESET}"
+        echo "Required for .NET/C# projects. Installs .NET 6.0 and 8.0 SDKs."
+        if ask_yes_no "Do you have .NET projects?"; then
+            ENABLE_DOTNET=true
+        fi
+
+        echo ""
+        echo -e "${BOLD}Selected configuration:${RESET}"
+        local any_selected=false
+        [ "$ENABLE_ANDROID" = true ] && echo -e "  Android SDK: Will be installed" && any_selected=true
+        [ "$ENABLE_NODE" = true ] && echo -e "  Node.js 20.x: Will be installed" && any_selected=true
+        [ "$ENABLE_PYTHON" = true ] && echo -e "  Python 3.11: Will be installed" && any_selected=true
+        [ "$ENABLE_DOTNET" = true ] && echo -e "  .NET SDK 6.0/8.0: Will be installed" && any_selected=true
+        [ "$any_selected" = false ] && echo -e "  No additional language runtimes"
+        echo ""
+        if ask_yes_no "Is this correct?"; then
+            break
+        fi
+        clear
+    done
+
+    clear
+}
+
+# Scalability options
+ask_scalability_options() {
+    while true; do
+        # Reset for restart
+        ENABLE_AWS_CLI=false
+        ENABLE_AWS_BATCH=false
+
+        print_section "Scalability Options"
+
+        # AWS CLI for S3 URLs
+        echo -e "\n${BOLD}AWS CLI for S3 URLs${RESET}"
+        echo "If your repositories are stored in S3 or you need to access S3 resources,"
+        echo "the AWS CLI can be installed in the container."
+        echo ""
+
+        print_context "${BOLD}What this does:\033[22m${GRAY} Installs AWS CLI v2, allowing you to use S3 URLs in your repos.csv
+and access AWS resources during processing."
+
+        if ask_yes_no "Do you need AWS CLI?"; then
+            ENABLE_AWS_CLI=true
+        fi
+
+        # AWS Batch support
+        echo -e "\n${BOLD}AWS Batch Support${RESET}"
+        echo "AWS Batch allows you to run containerized jobs at scale."
+        echo ""
+
+        print_context "${BOLD}What this does:\033[22m${GRAY} Includes chunk.sh script for job parallelization in AWS Batch environments."
+
+        if ask_yes_no "Do you need AWS Batch support?"; then
+            ENABLE_AWS_BATCH=true
+        fi
+
+        echo ""
+        echo -e "${BOLD}Selected configuration:${RESET}"
+        local any_selected=false
+        if [ "$ENABLE_AWS_CLI" = true ]; then
+            echo -e "  AWS CLI: Will be installed"
+            any_selected=true
+        fi
+        if [ "$ENABLE_AWS_BATCH" = true ]; then
+            echo -e "  AWS Batch support: Will be included"
+            any_selected=true
+        fi
+        if [ "$any_selected" = false ]; then
+            echo -e "  No scalability options needed"
+        fi
+        echo ""
+        if ask_yes_no "Is this correct?"; then
+            break
+        fi
+        clear
+    done
+
+    clear
+}
+
+# Security configuration
+ask_security_config() {
+    while true; do
+        # Reset for restart
+        CERT_FILE=""
+
+        print_section "Security Configuration"
+
+        # Self-signed certificates
+        echo "If your artifact repository, source control, or Moderne tenant uses self-signed"
+        echo "certificates, you'll need to import them into the JVM trust stores."
+        echo ""
+
+        print_context "${BOLD}What this does:\033[22m${GRAY} Imports your certificate into all JDK keystores and configures wget
+for Maven wrapper scripts."
+
+        if ! ask_yes_no "Do you use self-signed certificates?"; then
+            clear
+            return
+        fi
+
+        # If we get here, user said yes
+        if true; then
+            while true; do
+                CERT_FILE=$(ask_optional_path "Enter path to your certificate file (e.g., mycert.crt)")
+
+                if [ -z "$CERT_FILE" ]; then
+                    echo -e "\n${YELLOW}Note: Certificate configuration sections will be included as comments."
+                    echo -e "      You'll need to uncomment and customize them manually.${RESET}"
+                    break
+                fi
+
+                # Validate file extension (common certificate formats)
+                if [[ ! "$CERT_FILE" =~ \.(crt|cer|pem|der)$ ]]; then
+                    echo -e "${RED}Warning: File doesn't appear to be a certificate (expected .crt, .cer, .pem, or .der)${RESET}"
+                    if ! ask_yes_no "Use this file anyway?"; then
+                        continue
+                    fi
+                fi
+
+                if [ -f "$CERT_FILE" ]; then
+                    print_success "Certificate file found: $CERT_FILE"
+                    break
+                else
+                    print_error "Warning: File not found, but will include in Dockerfile anyway"
+                    echo -e "${YELLOW}        Make sure to provide the certificate before building.${RESET}"
+                    if ask_yes_no "Use this path anyway?"; then
+                        break
+                    fi
+                fi
+            done
+        fi
+
+        # Confirm configuration
+        echo ""
+        echo -e "${BOLD}Selected configuration:${RESET}"
+        if [ -n "$CERT_FILE" ]; then
+            echo -e "  Certificate: $CERT_FILE"
+        else
+            echo -e "  Certificate: None configured"
+        fi
+        echo ""
+        if ask_yes_no "Is this correct?"; then
+            break
+        fi
+        clear
+    done
+
+    clear
+}
+
+# Git authentication
+ask_git_auth() {
+    while true; do
+        # Reset for restart
+        ENABLE_GIT_SSH=false
+        ENABLE_GIT_HTTPS=false
+        CREATE_GIT_CREDENTIALS_TEMPLATE=false
+
+        print_section "Git Authentication"
+
+        echo "Configure Git authentication for accessing private repositories."
+        echo ""
+
+        print_context "${BOLD}SSH authentication:\033[22m${GRAY} Uses SSH keys for Git operations. Place your SSH keys in a .ssh/ directory.
+${BOLD}HTTPS authentication:\033[22m${GRAY} Uses a .git-credentials file with personal access tokens."
+
+        # Ask about SSH
+        if ask_yes_no "Do you need SSH authentication?"; then
+            ENABLE_GIT_SSH=true
+
+            # Create .ssh directory
+            local build_dir=$(dirname "$OUTPUT_DOCKERFILE")
+            local ssh_dir="$build_dir/.ssh"
+            if [ ! -d "$ssh_dir" ]; then
+                mkdir -p "$ssh_dir"
+                print_success "Created .ssh/ directory in build context"
+            fi
+        fi
+
+        echo ""
+
+        # Ask about HTTPS
+        if ask_yes_no "Do you need HTTPS authentication?"; then
+            ENABLE_GIT_HTTPS=true
+
+            echo ""
+            if ask_yes_no "Do you already have a .git-credentials file?"; then
+                print_success "HTTPS authentication will use your existing .git-credentials file"
+            else
+                # Create template .git-credentials file
+                local build_dir=$(dirname "$OUTPUT_DOCKERFILE")
+                local creds_file="$build_dir/.git-credentials"
+                cat > "$creds_file" << 'EOF'
+# Git credentials for HTTPS authentication
+# Format: https://username:token@hostname
+#
+# Examples:
+#   https://myuser:ghp_tokenhere@github.com
+#   https://myuser:glpat-tokenhere@gitlab.com
+#   https://myuser:tokenhere@bitbucket.org
+#
+# Add your credentials below (one per line):
+
+EOF
+                CREATE_GIT_CREDENTIALS_TEMPLATE=true
+                print_success "Created template .git-credentials file in build context"
+            fi
+        fi
+
+        echo ""
+        echo -e "${BOLD}Selected configuration:${RESET}"
+        local any_selected=false
+        if [ "$ENABLE_GIT_SSH" = true ]; then
+            echo -e "  SSH authentication: Will be configured"
+            any_selected=true
+        fi
+        if [ "$ENABLE_GIT_HTTPS" = true ]; then
+            echo -e "  HTTPS authentication: Will be configured"
+            if [ "$CREATE_GIT_CREDENTIALS_TEMPLATE" = true ]; then
+                echo -e "    Template .git-credentials file created"
+            fi
+            any_selected=true
+        fi
+        if [ "$any_selected" = false ]; then
+            echo -e "  No Git authentication needed"
+        fi
+        echo ""
+        if ask_yes_no "Is this correct?"; then
+            break
+        fi
+        clear
+    done
+
+    clear
+}
+
+# Runtime configuration
+ask_runtime_config() {
+    while true; do
+        print_section "Runtime Configuration"
+
+        # Java options
+        echo -e "${BOLD}JVM Options${RESET}"
+        print_context "Configure JVM options for the Moderne CLI runtime. These affect memory allocation
+and stack size for LST processing."
+        echo "Default: -Xmx4g -Xss3m (4GB max heap, 3MB stack size)"
+        echo ""
+
+        local default_java_opts="-Xmx4g -Xss3m"
+        read -p "$(echo -e "${BOLD}Java options${RESET} (press Enter for default) [${default_java_opts}]: ")" user_java_opts
+        if [ -n "$user_java_opts" ]; then
+            JAVA_OPTIONS="$user_java_opts"
+        else
+            JAVA_OPTIONS="$default_java_opts"
+        fi
+
+        # Data directory
+        echo -e "\n${BOLD}Data Directory${RESET}"
+        print_context "The directory where Moderne CLI stores its data, including LST artifacts
+and temporary files."
+        echo "Default: /var/moderne"
+        echo ""
+
+        local default_data_dir="/var/moderne"
+        read -p "$(echo -e "${BOLD}Data directory${RESET} (press Enter for default) [${default_data_dir}]: ")" user_data_dir
+        if [ -n "$user_data_dir" ]; then
+            DATA_DIR="$user_data_dir"
+        else
+            DATA_DIR="$default_data_dir"
+        fi
+
+        echo ""
+        echo -e "${BOLD}Selected configuration:${RESET}"
+        echo -e "  JVM options: $JAVA_OPTIONS"
+        echo -e "  Data directory: $DATA_DIR"
+        echo ""
+        if ask_yes_no "Is this correct?"; then
+            break
+        fi
+        clear
+    done
+
+    clear
+}
+
+# Docker Compose configuration
+ask_docker_compose() {
+    print_section "Docker Compose"
+
+    echo "Docker Compose simplifies container management with configuration files."
+    echo ""
+
+    print_context "${BOLD}What you get:\033[22m${GRAY} A docker-compose.yml and .env.example file for easier startup.
+Just edit .env with your credentials and run 'docker compose up'."
+
+    if ask_yes_no "Generate Docker Compose files?"; then
+        GENERATE_DOCKER_COMPOSE=true
+        print_success "Docker Compose files will be generated"
+    else
+        print_success "Will use manual docker commands instead"
+    fi
+
+    echo ""
+    echo ""
+
+    # Ask about data persistence
+    print_section "Data Persistence"
+
+    echo "The mass-ingest process generates LST artifacts and metadata during processing."
+    echo ""
+
+    print_context "${BOLD}Persist data:\033[22m${GRAY} Mount a local directory to save generated LSTs and processing state.
+This allows you to stop and restart the container without losing progress.
+
+${BOLD}No persistence:\033[22m${GRAY} Data stays inside the container. Useful for testing or one-time runs."
+
+    if ask_yes_no "Mount a data directory for persistence?"; then
+        echo ""
+        echo -e "${BOLD}Enter data directory path (default: ./data):${RESET}"
+        read -r dir_input
+        if [ -z "$dir_input" ]; then
+            DATA_MOUNT_DIR="./data"
+        else
+            DATA_MOUNT_DIR="$dir_input"
+        fi
+        print_success "Will mount $DATA_MOUNT_DIR to /var/moderne"
+    else
+        DATA_MOUNT_DIR=""
+        print_success "No data directory mount (ephemeral storage)"
+    fi
+
+    clear
+}
+
+# Helper function to get highest JDK version from enabled list
+get_highest_jdk() {
+    local highest=0
+    for jdk in "${ENABLED_JDKS[@]}"; do
+        if [ "$jdk" -gt "$highest" ]; then
+            highest="$jdk"
+        fi
+    done
+    echo "$highest"
+}
+
+# Generate base Dockerfile with selected JDKs only
+generate_base_section() {
+    local output="$1"
+    local highest_jdk=$(get_highest_jdk)
+
+    # Generate FROM statements for selected JDKs
+    for jdk in "${ENABLED_JDKS[@]}"; do
+        echo "FROM eclipse-temurin:${jdk}-jdk AS jdk${jdk}" >> "$output"
+    done
+    echo "" >> "$output"
+
+    # Install dependencies (using highest JDK as base)
+    echo "# Install dependencies for \`mod\` cli" >> "$output"
+    echo "FROM jdk${highest_jdk} AS dependencies" >> "$output"
+    echo "RUN apt-get -y update && apt-get install -y curl git git-lfs jq libxml2-utils unzip wget zip vim && git lfs install" >> "$output"
+    echo "" >> "$output"
+
+    # Copy selected JDK versions
+    echo "# Gather various JDK versions" >> "$output"
+    for jdk in "${ENABLED_JDKS[@]}"; do
+        echo "COPY --from=jdk${jdk} /opt/java/openjdk /usr/lib/jvm/temurin-${jdk}-jdk" >> "$output"
+    done
+}
+
+# Generate certificate configuration for selected JDKs only
+generate_certs_section() {
+    local output="$1"
+    local cert_basename="$2"
+
+    echo "# Configure trust store for self-signed certificates" >> "$output"
+    echo "COPY ${cert_basename} /root/${cert_basename}" >> "$output"
+
+    # Add keytool imports for each enabled JDK
+    for jdk in "${ENABLED_JDKS[@]}"; do
+        if [ "$jdk" = "8" ]; then
+            # JDK 8 has cacerts in a different location
+            echo "RUN /usr/lib/jvm/temurin-${jdk}-jdk/bin/keytool -import -noprompt -file /root/${cert_basename} -keystore /usr/lib/jvm/temurin-${jdk}-jdk/jre/lib/security/cacerts -storepass changeit" >> "$output"
+        else
+            echo "RUN /usr/lib/jvm/temurin-${jdk}-jdk/bin/keytool -import -noprompt -file /root/${cert_basename} -keystore /usr/lib/jvm/temurin-${jdk}-jdk/lib/security/cacerts -storepass changeit" >> "$output"
+        fi
+    done
+
+    echo "RUN mod config http trust-store edit java-home" >> "$output"
+    echo "" >> "$output"
+    echo "# mvnw scripts in maven projects may attempt to download maven-wrapper jars using wget." >> "$output"
+    echo "RUN echo \"ca_certificate = /root/${cert_basename}\" > /root/.wgetrc" >> "$output"
+}
+
+# Generate the Dockerfile
+generate_dockerfile() {
+    print_section "Generating Dockerfile"
+
+    local output="$OUTPUT_DOCKERFILE"
+
+    # Check if templates exist
+    if [ ! -d "$TEMPLATES_DIR" ]; then
+        print_error "Templates directory not found: $TEMPLATES_DIR"
+        exit 1
+    fi
+
+    # Start fresh
+    > "$output"
+
+    # Generate base section with selected JDKs
+    generate_base_section "$output"
+    echo "" >> "$output"
+
+    # Add Moderne CLI (download or local)
+    if [ "$CLI_SOURCE" = "local" ]; then
+        sed -e "s|{{CLI_JAR_PATH}}|$CLI_JAR_PATH|g" \
+            "$TEMPLATES_DIR/00-modcli-local.Dockerfile" >> "$output"
+    else
+        # Download - replace placeholders for stage and version
+        local cli_stage=""
+        local cli_version=""
+
+        if [ "$CLI_VERSION_TYPE" = "staging" ]; then
+            cli_stage="staging"
+        elif [ "$CLI_VERSION_TYPE" = "specific" ]; then
+            cli_version="$CLI_SPECIFIC_VERSION"
+        fi
+        # For stable, both remain empty (script will download latest stable)
+
+        sed -e "s|{{CLI_STAGE}}|$cli_stage|g" \
+            -e "s|{{CLI_VERSION}}|$cli_version|g" \
+            "$TEMPLATES_DIR/00-modcli-download.Dockerfile" >> "$output"
+    fi
+    echo "" >> "$output"
+
+    # Add build tools
+    if [ "$ENABLE_GRADLE" = true ]; then
+        # Replace hardcoded Gradle version with user's chosen version
+        sed "s/8\.14/$GRADLE_VERSION/g" "$TEMPLATES_DIR/10-gradle.Dockerfile" >> "$output"
+        echo "" >> "$output"
+    fi
+
+    if [ "$ENABLE_MAVEN" = true ]; then
+        # Replace hardcoded Maven version with user's chosen version
+        sed "s/ENV MAVEN_VERSION=.*/ENV MAVEN_VERSION=$MAVEN_VERSION/" "$TEMPLATES_DIR/11-maven.Dockerfile" >> "$output"
+        echo "" >> "$output"
+    fi
+
+    # Add language runtimes
+    if [ "$ENABLE_ANDROID" = true ]; then
+        cat "$TEMPLATES_DIR/20-android.Dockerfile" >> "$output"
+        echo "" >> "$output"
+    fi
+
+    if [ "$ENABLE_BAZEL" = true ]; then
+        cat "$TEMPLATES_DIR/21-bazel.Dockerfile" >> "$output"
+        echo "" >> "$output"
+    fi
+
+    if [ "$ENABLE_NODE" = true ]; then
+        cat "$TEMPLATES_DIR/22-node.Dockerfile" >> "$output"
+        echo "" >> "$output"
+    fi
+
+    if [ "$ENABLE_PYTHON" = true ]; then
+        cat "$TEMPLATES_DIR/23-python.Dockerfile" >> "$output"
+        echo "" >> "$output"
+    fi
+
+    if [ "$ENABLE_DOTNET" = true ]; then
+        cat "$TEMPLATES_DIR/24-dotnet.Dockerfile" >> "$output"
+        echo "" >> "$output"
+    fi
+
+    # Add AWS CLI
+    if [ "$ENABLE_AWS_CLI" = true ]; then
+        cat "$TEMPLATES_DIR/15-aws-cli.Dockerfile" >> "$output"
+        echo "" >> "$output"
+    fi
+
+    # Add AWS Batch support
+    if [ "$ENABLE_AWS_BATCH" = true ]; then
+        cat "$TEMPLATES_DIR/16-aws-batch.Dockerfile" >> "$output"
+        echo "" >> "$output"
+    fi
+
+    # Add Maven settings
+    if [ -n "$MAVEN_SETTINGS_FILE" ]; then
+        # Replace placeholder with actual filename
+        local settings_basename=$(basename "$MAVEN_SETTINGS_FILE")
+        sed "s|{{SETTINGS_FILE}}|$settings_basename|g" "$TEMPLATES_DIR/32-maven-settings.Dockerfile" >> "$output"
+        echo "" >> "$output"
+    fi
+
+    # Add certificate configuration
+    if [ -n "$CERT_FILE" ]; then
+        # Generate cert section with only selected JDKs
+        local cert_basename=$(basename "$CERT_FILE")
+        generate_certs_section "$output" "$cert_basename"
+        echo "" >> "$output"
+    fi
+
+    # Add Git authentication configuration
+    if [ "$ENABLE_GIT_SSH" = true ] || [ "$ENABLE_GIT_HTTPS" = true ]; then
+        echo "# Git authentication" >> "$output"
+
+        if [ "$ENABLE_GIT_SSH" = true ]; then
+            echo "COPY .ssh/ /root/.ssh/" >> "$output"
+            echo "RUN chmod 700 /root/.ssh && find /root/.ssh -type f -exec chmod 600 {} +" >> "$output"
+        fi
+
+        if [ "$ENABLE_GIT_HTTPS" = true ]; then
+            echo "COPY .git-credentials /root/.git-credentials" >> "$output"
+            echo "RUN chmod 600 /root/.git-credentials && git config --global credential.helper store" >> "$output"
+        fi
+
+        echo "" >> "$output"
+    fi
+
+    # Always include runner (with placeholder replacement)
+    sed -e "s|{{JAVA_OPTIONS}}|$JAVA_OPTIONS|g" \
+        -e "s|{{DATA_DIR}}|$DATA_DIR|g" \
+        "$TEMPLATES_DIR/99-runner.Dockerfile" >> "$output"
+
+    print_success "Dockerfile generated: $output"
+}
+
+# Generate docker-compose.yml and .env.example files
+generate_docker_compose() {
+    local output_dir=$(dirname "$OUTPUT_DOCKERFILE")
+    local compose_file="$output_dir/$OUTPUT_DOCKER_COMPOSE"
+    local env_file="$output_dir/$OUTPUT_ENV"
+
+    echo ""
+    echo -e "${CYAN}${BOLD}Generating Docker Compose files...${RESET}"
+    echo ""
+
+    # Generate docker-compose.yml
+    cat > "$compose_file" << 'EOF'
+services:
+  mass-ingest:
+    build:
+      context: .
+EOF
+
+    # Add build args if downloading CLI from Maven
+    if [ "$MODCLI_SOURCE" = "maven" ]; then
+        cat >> "$compose_file" << 'EOF'
+      args:
+        MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION:-}
+EOF
+    fi
+
+    cat >> "$compose_file" << 'EOF'
+    env_file:
+      - .env
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+EOF
+
+    # Add data volume mount if configured
+    if [ -n "$DATA_MOUNT_DIR" ]; then
+        cat >> "$compose_file" << EOF
+    volumes:
+      - $DATA_MOUNT_DIR:/var/moderne
+EOF
+    else
+        cat >> "$compose_file" << 'EOF'
+    volumes:
+EOF
+    fi
+
+    # Add Git authentication volume mounts
+    if [ "$ENABLE_GIT_HTTPS" = true ]; then
+        cat >> "$compose_file" << 'EOF'
+      # Git HTTPS credentials (ensure .git-credentials exists)
+      - ./.git-credentials:/root/.git-credentials:ro
+EOF
+    fi
+
+    if [ "$ENABLE_GIT_SSH" = true ]; then
+        cat >> "$compose_file" << 'EOF'
+      # Git SSH keys (ensure .ssh directory exists)
+      - ./.ssh:/root/.ssh:ro
+EOF
+    fi
+
+    # Generate .env with actual values
+    cat > "$env_file" << EOF
+# ==============================================================================
+# Mass-ingest configuration
+# Generated by setup wizard - all values configured
+# ==============================================================================
+
+# Artifact repository configuration
+EOF
+
+    # Add publish URL and authentication
+    if [ -n "$PUBLISH_URL" ]; then
+        printf '%s\n' "PUBLISH_URL=$PUBLISH_URL" >> "$env_file"
+        echo "" >> "$env_file"
+
+        if [ "$PUBLISH_AUTH_METHOD" = "userpass" ]; then
+            echo "# Username/password authentication" >> "$env_file"
+            printf '%s\n' "PUBLISH_USER=$PUBLISH_USER" >> "$env_file"
+            printf '%s\n' "PUBLISH_PASSWORD=$PUBLISH_PASSWORD" >> "$env_file"
+        else
+            echo "# Token authentication" >> "$env_file"
+            printf '%s\n' "PUBLISH_TOKEN=$PUBLISH_TOKEN" >> "$env_file"
+        fi
+    else
+        cat >> "$env_file" << 'EOF'
+# Configure your artifact repository
+PUBLISH_URL=https://your-artifactory.com/artifactory/moderne-ingest/
+PUBLISH_USER=your-username
+PUBLISH_PASSWORD=your-password
+# PUBLISH_TOKEN=your-token
+EOF
+    fi
+
+    # Add Moderne platform configuration
+    echo "" >> "$env_file"
+    if [ -n "$MODERNE_TENANT" ]; then
+        echo "# Moderne platform configuration" >> "$env_file"
+        echo "MODERNE_TENANT=https://${MODERNE_TENANT}.moderne.io" >> "$env_file"
+        if [ -n "$MODERNE_TOKEN" ]; then
+            echo "MODERNE_TOKEN=${MODERNE_TOKEN}" >> "$env_file"
+        else
+            echo "# MODERNE_TOKEN=your-moderne-token" >> "$env_file"
+        fi
+    else
+        echo "# Optional: Moderne platform configuration" >> "$env_file"
+        echo "# MODERNE_TENANT=https://app.moderne.io" >> "$env_file"
+        echo "# MODERNE_TOKEN=your-moderne-token" >> "$env_file"
+    fi
+
+    # Add CLI version option if downloading from Maven
+    if [ "$MODCLI_SOURCE" = "maven" ]; then
+        cat >> "$env_file" << 'EOF'
+
+# Optional: CLI version (defaults to latest stable if not set)
+# MODERNE_CLI_VERSION=3.50.0
+EOF
+    fi
+
+    # Add repository index range
+    echo "" >> "$env_file"
+    echo "# Repository processing range (1-indexed, inclusive)" >> "$env_file"
+    echo "START_INDEX=1" >> "$env_file"
+
+    # Calculate END_INDEX based on repos.csv size (subtract 1 for header)
+    local output_dir=$(dirname "$OUTPUT_DOCKERFILE")
+    local repos_file="$output_dir/$OUTPUT_FILE"
+    if [ -f "$repos_file" ]; then
+        local repo_count=$(($(wc -l < "$repos_file") - 1))
+        echo "END_INDEX=$repo_count" >> "$env_file"
+    else
+        echo "# END_INDEX=<will be set based on repos.csv size>" >> "$env_file"
+    fi
+
+    echo -e "${GREEN}✓ Generated $compose_file${RESET}"
+    echo -e "${GREEN}✓ Generated $env_file${RESET}"
+    echo ""
+}
+
+# ============================================================================
+# Combined Summary and Next Steps
+# ============================================================================
+
+show_combined_summary() {
+    print_header "Setup Complete!"
+
+    echo -e "${GREEN}${BOLD}Your mass-ingest environment is ready!${RESET}"
+    echo ""
+    echo -e "${BOLD}Generated files:${RESET}"
+    echo -e "  ${CYAN}✓ $OUTPUT_FILE${RESET} - Repository list"
+    echo -e "  ${CYAN}✓ $OUTPUT_DOCKERFILE${RESET} - Docker image configuration"
+    if [ "$GENERATE_DOCKER_COMPOSE" = true ]; then
+        echo -e "  ${CYAN}✓ $OUTPUT_DOCKER_COMPOSE${RESET} - Docker Compose configuration"
+        echo -e "  ${CYAN}✓ $OUTPUT_ENV${RESET} - Environment configuration (ready to use)"
+    fi
+    echo ""
+
+    print_section "Configuration Summary"
+
+    # repos.csv summary
+    echo -e "${BOLD}Repository Discovery:${RESET}"
+    local total_repos=0
+    for result in "${FETCH_RESULTS[@]}"; do
+        IFS='|' read -r provider status count <<< "$result"
+        if [ "$status" = "Success" ]; then
+            echo -e "  ${GREEN}✓${RESET} $provider: $count repositories"
+            total_repos=$((total_repos + count))
+        fi
+    done
+    echo -e "  ${BOLD}Total: $total_repos repositories${RESET}"
+    echo ""
+
+    # Dockerfile summary
+    echo -e "${BOLD}Docker Environment:${RESET}"
+    echo -e "  ${GREEN}✓${RESET} JDK versions: ${ENABLED_JDKS[*]}"
+
+    if [ "$CLI_SOURCE" = "local" ]; then
+        echo -e "  ${GREEN}✓${RESET} Moderne CLI (from local mod.jar)"
+    else
+        if [ "$CLI_VERSION_TYPE" = "stable" ]; then
+            echo -e "  ${GREEN}✓${RESET} Moderne CLI (latest stable)"
+        elif [ "$CLI_VERSION_TYPE" = "staging" ]; then
+            echo -e "  ${GREEN}✓${RESET} Moderne CLI (latest staging)"
+        else
+            echo -e "  ${GREEN}✓${RESET} Moderne CLI (version $CLI_SPECIFIC_VERSION)"
+        fi
+    fi
+
+    if [ -n "$MODERNE_TENANT" ]; then
+        echo -e "  ${GREEN}✓${RESET} Moderne tenant: https://${MODERNE_TENANT}.moderne.io"
+        if [ -n "$MODERNE_TOKEN" ]; then
+            echo -e "  ${GREEN}✓${RESET} Moderne token: configured"
+        fi
+    fi
+
+    if [ -n "$PUBLISH_URL" ]; then
+        echo -e "  ${GREEN}✓${RESET} Artifact repository: configured"
+        if [ "$PUBLISH_AUTH_METHOD" = "userpass" ]; then
+            echo -e "  ${GREEN}✓${RESET} Authentication: username/password"
+        else
+            echo -e "  ${GREEN}✓${RESET} Authentication: token"
+        fi
+    fi
+
+    [ "$ENABLE_MAVEN" = true ] && echo -e "  ${GREEN}✓${RESET} Apache Maven $MAVEN_VERSION"
+    [ "$ENABLE_GRADLE" = true ] && echo -e "  ${GREEN}✓${RESET} Gradle $GRADLE_VERSION"
+    [ "$ENABLE_BAZEL" = true ] && echo -e "  ${GREEN}✓${RESET} Bazel"
+    [ "$ENABLE_ANDROID" = true ] && echo -e "  ${GREEN}✓${RESET} Android SDK"
+    [ "$ENABLE_NODE" = true ] && echo -e "  ${GREEN}✓${RESET} Node.js 20.x"
+    [ "$ENABLE_PYTHON" = true ] && echo -e "  ${GREEN}✓${RESET} Python 3.11"
+    [ "$ENABLE_DOTNET" = true ] && echo -e "  ${GREEN}✓${RESET} .NET SDK 6.0/8.0"
+    [ "$ENABLE_AWS_CLI" = true ] && echo -e "  ${GREEN}✓${RESET} AWS CLI v2"
+    [ "$ENABLE_AWS_BATCH" = true ] && echo -e "  ${GREEN}✓${RESET} AWS Batch support"
+
+    if [ "$ENABLE_GIT_SSH" = true ] || [ "$ENABLE_GIT_HTTPS" = true ]; then
+        local auth_types=()
+        [ "$ENABLE_GIT_SSH" = true ] && auth_types+=("SSH")
+        [ "$ENABLE_GIT_HTTPS" = true ] && auth_types+=("HTTPS")
+        echo -e "  ${GREEN}✓${RESET} Git authentication: ${auth_types[*]}"
+    fi
+
+    echo ""
+
+    print_section "Next Steps"
+
+    local step=1
+
+    # Certificate file needs to be in place
+    if [ -n "$CERT_FILE" ]; then
+        echo -e "$step. ${YELLOW}Copy certificate file:${RESET}"
+        echo -e "   ${CYAN}cp $CERT_FILE $(dirname $OUTPUT_DOCKERFILE)/$(basename "$CERT_FILE")${RESET}"
+        echo ""
+        ((step++))
+    fi
+
+    # Maven settings file needs to be in place
+    if [ -n "$MAVEN_SETTINGS_FILE" ]; then
+        echo -e "$step. ${YELLOW}Copy Maven settings file:${RESET}"
+        echo -e "   ${CYAN}cp $MAVEN_SETTINGS_FILE $(dirname $OUTPUT_DOCKERFILE)/$(basename "$MAVEN_SETTINGS_FILE")${RESET}"
+        echo ""
+        ((step++))
+    fi
+
+    # Git authentication setup
+    if [ "$ENABLE_GIT_SSH" = true ]; then
+        echo -e "$step. ${YELLOW}Add SSH keys to .ssh/ directory:${RESET}"
+        echo -e "   Copy your SSH private keys to $(dirname $OUTPUT_DOCKERFILE)/.ssh/"
+        echo -e "   ${GRAY}Example: cp ~/.ssh/id_rsa $(dirname $OUTPUT_DOCKERFILE)/.ssh/${RESET}"
+        echo ""
+        ((step++))
+    fi
+
+    if [ "$CREATE_GIT_CREDENTIALS_TEMPLATE" = true ]; then
+        echo -e "$step. ${YELLOW}Fill in .git-credentials file:${RESET}"
+        echo -e "   Edit $(dirname $OUTPUT_DOCKERFILE)/.git-credentials and add your credentials"
+        echo -e "   ${GRAY}Format: https://username:token@hostname${RESET}"
+        echo ""
+        ((step++))
+    elif [ "$ENABLE_GIT_HTTPS" = true ]; then
+        echo -e "$step. ${YELLOW}Copy .git-credentials file:${RESET}"
+        echo -e "   ${CYAN}cp /path/to/your/.git-credentials $(dirname $OUTPUT_DOCKERFILE)/${RESET}"
+        echo ""
+        ((step++))
+    fi
+
+    # Different instructions based on whether docker-compose was generated
+    if [ "$GENERATE_DOCKER_COMPOSE" = true ]; then
+        # Docker Compose workflow
+        local output_dir=$(dirname "$OUTPUT_DOCKERFILE")
+
+        # Only show configuration step if credentials weren't fully configured
+        if [ -z "$PUBLISH_URL" ]; then
+            echo -e "$step. ${BOLD}Configure environment:${RESET}"
+            echo -e "   Edit $output_dir/.env and fill in your credentials"
+            echo ""
+            ((step++))
+        fi
+
+        echo -e "$step. ${BOLD}Start the container:${RESET}"
+        echo -e "   ${CYAN}docker compose up${RESET}"
+        echo ""
+        echo -e "   ${GRAY}The container will build automatically and start processing${RESET}"
+        echo ""
+    else
+        # Manual docker workflow
+        echo -e "$step. ${BOLD}Build your container image:${RESET}"
+        echo -e "   ${CYAN}docker build -f $OUTPUT_DOCKERFILE -t moderne/mass-ingest:latest .${RESET}"
+        echo ""
+        ((step++))
+
+        echo -e "$step. ${BOLD}Run the container with repos.csv:${RESET}"
+        echo ""
+        echo -e "     ${GRAY}docker run -v \$(pwd):/workspace moderne/moderne-cli:latest${RESET} \\"
+        echo -e "       ${GRAY}mass-ingest --repos /workspace/$OUTPUT_FILE${RESET} \\"
+        echo -e "       ${GRAY}--output /workspace/output${RESET}"
+        echo ""
+    fi
+
+    echo -e "${BOLD}Documentation:${RESET}"
+    echo "  • Moderne CLI: https://docs.moderne.io/user-documentation/moderne-cli"
+    echo "  • Mass Ingest: https://github.com/moderneinc/mass-ingest-example"
+    echo ""
+
+    echo -e "${GREEN}${BOLD}Happy ingesting! 🚀${RESET}\n"
+}
+
+# ============================================================================
+# Main Flow
+# ============================================================================
+
+main() {
+    # Create temp directory for CSV files
+    TEMP_DIR=$(mktemp -d)
+
+    show_welcome
+
+    # Phase 1: Repository Discovery
+    print_header "Phase 1: Repository Discovery"
+    echo ""
+
+    # Show repos.csv introduction and check for existing file
+    # Returns 0 if using existing file, 1 if need to generate
+    if ! show_repos_csv_introduction; then
+        # Add and configure SCM providers (loops with menu)
+        # Each configure function will fetch immediately
+        add_scm_providers
+
+        # Ask about CSV normalization
+        ask_csv_normalization
+
+        # Show summary and generate repos.csv
+        show_repos_summary
+    fi
+
+    # Phase 2: Docker Environment
+    print_header "Phase 2: Docker Environment"
+    echo ""
+
+    # Show Phase 2 introduction
+    show_phase2_introduction
+
+    ask_jdk_versions
+    ask_modcli_config
+    ask_artifact_repository_config
+    ask_maven_build_config
+    ask_gradle_build_config
+    ask_other_build_tools
+    ask_language_runtimes
+    ask_scalability_options
+    ask_security_config
+    ask_git_auth
+    ask_runtime_config
+    ask_docker_compose
+
+    # Show configuration preview
+    clear
+    print_section "Configuration Summary"
+    echo ""
+
+    # repos.csv summary
+    echo -e "${BOLD}Repository Discovery:${RESET}"
+    local total_repos=0
+
+    # Check if we have fetch results or are reusing existing file
+    if [ ${#FETCH_RESULTS[@]} -gt 0 ]; then
+        for result in "${FETCH_RESULTS[@]}"; do
+            IFS='|' read -r provider status count <<< "$result"
+            if [ "$status" = "Success" ]; then
+                echo -e "  ${GREEN}✓${RESET} $provider: $count repositories"
+                total_repos=$((total_repos + count))
+            fi
+        done
+    else
+        # Reusing existing repos.csv - count lines
+        if [ -f "$OUTPUT_FILE" ]; then
+            total_repos=$(tail -n +2 "$OUTPUT_FILE" 2>/dev/null | wc -l | tr -d ' ')
+            echo -e "  ${GREEN}✓${RESET} Reusing existing repos.csv"
+        fi
+    fi
+
+    echo -e "  ${BOLD}Total: $total_repos repositories${RESET}"
+    echo ""
+
+    # Dockerfile summary
+    echo -e "${BOLD}Docker Environment:${RESET}"
+    echo -e "  ${GREEN}✓${RESET} JDK versions: ${ENABLED_JDKS[*]}"
+
+    if [ "$CLI_SOURCE" = "local" ]; then
+        echo -e "  ${GREEN}✓${RESET} Moderne CLI (from local mod.jar)"
+    else
+        if [ "$CLI_VERSION_TYPE" = "stable" ]; then
+            echo -e "  ${GREEN}✓${RESET} Moderne CLI (latest stable)"
+        elif [ "$CLI_VERSION_TYPE" = "staging" ]; then
+            echo -e "  ${GREEN}✓${RESET} Moderne CLI (latest staging)"
+        else
+            echo -e "  ${GREEN}✓${RESET} Moderne CLI (version $CLI_SPECIFIC_VERSION)"
+        fi
+    fi
+
+    if [ -n "$MODERNE_TENANT" ]; then
+        echo -e "  ${GREEN}✓${RESET} Moderne tenant: https://${MODERNE_TENANT}.moderne.io"
+        if [ -n "$MODERNE_TOKEN" ]; then
+            echo -e "  ${GREEN}✓${RESET} Moderne token: configured"
+        fi
+    fi
+
+    if [ -n "$PUBLISH_URL" ]; then
+        echo -e "  ${GREEN}✓${RESET} Artifact repository: configured"
+        if [ "$PUBLISH_AUTH_METHOD" = "userpass" ]; then
+            echo -e "  ${GREEN}✓${RESET} Authentication: username/password"
+        else
+            echo -e "  ${GREEN}✓${RESET} Authentication: token"
+        fi
+    fi
+
+    [ "$ENABLE_MAVEN" = true ] && echo -e "  ${GREEN}✓${RESET} Apache Maven $MAVEN_VERSION"
+    [ "$ENABLE_GRADLE" = true ] && echo -e "  ${GREEN}✓${RESET} Gradle $GRADLE_VERSION"
+    [ "$ENABLE_BAZEL" = true ] && echo -e "  ${GREEN}✓${RESET} Bazel"
+    [ "$ENABLE_ANDROID" = true ] && echo -e "  ${GREEN}✓${RESET} Android SDK"
+    [ "$ENABLE_NODE" = true ] && echo -e "  ${GREEN}✓${RESET} Node.js 20.x"
+    [ "$ENABLE_PYTHON" = true ] && echo -e "  ${GREEN}✓${RESET} Python 3.11"
+    [ "$ENABLE_DOTNET" = true ] && echo -e "  ${GREEN}✓${RESET} .NET SDK 6.0/8.0"
+    [ "$ENABLE_AWS_CLI" = true ] && echo -e "  ${GREEN}✓${RESET} AWS CLI v2"
+    [ "$ENABLE_AWS_BATCH" = true ] && echo -e "  ${GREEN}✓${RESET} AWS Batch support"
+
+    if [ "$ENABLE_GIT_SSH" = true ] || [ "$ENABLE_GIT_HTTPS" = true ]; then
+        local auth_types=()
+        [ "$ENABLE_GIT_SSH" = true ] && auth_types+=("SSH")
+        [ "$ENABLE_GIT_HTTPS" = true ] && auth_types+=("HTTPS")
+        echo -e "  ${GREEN}✓${RESET} Git authentication: ${auth_types[*]}"
+    fi
+
+    [ "$GENERATE_DOCKER_COMPOSE" = true ] && echo -e "  ${GREEN}✓${RESET} Docker Compose configuration"
+
+    echo ""
+
+    # Generate files
+    if ask_yes_no "Generate Docker environment with this configuration?"; then
+        generate_dockerfile
+
+        if [ "$GENERATE_DOCKER_COMPOSE" = true ]; then
+            generate_docker_compose
+        fi
+
+        show_combined_summary
+    else
+        echo -e "\n${YELLOW}Docker environment generation cancelled.${RESET}\n"
+        echo "repos.csv was generated successfully at: $OUTPUT_FILE"
+        exit 0
+    fi
+}
+
+# Run main
+main "$@"

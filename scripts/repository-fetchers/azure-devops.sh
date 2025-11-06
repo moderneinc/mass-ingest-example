@@ -80,7 +80,7 @@ if [ -n "$PAT" ]; then
     # API mode with PAT
     api_url="https://dev.azure.com/$ORGANIZATION/$PROJECT/_apis/git/repositories?api-version=7.0"
 
-    response=$(curl --silent --max-time 30 --user ":$PAT" "$api_url")
+    response=$(curl --silent --max-time 10 --user ":$PAT" "$api_url")
 
     # Check if curl failed
     if [ $? -ne 0 ]; then

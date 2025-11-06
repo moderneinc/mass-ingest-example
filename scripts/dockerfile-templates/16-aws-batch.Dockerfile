@@ -1,3 +1,3 @@
 # AWS Batch support
-COPY chunk.sh /usr/local/bin/chunk.sh
+COPY 3-scalability/chunk.sh /usr/local/bin/chunk.sh
 RUN chmod +x /usr/local/bin/chunk.sh

@@ -26,7 +26,7 @@ if [ -n "$token" ]; then
     while :; do
         request_url="${api_url}/orgs/${organization}/repos?page=${page}&per_page=${per_page}&type=all"
 
-        response=$(curl --silent --max-time 30 --header "Authorization: Bearer $token" "$request_url")
+        response=$(curl --silent --max-time 10 --header "Authorization: Bearer $token" "$request_url")
 
         # Check if curl failed
         if [ $? -ne 0 ]; then

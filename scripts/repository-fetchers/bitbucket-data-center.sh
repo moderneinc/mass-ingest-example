@@ -1,14 +1,16 @@
 #!/bin/bash
 
 if [ -z "$1" ] || [ -z "$2" ]; then
-    echo "Usage: $0 <bitbucket_url> <auth_token> [clone_protocol]"
+    echo "Usage: $0 <bitbucket_url> <auth_token> [clone_protocol] [project_key]"
     echo "Example: $0 https://my-bitbucket.com/stash mytoken123 http"
+    echo "Example: $0 https://my-bitbucket.com/stash mytoken123 http PROJ"
     exit 1
 fi
 
 bitbucket_url=$1
 AUTH_TOKEN=$2
 CLONE_PROTOCOL=${3:-http}
+PROJECT_KEY=$4
 
 if [ "$CLONE_PROTOCOL" != "ssh" ] && [ "$CLONE_PROTOCOL" != "http" ]; then
     echo "Error: clone_protocol must be either 'ssh' or 'http'"
@@ -24,7 +26,7 @@ function fetch_default_branch() {
     while [ "$last_page" != "true" ] ; do
         local request_url="$bitbucket_url/rest/api/1.0/projects/$project/repos/$repo_slug/branches?start=$next_page&limit=100"
 
-        local response=$(curl --silent --max-time 30 -H "Content-Type: application/json" -H "Authorization: Bearer $AUTH_TOKEN" "$request_url")
+        local response=$(curl --silent --max-time 10 -H "Content-Type: application/json" -H "Authorization: Bearer $AUTH_TOKEN" "$request_url")
         if [ $? -ne 0 ]; then
             echo "Error occurred while default branch for $repo_slug." 1>&2
             echo ""
@@ -43,8 +45,16 @@ function fetch_default_branch() {
             return
         fi
 
-        last_page=$(echo "$response" | jq '. | .isLastPage')
-        next_page=$(echo "$response" | jq '. | .nextPageStart') 
+        # Check for API errors in the response
+        if echo "$response" | jq -e '.errors' >/dev/null 2>&1; then
+            local error_msg=$(echo "$response" | jq -r '.errors[0].message // "Unknown error"')
+            echo "Error: Bitbucket API error for $repo_slug: $error_msg" 1>&2
+            echo ""
+            return
+        fi
+
+        last_page=$(echo "$response" | jq -r '.isLastPage // "true"')
+        next_page=$(echo "$response" | jq -r '.nextPageStart // 0') 
 
         for ROW in `echo "$response" | jq -r '.values[] | [.isDefault, .displayId] | @csv | sub("\"";"";"g")'`; do
             IFS=", " read -r is_default branch_name <<< $ROW
@@ -74,9 +84,14 @@ function fetch_repos() {
     local last_page="false"
 
     while [ "$last_page" != "true" ] ; do
-        local request_url="$bitbucket_url/rest/api/1.0/repos?start=$next_page&limit=100"
+        # Use project-specific endpoint if PROJECT_KEY is specified
+        if [ -n "$PROJECT_KEY" ]; then
+            local request_url="$bitbucket_url/rest/api/1.0/projects/$PROJECT_KEY/repos?start=$next_page&limit=100"
+        else
+            local request_url="$bitbucket_url/rest/api/1.0/repos?start=$next_page&limit=100"
+        fi
 
-        local response=$(curl --silent --max-time 30 -H "Content-Type: application/json" -H "Authorization: Bearer $AUTH_TOKEN" "$request_url")
+        local response=$(curl --silent --max-time 10 -H "Content-Type: application/json" -H "Authorization: Bearer $AUTH_TOKEN" "$request_url")
         if [ $? -ne 0 ]; then
             echo "Error occurred while retrieving repository list." 1>&2
             exit 1
@@ -87,14 +102,23 @@ function fetch_repos() {
             echo "Error: Invalid JSON response from Bitbucket API. Check your URL and authentication." 1>&2
             echo "Response saved to: repo-fetch-error.html" 1>&2
             echo "$response" > repo-fetch-error.html
+            echo "Response length: $(echo "$response" | wc -c | tr -d ' ') bytes" 1>&2
+            echo "First 200 chars: $(echo "$response" | head -c 200)" 1>&2
             echo "" 1>&2
             echo "To debug, run this command manually:" 1>&2
-            echo "curl -H 'Content-Type: application/json' -H 'Authorization: Bearer $AUTH_TOKEN' '$request_url'" 1>&2
+            echo "curl -v -H 'Content-Type: application/json' -H 'Authorization: Bearer ***' '$request_url'" 1>&2
             exit 1
         fi
 
-        last_page=$(echo "$response" | jq '. | .isLastPage')
-        next_page=$(echo "$response" | jq '. | .nextPageStart') 
+        # Check for API errors in the response
+        if echo "$response" | jq -e '.errors' >/dev/null 2>&1; then
+            local error_msg=$(echo "$response" | jq -r '.errors[0].message // "Unknown error"')
+            echo "Error: Bitbucket API error: $error_msg" 1>&2
+            exit 1
+        fi
+
+        last_page=$(echo "$response" | jq -r '.isLastPage // "true"')
+        next_page=$(echo "$response" | jq -r '.nextPageStart // 0') 
 
         for ROW in `echo "$response" | \
             jq --arg CLONE_PROTOCOL $CLONE_PROTOCOL -r '.values[] | [(.links.clone[] | select(.name == $CLONE_PROTOCOL).href), .slug, .project.key] | @csv | sub("\"";"";"g")'`; do
