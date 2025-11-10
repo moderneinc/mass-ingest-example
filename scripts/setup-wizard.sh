@@ -139,7 +139,14 @@ print_header() {
 }
 
 print_section() {
-    echo -e "\n${CYAN}${BOLD}▶ $1${RESET}\n"
+    local title="$1"
+    local progress="$2"  # Optional: "Step X/Y" or similar
+
+    if [ -n "$progress" ]; then
+        echo -e "\n${GRAY}[$progress]${RESET} ${CYAN}${BOLD}▶ $title${RESET}\n"
+    else
+        echo -e "\n${CYAN}${BOLD}▶ $title${RESET}\n"
+    fi
 }
 
 print_context() {
@@ -417,6 +424,14 @@ validate_moderne_token() {
     if [ "$http_code" = "200" ] && echo "$body" | grep -q '"accessTokens"'; then
         return 0
     else
+        # Show curl command for debugging
+        echo "" >&2
+        echo -e "${GRAY}Debug: Test this connection yourself with:${RESET}" >&2
+        echo -e "${GRAY}curl -X POST \"$graphql_url\" \\${RESET}" >&2
+        echo -e "${GRAY}  -H \"Content-Type: application/json\" \\${RESET}" >&2
+        echo -e "${GRAY}  -H \"Authorization: Bearer YOUR_TOKEN\" \\${RESET}" >&2
+        echo -e "${GRAY}  -d '{\"query\":\"query test { accessTokens { id } }\"}'${RESET}" >&2
+        echo "" >&2
         return 1
     fi
 }
@@ -445,6 +460,15 @@ validate_artifact_repository() {
     if [ "$http_code" = "200" ] || [ "$http_code" = "201" ] || [ "$http_code" = "204" ]; then
         return 0
     else
+        # Show curl command for debugging
+        echo "" >&2
+        echo -e "${GRAY}Debug: Test this connection yourself with:${RESET}" >&2
+        if [ "$auth_method" = "userpass" ]; then
+            echo -e "${GRAY}curl -L -u \"YOUR_USERNAME:YOUR_PASSWORD\" \"$url\"${RESET}" >&2
+        else
+            echo -e "${GRAY}curl -L -H \"X-JFrog-Art-Api: YOUR_TOKEN\" \"$url\"${RESET}" >&2
+        fi
+        echo "" >&2
         return 1
     fi
 }
@@ -545,38 +569,30 @@ show_welcome() {
     echo "   ▀▀▀▀▀▀▀▀▀▀▀"
     echo ""
 
-    print_header "Mass Ingest - Complete Setup Wizard"
+    print_header "Mass Ingest - Setup Wizard"
 
-    echo -e "Ready to ingest your repositories into Moderne? This wizard will set up everything"
-    echo -e "you need to run mass-ingest: from repository discovery to Docker environment."
+    echo -e "Let's get your repositories into Moderne."
     echo ""
-    echo -e "${CYAN}${BOLD}What we'll create:${RESET}"
+    echo -e "In the next ${BOLD}5-10 minutes${RESET}, we'll:"
     echo ""
-    echo -e "  ${CYAN}•${RESET} ${BOLD}repos.csv${RESET} - A catalog listing all repositories to analyze"
-    echo -e "  ${CYAN}•${RESET} ${BOLD}Dockerfile${RESET} - Custom Docker image with all required tools"
-    echo -e "  ${CYAN}•${RESET} ${BOLD}docker-compose.yml${RESET} - Easy container management (optional)"
-    echo -e "  ${CYAN}•${RESET} ${BOLD}.env${RESET} - Environment configuration with your credentials"
+    echo -e "  ${CYAN}1.${RESET} Connect to your SCM providers and discover repositories"
+    echo -e "  ${CYAN}2.${RESET} Configure Docker with the JDKs and build tools you need"
+    echo -e "  ${CYAN}3.${RESET} Set up artifact repository publishing and authentication"
+    echo -e "  ${CYAN}4.${RESET} Generate all configuration files"
     echo ""
-    echo -e "${CYAN}${BOLD}Setup steps:${RESET}"
+    echo -e "${BOLD}What you'll have when we're done:${RESET}"
     echo ""
-    echo -e "  ${CYAN}Phase 1: Repository Discovery${RESET}"
-    echo -e "    1. Choose SCM providers (GitHub, GitLab, Azure DevOps, Bitbucket)"
-    echo -e "    2. Authenticate with access tokens or credentials"
-    echo -e "    3. Fetch repositories automatically"
-    echo -e "    4. Generate repos.csv"
+    echo -e "  ${GREEN}✓${RESET} repos.csv with your repositories"
+    echo -e "  ${GREEN}✓${RESET} Custom Dockerfile tailored to your tech stack"
+    echo -e "  ${GREEN}✓${RESET} docker-compose.yml ready to run"
+    echo -e "  ${GREEN}✓${RESET} .env with credentials configured"
     echo ""
-    echo -e "  ${CYAN}Phase 2: Docker Environment${RESET}"
-    echo -e "    5. Select JDK versions (8, 11, 17, 21, 25)"
-    echo -e "    6. Configure Moderne CLI"
-    echo -e "    7. Choose build tools (Maven, Gradle, Bazel)"
-    echo -e "    8. Add language runtimes (Android, Node, Python, .NET)"
-    echo -e "    9. Configure security and Git authentication"
-    echo -e "   10. Generate Dockerfile and docker-compose.yml"
+    echo -e "${BOLD}Next:${RESET} Build the Docker image and run mass-ingest to generate LSTs"
     echo ""
-    echo -e "${CYAN}${BOLD}Time investment:${RESET} 5-10 minutes"
+    echo -e "${GRAY}(Press Ctrl+C at any time to cancel)${RESET}"
     echo ""
 
-    read -p "$(echo -e "${BOLD}Press Enter to continue...${RESET}")"
+    read -p "$(echo -e "${BOLD}Ready? Press Enter to start...${RESET}")"
     clear
 }
 
@@ -1641,8 +1657,9 @@ show_phase2_introduction() {
 
 # JDK selection
 ask_jdk_versions() {
+    local progress="$1"
     while true; do
-        print_section "JDK Versions"
+        print_section "JDK Versions" "$progress"
 
         echo "The Moderne CLI needs access to all JDK versions used by your Java projects to"
         echo "successfully build LSTs. We'll install JDK 8, 11, 17, 21, and 25 by default."
@@ -1709,6 +1726,7 @@ disable the ones you don't need to save space."
 
 # Moderne CLI configuration
 ask_modcli_config() {
+    local progress="$1"
     while true; do
         # Reset for restart (preserve environment variables)
         CLI_SOURCE="${CLI_SOURCE:-download}"
@@ -1718,7 +1736,7 @@ ask_modcli_config() {
         MODERNE_TENANT="${MODERNE_TENANT:-}"
         MODERNE_TOKEN="${MODERNE_TOKEN:-}"
 
-        print_section "Moderne CLI Configuration"
+        print_section "Moderne CLI Configuration" "$progress"
 
         print_context "Choose how to provide the Moderne CLI to the container.
 
@@ -1909,6 +1927,7 @@ recipes), provide your tenant name."
 
 # Artifact repository configuration
 ask_artifact_repository_config() {
+    local progress="$1"
     while true; do
         # Reset for restart
         PUBLISH_URL=""
@@ -1917,7 +1936,7 @@ ask_artifact_repository_config() {
         PUBLISH_PASSWORD=""
         PUBLISH_TOKEN=""
 
-        print_section "Artifact Repository Configuration"
+        print_section "Artifact Repository Configuration" "$progress"
 
         print_context "Configure where Moderne CLI will publish the generated LST artifacts.
 This must be a ${BOLD}Maven 2 format/layout${RESET} repository (e.g., JFrog Artifactory with Maven 2 layout)."
@@ -2082,13 +2101,14 @@ ${BOLD}Token:\033[22m${GRAY} API token or access token (e.g., JFrog API key)."
 
 # Maven configuration page
 ask_maven_build_config() {
+    local progress="$1"
     while true; do
         # Reset for restart
         ENABLE_MAVEN=false
         MAVEN_SETTINGS_FILE=""
         MAVEN_VERSION="3.9.11"
 
-        print_section "Maven Configuration"
+        print_section "Maven Configuration" "$progress"
 
         echo "Maven is a popular build tool for Java projects."
         echo ""
@@ -2199,12 +2219,13 @@ ${BOLD}What this does:\033[22m${GRAY} Copies your settings.xml to /root/.m2/ and
 
 # Gradle configuration page
 ask_gradle_build_config() {
+    local progress="$1"
     while true; do
         # Reset for restart
         ENABLE_GRADLE=false
         GRADLE_VERSION="8.14"
 
-        print_section "Gradle Configuration"
+        print_section "Gradle Configuration" "$progress"
 
         echo "Gradle is a popular build tool for Java and Kotlin projects."
         echo ""
@@ -2248,8 +2269,9 @@ ${BOLD}Pre-installed Gradle:\033[22m${GRAY} Older projects or specific scenarios
 
 # Other build tools
 ask_other_build_tools() {
+    local progress="$1"
     while true; do
-        print_section "Other Build Tools"
+        print_section "Other Build Tools" "$progress"
 
         print_context "Some projects use specialized build tools beyond Maven and Gradle."
 
@@ -2281,6 +2303,7 @@ ask_other_build_tools() {
 
 # Development platforms & runtimes
 ask_language_runtimes() {
+    local progress="$1"
     while true; do
         # Initialize all to false for restart
         ENABLE_ANDROID=false
@@ -2288,7 +2311,7 @@ ask_language_runtimes() {
         ENABLE_PYTHON=false
         ENABLE_DOTNET=false
 
-        print_section "Development Platforms & Runtimes"
+        print_section "Development Platforms & Runtimes" "$progress"
 
         print_context "While the Moderne CLI primarily processes Java/Kotlin projects, your repositories
 may have multi-language components that require additional runtimes for successful builds.
@@ -2343,12 +2366,13 @@ Answer 'yes' if any of your repositories need these runtimes."
 
 # Scalability options
 ask_scalability_options() {
+    local progress="$1"
     while true; do
         # Reset for restart
         ENABLE_AWS_CLI=false
         ENABLE_AWS_BATCH=false
 
-        print_section "Scalability Options"
+        print_section "Scalability Options" "$progress"
 
         # AWS CLI for S3 URLs
         echo -e "\n${BOLD}AWS CLI for S3 URLs${RESET}"
@@ -2400,11 +2424,12 @@ and access AWS resources during processing."
 
 # Security configuration
 ask_security_config() {
+    local progress="$1"
     while true; do
         # Reset for restart
         CERT_FILE=""
 
-        print_section "Security Configuration"
+        print_section "Security Configuration" "$progress"
 
         # Self-signed certificates
         echo "If your artifact repository, source control, or Moderne tenant uses self-signed"
@@ -2471,13 +2496,14 @@ for Maven wrapper scripts."
 
 # Git authentication
 ask_git_auth() {
+    local progress="$1"
     while true; do
         # Reset for restart
         ENABLE_GIT_SSH=false
         ENABLE_GIT_HTTPS=false
         CREATE_GIT_CREDENTIALS_TEMPLATE=false
 
-        print_section "Git Authentication"
+        print_section "Git Authentication" "$progress"
 
         echo "Configure Git authentication for accessing private repositories."
         echo ""
@@ -2557,8 +2583,9 @@ EOF
 
 # Runtime configuration
 ask_runtime_config() {
+    local progress="$1"
     while true; do
-        print_section "Runtime Configuration"
+        print_section "Runtime Configuration" "$progress"
 
         # Java options
         echo -e "${BOLD}JVM Options${RESET}"
@@ -2606,7 +2633,8 @@ and temporary files."
 
 # Docker Compose configuration
 ask_docker_compose() {
-    print_section "Docker Compose"
+    local progress="$1"
+    print_section "Docker Compose" "$progress"
 
     echo "Docker Compose simplifies container management with configuration files."
     echo ""
@@ -3162,7 +3190,7 @@ main() {
     show_welcome
 
     # Phase 1: Repository Discovery
-    print_header "Phase 1: Repository Discovery"
+    print_header "Phase 1 of 2: Repository Discovery"
     echo ""
 
     # Show repos.csv introduction and check for existing file
@@ -3180,24 +3208,24 @@ main() {
     fi
 
     # Phase 2: Docker Environment
-    print_header "Phase 2: Docker Environment"
+    print_header "Phase 2 of 2: Docker Environment"
     echo ""
 
     # Show Phase 2 introduction
     show_phase2_introduction
 
-    ask_jdk_versions
-    ask_modcli_config
-    ask_artifact_repository_config
-    ask_maven_build_config
-    ask_gradle_build_config
-    ask_other_build_tools
-    ask_language_runtimes
-    ask_scalability_options
-    ask_security_config
-    ask_git_auth
-    ask_runtime_config
-    ask_docker_compose
+    ask_jdk_versions "Step 1/12"
+    ask_modcli_config "Step 2/12"
+    ask_artifact_repository_config "Step 3/12"
+    ask_maven_build_config "Step 4/12"
+    ask_gradle_build_config "Step 5/12"
+    ask_other_build_tools "Step 6/12"
+    ask_language_runtimes "Step 7/12"
+    ask_scalability_options "Step 8/12"
+    ask_security_config "Step 9/12"
+    ask_git_auth "Step 10/12"
+    ask_runtime_config "Step 11/12"
+    ask_docker_compose "Step 12/12"
 
     # Show configuration preview
     clear
