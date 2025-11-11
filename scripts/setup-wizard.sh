@@ -143,7 +143,7 @@ print_section() {
     local progress="$2"  # Optional: "Step X/Y" or similar
 
     if [ -n "$progress" ]; then
-        echo -e "\n${GRAY}[$progress]${RESET} ${CYAN}${BOLD}▶ $title${RESET}\n"
+        echo -e "\n${CYAN}[$progress]${RESET} ${CYAN}${BOLD}▶ $title${RESET}\n"
     else
         echo -e "\n${CYAN}${BOLD}▶ $title${RESET}\n"
     fi
@@ -1069,13 +1069,22 @@ configure_github() {
 
     print_context "We'll fetch all repositories from GitHub organization(s) or user account(s)."
 
-    ask_choice "Which GitHub service?" "GitHub.com (cloud)" "GitHub Enterprise Server (on-prem)"
+    echo ""
+    read -p "$(echo -e "${BOLD}GitHub URL${RESET} (press Enter for github.com): ")" github_url_input
 
-    local github_url="https://github.com"
-    local api_url="https://api.github.com"
-    if [ "$CHOICE_RESULT" -eq 1 ]; then
-        github_url=$(ask_input "GitHub Enterprise Server URL")
+    if [ -z "$github_url_input" ]; then
+        github_url="https://github.com"
+        api_url="https://api.github.com"
+        print_success "Using GitHub.com"
+    else
+        # Add https:// if not present
+        if [[ ! "$github_url_input" =~ ^https?:// ]]; then
+            github_url="https://$github_url_input"
+        else
+            github_url="$github_url_input"
+        fi
         api_url="${github_url}/api/v3"
+        print_success "Using GitHub Enterprise Server: $github_url"
     fi
 
     GITHUB_URL="$github_url"
@@ -1096,8 +1105,12 @@ We'll fetch all repositories from each organization you specify."
         echo ""
         echo -e "${BOLD}Supply a GitHub Personal Access Token.${RESET}"
         echo ""
-        print_context "You'll need a Personal Access Token with 'repo' scope.
-Create one at: ${github_url}/settings/tokens"
+        print_context "You'll need a Personal Access Token (classic) with these scopes:
+  • 'repo' (for private repositories)
+  OR
+  • 'public_repo' (if you only have public repositories)
+
+Create at: ${github_url}/settings/tokens (select 'Tokens (classic)' type)"
         token=$(ask_secret_or_env_var "GitHub Personal Access Token")
     elif command -v gh &> /dev/null; then
         echo ""
@@ -1110,8 +1123,12 @@ Learn more: https://cli.github.com/manual/gh_auth_login"
         echo ""
         echo -e "${BOLD}Supply a GitHub Personal Access Token.${RESET}"
         echo ""
-        print_context "You'll need a Personal Access Token with 'repo' scope.
-Create one at: ${GITHUB_URL}/settings/tokens"
+        print_context "You'll need a Personal Access Token (classic) with these scopes:
+  • 'repo' (for private repositories)
+  OR
+  • 'public_repo' (if you only have public repositories)
+
+Create at: ${GITHUB_URL}/settings/tokens (select 'Tokens (classic)' type)"
         token=$(ask_secret_or_env_var "GitHub Personal Access Token")
     fi
 
@@ -1227,11 +1244,20 @@ configure_gitlab() {
 
     print_context "We'll fetch repositories from GitLab group(s) or all accessible repositories."
 
-    ask_choice "Which GitLab service?" "GitLab.com (cloud)" "Self-hosted GitLab"
+    echo ""
+    read -p "$(echo -e "${BOLD}GitLab URL${RESET} (press Enter for gitlab.com): ")" gitlab_url_input
 
-    local gitlab_domain="https://gitlab.com"
-    if [ "$CHOICE_RESULT" -eq 1 ]; then
-        gitlab_domain=$(ask_input "GitLab Server URL")
+    if [ -z "$gitlab_url_input" ]; then
+        gitlab_domain="https://gitlab.com"
+        print_success "Using GitLab.com"
+    else
+        # Add https:// if not present
+        if [[ ! "$gitlab_url_input" =~ ^https?:// ]]; then
+            gitlab_domain="https://$gitlab_url_input"
+        else
+            gitlab_domain="$gitlab_url_input"
+        fi
+        print_success "Using self-hosted GitLab: $gitlab_domain"
     fi
 
     GITLAB_DOMAIN="$gitlab_domain"
@@ -1240,7 +1266,7 @@ configure_gitlab() {
     echo ""
     echo -e "${BOLD}Supply a GitLab Personal Access Token.${RESET}"
     echo ""
-    print_context "GitLab requires a Personal Access Token with 'read_api' scope.
+    print_context "GitLab requires a Personal Access Token with 'read_api' and 'read_repository' scopes.
 Create one at: ${gitlab_domain}/-/user_settings/personal_access_tokens"
 
     local token=$(ask_secret_or_env_var "GitLab Personal Access Token")
@@ -2203,8 +2229,8 @@ ${BOLD}Supply JAR directly:\033[22m${GRAY} You provide mod.jar in the build cont
         echo ""
         echo -e "${BOLD}Moderne Platform Configuration (Optional)${RESET}"
         echo ""
-        print_context "If you want to connect to the Moderne platform (to publish LSTs or access
-recipes), provide your tenant name."
+        print_context "Connect to Moderne platform to upload code analysis results and run
+automated refactorings across your repositories."
         echo ""
 
         MODERNE_TENANT=$(ask_optional_input "Moderne tenant name (e.g., 'acme' for acme.moderne.io)")
@@ -2532,73 +2558,79 @@ ${BOLD}Token:\033[22m${GRAY} API token or access token (e.g., JFrog API key)."
 }
 
 # Maven configuration page
-ask_maven_build_config() {
+ask_build_tools_config() {
     local progress="$1"
     while true; do
         # Reset for restart
         ENABLE_MAVEN=false
+        ENABLE_GRADLE=false
+        ENABLE_BAZEL=false
         MAVEN_SETTINGS_FILE=""
         MAVEN_VERSION="3.9.11"
+        GRADLE_VERSION="8.14"
 
-        print_section "Maven Configuration" "$progress"
+        print_section "Build Tools Configuration" "$progress"
 
-        echo "Maven is a popular build tool for Java projects."
+        echo "Java build tools needed for your projects."
         echo ""
 
-        print_context "${BOLD}Maven wrapper (mvnw):\033[22m${GRAY} Many projects include wrapper scripts that don't require pre-installation.
-${BOLD}Pre-installed Maven:\033[22m${GRAY} Needed for older projects or when mvnw is not available."
+        print_context "${BOLD}Wrappers (mvnw/gradlew):\033[22m${GRAY} Many projects include wrappers. If ALL your Maven projects
+use mvnw, you can skip Maven installation to save ~100MB and get faster builds.
+${BOLD}Bazel:\033[22m${GRAY} Google's build system, mainly for monorepos or Google-style projects."
 
         echo ""
-        ask_choice "Maven build tool configuration" \
-            "Install Maven 3.9.11 (default, recommended)" \
-            "Install specific Maven version" \
-            "Skip (not needed - projects use mvnw wrapper or no Maven projects)"
+        ask_multi_select "Select build tools to install (if needed):" --default-unchecked \
+            "Maven 3.9.11" \
+            "Gradle 8.14" \
+            "Bazel 7.4.1"
 
-        case $CHOICE_RESULT in
-            0)
-                ENABLE_MAVEN=true
-                MAVEN_VERSION="3.9.11"
+        # Process selections
+        for item in "${MULTI_SELECT_RESULT[@]}"; do
+            case "$item" in
+                "Maven 3.9.11")
+                    ENABLE_MAVEN=true
+                    ;;
+                "Gradle 8.14")
+                    ENABLE_GRADLE=true
+                    ;;
+                "Bazel 7.4.1")
+                    ENABLE_BAZEL=true
+                    ;;
+            esac
+        done
+
+        # Ask for custom versions if selected
+        if [ "$ENABLE_MAVEN" = true ]; then
+            echo ""
+            read -p "$(echo -e "${BOLD}Maven version${RESET} (press Enter for 3.9.11): ")" user_maven_version
+            if [ -n "$user_maven_version" ]; then
+                # Validate semver format (MAJOR.MINOR.PATCH)
+                if [[ "$user_maven_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                    MAVEN_VERSION="$user_maven_version"
+                    print_success "Maven $MAVEN_VERSION will be installed"
+                else
+                    echo -e "${RED}Invalid version format. Using default 3.9.11${RESET}"
+                    MAVEN_VERSION="3.9.11"
+                fi
+            else
                 print_success "Maven 3.9.11 will be installed"
-                ;;
-            1)
-                ENABLE_MAVEN=true
-                # Ask for Maven version with validation
-                while true; do
-                    echo ""
-                    read -p "$(echo -e "${BOLD}Maven version${RESET} (e.g., 3.9.11): ")" user_maven_version
+            fi
+        fi
 
-                    if [ -z "$user_maven_version" ]; then
-                        echo -e "${RED}Version cannot be empty${RESET}"
-                        if ! ask_yes_no "Try again?"; then
-                            # Use default version
-                            MAVEN_VERSION="3.9.11"
-                            print_success "Using default Maven 3.9.11"
-                            break
-                        fi
-                        continue
-                    fi
+        if [ "$ENABLE_GRADLE" = true ]; then
+            echo ""
+            read -p "$(echo -e "${BOLD}Gradle version${RESET} (press Enter for 8.14): ")" user_gradle_version
+            if [ -n "$user_gradle_version" ]; then
+                GRADLE_VERSION="$user_gradle_version"
+                print_success "Gradle $GRADLE_VERSION will be installed"
+            else
+                print_success "Gradle 8.14 will be installed"
+            fi
+        fi
 
-                    # Validate semver format (MAJOR.MINOR.PATCH)
-                    if [[ "$user_maven_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                        MAVEN_VERSION="$user_maven_version"
-                        print_success "Maven $MAVEN_VERSION will be installed"
-                        break
-                    else
-                        echo -e "${RED}Invalid version format. Maven versions must follow semver (e.g., 3.9.11)${RESET}"
-                        if ! ask_yes_no "Try again?"; then
-                            # Use default version
-                            MAVEN_VERSION="3.9.11"
-                            print_success "Using default Maven 3.9.11"
-                            break
-                        fi
-                    fi
-                done
-                ;;
-            2)
-                ENABLE_MAVEN=false
-                print_success "Maven will not be installed (projects use wrappers or not needed)"
-                ;;
-        esac
+        if [ "$ENABLE_BAZEL" = true ]; then
+            print_success "Bazel 7.4.1 will be installed"
+        fi
 
         # Maven settings.xml configuration (applies to both Maven and mvnw)
         echo ""
@@ -2648,110 +2680,20 @@ ${BOLD}Applies to:\033[22m${GRAY} Both pre-installed Maven and Maven wrapper (mv
         echo -e "${BOLD}Selected configuration:${RESET}"
         if [ "$ENABLE_MAVEN" = true ]; then
             echo -e "  Maven: Version $MAVEN_VERSION will be installed"
-        else
-            echo -e "  Maven: Not installed (projects use wrappers)"
+        fi
+        if [ "$ENABLE_GRADLE" = true ]; then
+            echo -e "  Gradle: Version $GRADLE_VERSION will be installed"
+        fi
+        if [ "$ENABLE_BAZEL" = true ]; then
+            echo -e "  Bazel: Version 7.4.1 will be installed"
+        fi
+        if [ "$ENABLE_MAVEN" = false ] && [ "$ENABLE_GRADLE" = false ] && [ "$ENABLE_BAZEL" = false ]; then
+            echo -e "  No build tools will be installed (projects use wrappers)"
         fi
         if [ -n "$MAVEN_SETTINGS_FILE" ]; then
             echo -e "  Maven settings: $MAVEN_SETTINGS_FILE"
-        else
+        elif [ "$ENABLE_MAVEN" = true ]; then
             echo -e "  Maven settings: None configured"
-        fi
-        echo ""
-        if ask_yes_no "Is this correct?"; then
-            break
-        fi
-        clear
-    done
-
-    clear
-}
-
-# Gradle configuration page
-ask_gradle_build_config() {
-    local progress="$1"
-    while true; do
-        # Reset for restart
-        ENABLE_GRADLE=false
-        GRADLE_VERSION="8.14"
-
-        print_section "Gradle Configuration" "$progress"
-
-        echo "Gradle is a popular build tool for Java and Kotlin projects."
-        echo ""
-
-        print_context "${BOLD}Gradle wrapper (gradlew):\033[22m${GRAY} Many projects include wrapper scripts that don't require pre-installation.
-${BOLD}Pre-installed Gradle:\033[22m${GRAY} Needed for older projects or when gradlew is not available."
-
-        echo ""
-        ask_choice "Gradle build tool configuration" \
-            "Install Gradle 8.14 (default, recommended)" \
-            "Install specific Gradle version" \
-            "Skip (not needed - projects use gradlew wrapper or no Gradle projects)"
-
-        case $CHOICE_RESULT in
-            0)
-                ENABLE_GRADLE=true
-                GRADLE_VERSION="8.14"
-                print_success "Gradle 8.14 will be installed"
-                ;;
-            1)
-                ENABLE_GRADLE=true
-                echo ""
-                read -p "$(echo -e "${BOLD}Gradle version${RESET} (e.g., 8.14): ")" version_input
-                if [ -n "$version_input" ]; then
-                    GRADLE_VERSION="$version_input"
-                    print_success "Gradle $GRADLE_VERSION will be installed"
-                else
-                    GRADLE_VERSION="8.14"
-                    print_success "Using default Gradle 8.14"
-                fi
-                ;;
-            2)
-                ENABLE_GRADLE=false
-                print_success "Gradle will not be installed (projects use wrappers or not needed)"
-                ;;
-        esac
-
-        echo ""
-        echo -e "${BOLD}Selected configuration:${RESET}"
-        if [ "$ENABLE_GRADLE" = true ]; then
-            echo -e "  Gradle: Version $GRADLE_VERSION will be installed"
-        else
-            echo -e "  Gradle: Not installed (projects use wrappers or not needed)"
-        fi
-        echo ""
-        if ask_yes_no "Is this correct?"; then
-            break
-        fi
-        clear
-    done
-
-    clear
-}
-
-# Other build tools
-ask_other_build_tools() {
-    local progress="$1"
-    while true; do
-        print_section "Other Build Tools" "$progress"
-
-        print_context "Some projects use specialized build tools beyond Maven and Gradle."
-
-        # Bazel
-        echo -e "${BOLD}Bazel${RESET}"
-        echo "Google's build system, commonly used in monorepos and large-scale projects."
-        if ask_yes_no "Do you use Bazel?"; then
-            ENABLE_BAZEL=true
-        else
-            ENABLE_BAZEL=false
-        fi
-
-        echo ""
-        echo -e "${BOLD}Selected configuration:${RESET}"
-        if [ "$ENABLE_BAZEL" = true ]; then
-            echo -e "  Bazel: Will be installed"
-        else
-            echo -e "  Bazel: Not needed"
         fi
         echo ""
         if ask_yes_no "Is this correct?"; then
@@ -2775,10 +2717,10 @@ ask_language_runtimes() {
 
         print_section "Development Platforms & Runtimes" "$progress"
 
-        print_context "While the Moderne CLI primarily processes Java/Kotlin projects, your repositories
-may have multi-language components that require additional runtimes for successful builds.
+        print_context "Some Java projects include JavaScript, Python, or other components. Select the
+runtimes needed to build your projects successfully. Missing runtimes will cause build failures.
 
-Select any runtimes your repositories need (or leave all unchecked if not needed)."
+Leave all unchecked if not needed."
 
         echo ""
         ask_multi_select "Select language runtimes to install:" --default-unchecked \
@@ -2833,29 +2775,28 @@ ask_scalability_options() {
 
         print_section "Scalability Options" "$progress"
 
-        # AWS CLI for S3 URLs
-        echo -e "\n${BOLD}AWS CLI for S3 URLs${RESET}"
-        echo "If your repositories are stored in S3 or you need to access S3 resources,"
-        echo "the AWS CLI can be installed in the container."
+        echo "AWS integrations for scalable processing."
         echo ""
 
-        print_context "${BOLD}What this does:\033[22m${GRAY} Installs AWS CLI v2, allowing you to use S3 URLs in your repos.csv
-and access AWS resources during processing."
+        print_context "${BOLD}AWS CLI for S3:\033[22m${GRAY} Allows S3 URLs in repos.csv and access to AWS resources.
+${BOLD}AWS Batch support:\033[22m${GRAY} Includes chunk.sh script for job parallelization at scale."
 
-        if ask_yes_no "Do you need AWS CLI?"; then
-            ENABLE_AWS_CLI=true
-        fi
-
-        # AWS Batch support
-        echo -e "\n${BOLD}AWS Batch Support${RESET}"
-        echo "AWS Batch allows you to run containerized jobs at scale."
         echo ""
+        ask_multi_select "Select AWS integrations (if needed):" --default-unchecked \
+            "AWS CLI (for S3 artifact storage)" \
+            "AWS Batch support (for distributed processing)"
 
-        print_context "${BOLD}What this does:\033[22m${GRAY} Includes chunk.sh script for job parallelization in AWS Batch environments."
-
-        if ask_yes_no "Do you need AWS Batch support?"; then
-            ENABLE_AWS_BATCH=true
-        fi
+        # Process selections
+        for item in "${MULTI_SELECT_RESULT[@]}"; do
+            case "$item" in
+                "AWS CLI (for S3 artifact storage)")
+                    ENABLE_AWS_CLI=true
+                    ;;
+                "AWS Batch support (for distributed processing)")
+                    ENABLE_AWS_BATCH=true
+                    ;;
+            esac
+        done
 
         echo ""
         echo -e "${BOLD}Selected configuration:${RESET}"
@@ -2891,8 +2832,8 @@ ask_security_config() {
         print_section "Security Configuration" "$progress"
 
         # Self-signed certificates
-        echo "If your artifact repository, source control, or Moderne tenant uses self-signed"
-        echo "certificates, you'll need to import them into the JVM trust stores."
+        echo "If you use self-signed SSL certificates for artifact storage, Git servers, or"
+        echo "Moderne platform, the Java runtime needs to trust them to make HTTPS connections."
         echo ""
 
         print_context "${BOLD}What this does:\033[22m${GRAY} Imports your certificate into all JDK keystores and configures wget
@@ -3685,18 +3626,16 @@ main() {
     # Show Phase 2 introduction
     show_phase2_introduction
 
-    ask_jdk_versions "Step 1/12"
-    ask_modcli_config "Step 2/12"
-    ask_artifact_repository_config "Step 3/12"
-    ask_maven_build_config "Step 4/12"
-    ask_gradle_build_config "Step 5/12"
-    ask_other_build_tools "Step 6/12"
-    ask_language_runtimes "Step 7/12"
-    ask_scalability_options "Step 8/12"
-    ask_security_config "Step 9/12"
-    ask_git_auth "Step 10/12"
-    ask_runtime_config "Step 11/12"
-    ask_docker_compose "Step 12/12"
+    ask_jdk_versions "Step 1/10"
+    ask_modcli_config "Step 2/10"
+    ask_artifact_repository_config "Step 3/10"
+    ask_build_tools_config "Step 4/10"
+    ask_language_runtimes "Step 5/10"
+    ask_scalability_options "Step 6/10"
+    ask_security_config "Step 7/10"
+    ask_git_auth "Step 8/10"
+    ask_runtime_config "Step 9/10"
+    ask_docker_compose "Step 10/10"
 
     # Show configuration preview
     clear
