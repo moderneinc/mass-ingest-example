@@ -30,6 +30,7 @@ BOLD='\033[1m'
 OUTPUT_FILE="repos.csv"
 USE_HIERARCHICAL_ORGS=false  # Options: "none", false (simple), or true (hierarchical)
 NORMALIZE_CSV=false
+REPOS_CSV_REUSED=false  # Track if we reused existing repos.csv
 
 # Temp directory for CSV files
 TEMP_DIR=""
@@ -178,6 +179,8 @@ print_warning() {
 
 ask_yes_no() {
     local prompt="$1"
+    local yes_label="${2:-Yes, continue}"
+    local no_label="${3:-No, redo this section}"
     local selected=0
     local key
 
@@ -188,11 +191,11 @@ ask_yes_no() {
     # Function to draw menu
     draw_menu() {
         if [ $selected -eq 0 ]; then
-            echo -e "  ${CYAN}▶${RESET} ${BOLD}Yes${RESET}"
-            echo -e "    No"
+            echo -e "  ${CYAN}▶${RESET} ${BOLD}$yes_label${RESET}"
+            echo -e "    $no_label"
         else
-            echo -e "    Yes"
-            echo -e "  ${CYAN}▶${RESET} ${BOLD}No${RESET}"
+            echo -e "    $yes_label"
+            echo -e "  ${CYAN}▶${RESET} ${BOLD}$no_label${RESET}"
         fi
         echo ""
         echo -e "${GRAY}(Use ↑/↓ arrows, Enter to select)${RESET}"
@@ -257,7 +260,8 @@ expand_env_var() {
         local var_name="${value#\$\{}"
         var_name="${var_name%\}}"
         # Use printenv to get the actual environment variable (not shadowed by shell vars)
-        printenv "$var_name"
+        # Don't fail if variable doesn't exist (returns empty string instead)
+        printenv "$var_name" 2>/dev/null || true
     else
         echo "$value"
     fi
@@ -698,8 +702,12 @@ ask_multi_select() {
                 fi
             done
             # Restore terminal settings from saved file
-            stty $(cat "$STTY_SAVE_FILE")
-            rm -f "$STTY_SAVE_FILE"
+            if [ -f "$STTY_SAVE_FILE" ]; then
+                stty $(cat "$STTY_SAVE_FILE" 2>/dev/null) 2>/dev/null || stty sane
+                rm -f "$STTY_SAVE_FILE"
+            else
+                stty sane
+            fi
             echo "" # newline after selection
             return 0
         elif [[ $key == $'\x1b' ]]; then
@@ -846,7 +854,7 @@ parse_error_message() {
         error_msg="Resource not found - check your URL, organization, or project name"
     elif grep -q "Error:" "$output_file" 2>/dev/null; then
         # Extract first error line
-        error_msg=$(grep -m 1 "Error:" "$output_file" | sed 's/^Error: //')
+        error_msg=$(grep -m 1 "Error:" "$output_file" 2>/dev/null | sed 's/^Error: //' || true)
     fi
 
     if [ -n "$error_msg" ]; then
@@ -981,8 +989,9 @@ show_repos_csv_introduction() {
         echo -e "${GRAY}$(head -n 10 "$OUTPUT_FILE")${RESET}"
         echo ""
 
-        if ask_yes_no "Use this existing repos.csv?"; then
+        if ask_yes_no "Use this existing repos.csv?" "Yes, use existing" "No, generate new"; then
             print_success "Using existing repos.csv"
+            REPOS_CSV_REUSED=true
             return 0  # Skip repos.csv generation
         else
             print_warning "Will regenerate repos.csv"
@@ -1011,16 +1020,36 @@ show_repos_csv_introduction() {
 
 # SCM provider selection (loop with menu)
 add_scm_providers() {
+    local has_provider=false
+
     while true; do
         clear
         print_section "SCM Provider Selection"
 
-        ask_choice "Select an SCM provider to add:" \
-            "GitHub" \
-            "GitLab" \
-            "Azure DevOps" \
-            "Bitbucket Data Center / Server" \
-            "Bitbucket Cloud"
+        # Check if at least one provider was added
+        if [ "$ENABLE_GITHUB" = true ] || [ "$ENABLE_GITLAB" = true ] || \
+           [ "$ENABLE_AZURE_DEVOPS" = true ] || [ "$ENABLE_BITBUCKET_CLOUD" = true ] || \
+           [ "$ENABLE_BITBUCKET_DATA_CENTER" = true ]; then
+            has_provider=true
+        fi
+
+        # Show menu with optional "Done" option
+        if [ "$has_provider" = true ]; then
+            ask_choice "Select an SCM provider to add:" \
+                "GitHub" \
+                "GitLab" \
+                "Azure DevOps" \
+                "Bitbucket Data Center / Server" \
+                "Bitbucket Cloud" \
+                "Done adding SCM providers"
+        else
+            ask_choice "Select an SCM provider to add:" \
+                "GitHub" \
+                "GitLab" \
+                "Azure DevOps" \
+                "Bitbucket Data Center / Server" \
+                "Bitbucket Cloud"
+        fi
 
         local continue_adding
         case $CHOICE_RESULT in
@@ -1043,6 +1072,12 @@ add_scm_providers() {
             4)
                 configure_bitbucket_cloud && continue_adding=0 || continue_adding=1
                 ENABLE_BITBUCKET_CLOUD=true
+                ;;
+            5)
+                # "Done adding SCM providers" - only available when has_provider=true
+                if [ "$has_provider" = true ]; then
+                    break
+                fi
                 ;;
         esac
 
@@ -1275,7 +1310,7 @@ Create one at: ${gitlab_domain}/-/user_settings/personal_access_tokens"
     # Decide: all accessible repos or specific groups?
     echo ""
     echo -e "${BOLD}Group Configuration${RESET}"
-    if ask_yes_no "Fetch from specific groups? (say 'no' to fetch all accessible repositories)"; then
+    if ask_yes_no "Fetch from specific groups?" "Yes, select groups" "No, fetch all"; then
         echo ""
         print_context "You can specify GitLab groups (including subgroups).
 Example: openrewrite/recipes"
@@ -1794,18 +1829,24 @@ For GitHub (e.g., 'openrewrite/rewrite'):
             ;;
     esac
 
-    echo ""
+    # Only ask about normalization if using hierarchical org structure
+    if [ "$USE_HIERARCHICAL_ORGS" = true ]; then
+        echo ""
 
-    print_context "CSV normalization pads all rows with empty columns to match the maximum depth.
+        print_context "CSV normalization pads all rows with empty columns to match the maximum depth.
 Empty columns are added at the beginning so 'ALL' appears in the same column for filtering.
 This ensures Excel and other tools can properly parse the file."
 
-    if ask_yes_no "Normalize CSV for Excel compatibility?"; then
-        NORMALIZE_CSV=true
-        print_success "CSV will be normalized"
+        if ask_yes_no "Normalize CSV for Excel compatibility?" "Yes, normalize" "No, keep as-is"; then
+            NORMALIZE_CSV=true
+            print_success "CSV will be normalized"
+        else
+            NORMALIZE_CSV=false
+            print_success "CSV will not be normalized"
+        fi
     else
+        # No normalization needed for "none" or "simple" modes
         NORMALIZE_CSV=false
-        print_success "CSV will not be normalized"
     fi
 
     clear
@@ -2058,14 +2099,25 @@ show_repos_summary() {
     echo -e "${GRAY}$(head -n 10 "$OUTPUT_FILE")${RESET}"
     echo ""
 
-    if ! ask_yes_no "Does this look correct?"; then
-        print_error "repos.csv generation issues detected"
-        echo ""
-        echo "Please review the file and re-run the wizard if needed."
-        exit 1
-    fi
+    ask_choice "Does this look correct?" \
+        "Yes, continue to Docker configuration" \
+        "No, add another SCM provider" \
+        "No, start over from scratch"
 
-    clear
+    case $CHOICE_RESULT in
+        0)
+            # Continue
+            clear
+            ;;
+        1)
+            # Add another SCM - return code 10
+            return 10
+            ;;
+        2)
+            # Start over - return code 20
+            return 20
+            ;;
+    esac
 }
 
 # ============================================================================
@@ -2314,7 +2366,7 @@ automated refactorings across your repositories."
                                     print_warning "The token may be invalid or the tenant URL may be incorrect"
                                 fi
                                 echo ""
-                                if ask_yes_no "Try again?"; then
+                                if ask_yes_no "Retry token entry?" "Yes, try again" "No, skip token"; then
                                     continue
                                 else
                                     MODERNE_TOKEN=""
@@ -2410,7 +2462,7 @@ This must be a ${BOLD}Maven 2 format/layout${RESET} repository (e.g., JFrog Arti
         if [ -z "$url_input" ]; then
             print_error "Artifact repository URL is required"
             echo ""
-            if ! ask_yes_no "Try again?"; then
+            if ! ask_yes_no "Retry?" "Yes, try again" "No, skip configuration"; then
                 print_warning "Skipping artifact repository configuration - you'll need to configure .env manually"
                 break
             fi
@@ -2448,7 +2500,7 @@ ${BOLD}Token:\033[22m${GRAY} API token or access token (e.g., JFrog API key)."
                 if [ -z "$user_input" ]; then
                     print_error "Username is required"
                     echo ""
-                    if ! ask_yes_no "Try again?"; then
+                    if ! ask_yes_no "Retry?" "Yes, try again" "No, skip configuration"; then
                         print_warning "Skipping artifact repository configuration"
                         break
                     fi
@@ -2466,7 +2518,7 @@ ${BOLD}Token:\033[22m${GRAY} API token or access token (e.g., JFrog API key)."
                 if [ -z "$password_input" ]; then
                     print_error "Password is required"
                     echo ""
-                    if ! ask_yes_no "Try again?"; then
+                    if ! ask_yes_no "Retry?" "Yes, try again" "No, skip configuration"; then
                         print_warning "Skipping artifact repository configuration"
                         break
                     fi
@@ -2506,7 +2558,7 @@ ${BOLD}Token:\033[22m${GRAY} API token or access token (e.g., JFrog API key)."
                 if [ -z "$token_input" ]; then
                     print_error "Token is required"
                     echo ""
-                    if ! ask_yes_no "Try again?"; then
+                    if ! ask_yes_no "Retry?" "Yes, try again" "No, skip configuration"; then
                         print_warning "Skipping artifact repository configuration"
                         break
                     fi
@@ -2574,26 +2626,28 @@ ask_build_tools_config() {
         echo "Java build tools needed for your projects."
         echo ""
 
-        print_context "${BOLD}Wrappers (mvnw/gradlew):\033[22m${GRAY} Many projects include wrappers. If ALL your Maven projects
-use mvnw, you can skip Maven installation to save ~100MB and get faster builds.
+        print_context "${BOLD}Maven wrapper (mvnw):\033[22m${GRAY} If ALL your Maven projects use mvnw, you can skip Maven
+installation to save ~100MB and get faster builds.
+${BOLD}Gradle wrapper (gradlew):\033[22m${GRAY} If ALL your Gradle projects use gradlew, you can skip Gradle
+installation to save space and ensure version consistency.
 ${BOLD}Bazel:\033[22m${GRAY} Google's build system, mainly for monorepos or Google-style projects."
 
         echo ""
         ask_multi_select "Select build tools to install (if needed):" --default-unchecked \
-            "Maven 3.9.11" \
-            "Gradle 8.14" \
-            "Bazel 7.4.1"
+            "Maven" \
+            "Gradle" \
+            "Bazel"
 
         # Process selections
         for item in "${MULTI_SELECT_RESULT[@]}"; do
             case "$item" in
-                "Maven 3.9.11")
+                "Maven")
                     ENABLE_MAVEN=true
                     ;;
-                "Gradle 8.14")
+                "Gradle")
                     ENABLE_GRADLE=true
                     ;;
-                "Bazel 7.4.1")
+                "Bazel")
                     ENABLE_BAZEL=true
                     ;;
             esac
@@ -2629,7 +2683,7 @@ ${BOLD}Bazel:\033[22m${GRAY} Google's build system, mainly for monorepos or Goog
         fi
 
         if [ "$ENABLE_BAZEL" = true ]; then
-            print_success "Bazel 7.4.1 will be installed"
+            print_success "Bazelisk will be installed (auto-detects Bazel version per project)"
         fi
 
         # Maven settings.xml configuration (applies to both Maven and mvnw)
@@ -2641,7 +2695,7 @@ mirrors, profiles, or authentication.
 ${BOLD}What this does:\033[22m${GRAY} Copies your settings.xml to /root/.m2/ and configures mod CLI to use it.
 ${BOLD}Applies to:\033[22m${GRAY} Both pre-installed Maven and Maven wrapper (mvnw) projects."
 
-        if ask_yes_no "Do you need custom Maven settings.xml?"; then
+        if ask_yes_no "Do you need custom Maven settings.xml?" "Yes, configure settings" "No, skip"; then
             while true; do
                 MAVEN_SETTINGS_FILE=$(ask_optional_path "Enter path to your settings.xml file")
 
@@ -2655,7 +2709,7 @@ ${BOLD}Applies to:\033[22m${GRAY} Both pre-installed Maven and Maven wrapper (mv
                 if [[ ! "$MAVEN_SETTINGS_FILE" =~ \.xml$ ]]; then
                     echo -e "${RED}Error: Maven settings must be an XML file (expected .xml extension)${RESET}"
                     echo -e "${YELLOW}You provided: $(basename "$MAVEN_SETTINGS_FILE")${RESET}"
-                    if ! ask_yes_no "Try again?"; then
+                    if ! ask_yes_no "Retry?" "Yes, enter different path" "No, skip settings"; then
                         MAVEN_SETTINGS_FILE=""
                         break
                     fi
@@ -2668,7 +2722,7 @@ ${BOLD}Applies to:\033[22m${GRAY} Both pre-installed Maven and Maven wrapper (mv
                 else
                     print_error "Warning: File not found, but will include in Dockerfile anyway"
                     echo -e "${YELLOW}        Make sure to provide the settings.xml before building.${RESET}"
-                    if ask_yes_no "Use this path anyway?"; then
+                    if ask_yes_no "Use this path anyway?" "Yes, use path" "No, enter different path"; then
                         break
                     fi
                 fi
@@ -2685,7 +2739,7 @@ ${BOLD}Applies to:\033[22m${GRAY} Both pre-installed Maven and Maven wrapper (mv
             echo -e "  Gradle: Version $GRADLE_VERSION will be installed"
         fi
         if [ "$ENABLE_BAZEL" = true ]; then
-            echo -e "  Bazel: Version 7.4.1 will be installed"
+            echo -e "  Bazel: Bazelisk will be installed (auto-detects version per project)"
         fi
         if [ "$ENABLE_MAVEN" = false ] && [ "$ENABLE_GRADLE" = false ] && [ "$ENABLE_BAZEL" = false ]; then
             echo -e "  No build tools will be installed (projects use wrappers)"
@@ -2839,7 +2893,7 @@ ask_security_config() {
         print_context "${BOLD}What this does:\033[22m${GRAY} Imports your certificate into all JDK keystores and configures wget
 for Maven wrapper scripts."
 
-        if ! ask_yes_no "Do you use self-signed certificates?"; then
+        if ! ask_yes_no "Do you use self-signed certificates?" "Yes, configure certificate" "No, skip"; then
             clear
             return
         fi
@@ -2858,7 +2912,7 @@ for Maven wrapper scripts."
                 # Validate file extension (common certificate formats)
                 if [[ ! "$CERT_FILE" =~ \.(crt|cer|pem|der)$ ]]; then
                     echo -e "${RED}Warning: File doesn't appear to be a certificate (expected .crt, .cer, .pem, or .der)${RESET}"
-                    if ! ask_yes_no "Use this file anyway?"; then
+                    if ! ask_yes_no "Use this file anyway?" "Yes, use file" "No, enter different path"; then
                         continue
                     fi
                 fi
@@ -2869,7 +2923,7 @@ for Maven wrapper scripts."
                 else
                     print_error "Warning: File not found, but will include in Dockerfile anyway"
                     echo -e "${YELLOW}        Make sure to provide the certificate before building.${RESET}"
-                    if ask_yes_no "Use this path anyway?"; then
+                    if ask_yes_no "Use this path anyway?" "Yes, use path" "No, enter different path"; then
                         break
                     fi
                 fi
@@ -2943,7 +2997,7 @@ You can select both, one, or neither."
         # If HTTPS was selected, ask about existing .git-credentials file
         if [ "$ENABLE_GIT_HTTPS" = true ]; then
             echo ""
-            if ask_yes_no "Do you already have a .git-credentials file?"; then
+            if ask_yes_no "Do you already have a .git-credentials file?" "Yes, I have one" "No, create template"; then
                 print_success "HTTPS authentication will use your existing .git-credentials file"
             else
                 # Create template .git-credentials file
@@ -3054,7 +3108,7 @@ ask_docker_compose() {
     print_context "${BOLD}What you get:\033[22m${GRAY} A docker-compose.yml and .env.example file for easier startup.
 Just edit .env with your credentials and run 'docker compose up'."
 
-    if ask_yes_no "Generate Docker Compose files?"; then
+    if ask_yes_no "Generate Docker Compose files?" "Yes, generate files" "No, skip"; then
         GENERATE_DOCKER_COMPOSE=true
         print_success "Docker Compose files will be generated"
     else
@@ -3075,7 +3129,7 @@ This allows you to stop and restart the container without losing progress.
 
 ${BOLD}No persistence:\033[22m${GRAY} Data stays inside the container. Useful for testing or one-time runs."
 
-    if ask_yes_no "Mount a data directory for persistence?"; then
+    if ask_yes_no "Mount a data directory for persistence?" "Yes, mount directory" "No, skip"; then
         echo ""
         echo -e "${BOLD}Enter data directory path (default: ./data):${RESET}"
         read -r dir_input
@@ -3608,15 +3662,42 @@ main() {
     # Show repos.csv introduction and check for existing file
     # Returns 0 if using existing file, 1 if need to generate
     if ! show_repos_csv_introduction; then
-        # Add and configure SCM providers (loops with menu)
-        # Each configure function will fetch immediately
-        add_scm_providers
+        # Loop to allow adding more SCM providers or starting over
+        while true; do
+            # Add and configure SCM providers (loops with menu)
+            # Each configure function will fetch immediately
+            add_scm_providers
 
-        # Ask about CSV normalization
-        ask_csv_normalization
+            # Ask about CSV normalization
+            ask_csv_normalization
 
-        # Show summary and generate repos.csv
-        show_repos_summary
+            # Show summary and generate repos.csv
+            # Temporarily disable set -e to capture return codes
+            set +e
+            show_repos_summary
+            local summary_result=$?
+            set -e
+
+            if [ $summary_result -eq 10 ]; then
+                # User wants to add another SCM provider
+                clear
+                continue
+            elif [ $summary_result -eq 20 ]; then
+                # User wants to start over - reset everything
+                clear
+                ENABLE_GITHUB=false
+                ENABLE_GITLAB=false
+                ENABLE_AZURE_DEVOPS=false
+                ENABLE_BITBUCKET_CLOUD=false
+                ENABLE_BITBUCKET_DATA_CENTER=false
+                unset FETCH_RESULTS
+                FETCH_RESULTS=()
+                continue
+            else
+                # User accepted, continue to Phase 2
+                break
+            fi
+        done
     fi
 
     # Phase 2: Docker Environment
@@ -3720,7 +3801,7 @@ main() {
     echo ""
 
     # Generate files
-    if ask_yes_no "Generate Docker environment with this configuration?"; then
+    if ask_yes_no "Generate Docker environment with this configuration?" "Yes, generate now" "No, cancel"; then
         generate_dockerfile
 
         if [ "$GENERATE_DOCKER_COMPOSE" = true ]; then
@@ -3730,7 +3811,11 @@ main() {
         show_combined_summary
     else
         echo -e "\n${YELLOW}Docker environment generation cancelled.${RESET}\n"
-        echo "repos.csv was generated successfully at: $OUTPUT_FILE"
+        if [ "$REPOS_CSV_REUSED" = true ]; then
+            echo "Using existing repos.csv at: $OUTPUT_FILE"
+        else
+            echo "repos.csv was generated successfully at: $OUTPUT_FILE"
+        fi
         exit 0
     fi
 }
