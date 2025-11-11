@@ -1026,10 +1026,13 @@ add_scm_providers() {
         clear
         print_section "SCM Provider Selection"
 
-        # Check if at least one provider was added
-        if [ "$ENABLE_GITHUB" = true ] || [ "$ENABLE_GITLAB" = true ] || \
-           [ "$ENABLE_AZURE_DEVOPS" = true ] || [ "$ENABLE_BITBUCKET_CLOUD" = true ] || \
-           [ "$ENABLE_BITBUCKET_DATA_CENTER" = true ]; then
+        # Check if at least one provider has actual data fetched
+        has_provider=false
+        if [ ${#GITHUB_ORGS[@]} -gt 0 ] || \
+           [ ${#GITLAB_GROUPS[@]} -gt 0 ] || \
+           [ ${#AZURE_ORGS[@]} -gt 0 ] || \
+           [ ${#BITBUCKET_CLOUD_WORKSPACES[@]} -gt 0 ] || \
+           [ ${#BITBUCKET_DC_PROJECTS[@]} -gt 0 ]; then
             has_provider=true
         fi
 
@@ -1173,35 +1176,145 @@ Create at: ${GITHUB_URL}/settings/tokens (select 'Tokens (classic)' type)"
         export GITHUB_API_URL="$api_url"
     fi
 
+    # Discover organizations
+    echo ""
+    echo -e "${CYAN}Discovering your organizations...${RESET}"
+
+    local -a discovered_orgs=()
+    local orgs_json=""
+
+    if command -v gh &> /dev/null && [ -z "$token" ]; then
+        # Use GH CLI
+        if [[ "$github_url" != "https://github.com" ]]; then
+            export GH_HOST="${github_url#https://}"
+        fi
+        orgs_json=$(gh api /user/orgs --jq '.[].login' 2>/dev/null | tr '\n' ' ' || true)
+    else
+        # Use API with token
+        orgs_json=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$api_url/user/orgs" 2>/dev/null | grep -o '"login":"[^"]*"' | cut -d'"' -f4 | tr '\n' ' ' || true)
+    fi
+
+    # Parse org names into array
+    if [ -n "$orgs_json" ]; then
+        read -ra discovered_orgs <<< "$orgs_json"
+    fi
+
     # Collect organizations and fetch immediately
     while true; do
         echo ""
-        local org=$(ask_input "Organization name (or GitHub username for personal repos)")
-        GITHUB_ORGS+=("$org")
 
-        # Fetch immediately
-        fetch_from_github "$github_url" "$org" "$token" "$api_url"
+        if [ ${#discovered_orgs[@]} -gt 0 ]; then
+            print_success "Found ${#discovered_orgs[@]} organization(s)"
+            echo ""
+
+            # Build options array with discovered orgs + manual option
+            local -a select_options=()
+            for org in "${discovered_orgs[@]}"; do
+                select_options+=("$org")
+            done
+            select_options+=("Manually add organization/user")
+
+            ask_choice "Select organization to fetch from:" "${select_options[@]}"
+
+            # Process selection
+            local selected_index=$CHOICE_RESULT
+            if [ $selected_index -eq ${#discovered_orgs[@]} ]; then
+                # Manual add selected (last option)
+                echo ""
+                local org=$(ask_input "Organization name (or GitHub username for personal repos)")
+                GITHUB_ORGS+=("$org")
+                fetch_from_github "$github_url" "$org" "$token" "$api_url"
+            else
+                # Discovered org selected
+                local org="${discovered_orgs[$selected_index]}"
+                GITHUB_ORGS+=("$org")
+                fetch_from_github "$github_url" "$org" "$token" "$api_url"
+            fi
+        else
+            # No orgs discovered, fall back to manual entry
+            print_warning "No organizations found. Add manually:"
+            echo ""
+            local org=$(ask_input "Organization name (or GitHub username for personal repos)")
+            GITHUB_ORGS+=("$org")
+            fetch_from_github "$github_url" "$org" "$token" "$api_url"
+        fi
 
         # Ask what to do next
         echo ""
-        ask_choice "What's next?" \
-            "Add another GitHub organization" \
-            "Add a different SCM provider" \
-            "Finalize repos.csv"
 
-        case $CHOICE_RESULT in
-            0) # Add another GitHub org
-                continue
-                ;;
-            1) # Add different SCM
-                clear
-                return 0
-                ;;
-            2) # Done
-                clear
-                return 1
-                ;;
-        esac
+        # Build menu options dynamically
+        local -a next_options=("Add another GitHub organization")
+
+        # Only show "Remove last" if at least one org has been added
+        if [ ${#GITHUB_ORGS[@]} -gt 0 ]; then
+            local last_org_idx=$((${#GITHUB_ORGS[@]}-1))
+            next_options+=("Remove last added organization (${GITHUB_ORGS[$last_org_idx]})")
+        fi
+
+        next_options+=("Add a different SCM provider" "Finalize repos.csv")
+
+        ask_choice "What's next?" "${next_options[@]}"
+
+        # Map choice to action (accounting for optional "Remove last" option)
+        local add_another_idx=0
+        local remove_last_idx=-1
+        local different_scm_idx=1
+        local finalize_idx=2
+
+        if [ ${#GITHUB_ORGS[@]} -gt 0 ]; then
+            remove_last_idx=1
+            different_scm_idx=2
+            finalize_idx=3
+        fi
+
+        if [ $CHOICE_RESULT -eq $add_another_idx ]; then
+            # Add another GitHub org
+            continue
+        elif [ ${#GITHUB_ORGS[@]} -gt 0 ] && [ $CHOICE_RESULT -eq $remove_last_idx ]; then
+            # Remove last org
+            local last_org_idx=$((${#GITHUB_ORGS[@]}-1))
+            local last_org="${GITHUB_ORGS[$last_org_idx]}"
+
+            # Rebuild array without last element (bash 3.2 compatible)
+            local -a new_github_orgs=()
+            for (( i=0; i<$last_org_idx; i++ )); do
+                new_github_orgs+=("${GITHUB_ORGS[$i]}")
+            done
+            GITHUB_ORGS=("${new_github_orgs[@]}")
+
+            # Remove CSV file
+            rm -f "$TEMP_DIR/github_${last_org}.csv"
+
+            # Remove from FETCH_RESULTS
+            local -a new_fetch_results=()
+            for result in "${FETCH_RESULTS[@]}"; do
+                if [[ ! "$result" =~ ^"GitHub ($last_org)|" ]]; then
+                    new_fetch_results+=("$result")
+                fi
+            done
+            FETCH_RESULTS=("${new_fetch_results[@]}")
+
+            # Clear ENABLE_GITHUB if no orgs left
+            if [ ${#GITHUB_ORGS[@]} -eq 0 ]; then
+                ENABLE_GITHUB=false
+            fi
+
+            print_success "Removed: $last_org"
+            echo ""
+            sleep 1
+
+            # Go back to SCM selection menu
+            clear
+            return 0
+        elif [ $CHOICE_RESULT -eq $different_scm_idx ]; then
+            # Add different SCM
+            clear
+            return 0
+        elif [ $CHOICE_RESULT -eq $finalize_idx ]; then
+            # Done
+            clear
+            return 1
+        fi
     done
 }
 
