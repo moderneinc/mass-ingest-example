@@ -28,7 +28,7 @@ BOLD='\033[1m'
 
 # Output file
 OUTPUT_FILE="repos.csv"
-USE_HIERARCHICAL_ORGS=false
+USE_HIERARCHICAL_ORGS=false  # Options: "none", false (simple), or true (hierarchical)
 NORMALIZE_CSV=false
 
 # Temp directory for CSV files
@@ -178,20 +178,58 @@ print_warning() {
 
 ask_yes_no() {
     local prompt="$1"
-    local response
+    local selected=0
+    local key
 
-    # Add (y/n) to prompt if not already present
-    if [[ ! "$prompt" =~ \(y/n\) ]]; then
-        prompt="$prompt (y/n)"
-    fi
+    # Show prompt
+    echo -e "${BOLD}$prompt${RESET}"
+    echo ""
 
+    # Function to draw menu
+    draw_menu() {
+        if [ $selected -eq 0 ]; then
+            echo -e "  ${CYAN}▶${RESET} ${BOLD}Yes${RESET}"
+            echo -e "    No"
+        else
+            echo -e "    Yes"
+            echo -e "  ${CYAN}▶${RESET} ${BOLD}No${RESET}"
+        fi
+        echo ""
+        echo -e "${GRAY}(Use ↑/↓ arrows, Enter to select)${RESET}"
+    }
+
+    # Initial draw
+    draw_menu
+
+    # Read keys and navigate
     while true; do
-        read -p "$(echo -e "${BOLD}$prompt${RESET}: ")" response
-        case "$response" in
-            [Yy]* ) return 0;;
-            [Nn]* ) return 1;;
-            * ) echo "Please answer y or n." >&2;;
-        esac
+        read -rsn1 key
+
+        if [[ $key == "" ]]; then
+            # Enter key pressed
+            echo "" # newline after selection
+            if [ $selected -eq 0 ]; then
+                return 0  # Yes
+            else
+                return 1  # No
+            fi
+        elif [[ $key == $'\x1b' ]]; then
+            read -rsn2 key
+
+            case $key in
+                '[A'|'[B') # Up or Down arrow (toggle between 2 options)
+                    selected=$((1 - selected))
+                    ;;
+            esac
+
+            # Clear previous menu and redraw
+            echo -ne "\033[1A\033[2K" # Clear hint line
+            echo -ne "\033[1A\033[2K" # Clear empty line
+            echo -ne "\033[1A\033[2K" # Clear "No"
+            echo -ne "\033[1A\033[2K" # Clear "Yes"
+
+            draw_menu
+        fi
     done
 }
 
@@ -229,10 +267,69 @@ expand_env_var() {
 ask_secret_or_env_var_ref() {
     local prompt="$1"
     local value
+    local selected=0
+    local key
 
     echo "" >&2
-    if ask_yes_no "Use an environment variable?"; then
-        # Ask for env var name (unmasked)
+
+    # Show selection menu
+    echo -e "${BOLD}How do you want to provide this?${RESET}" >&2
+    echo "" >&2
+
+    # Function to draw menu
+    draw_menu() {
+        if [ $selected -eq 0 ]; then
+            echo -e "  ${CYAN}▶${RESET} ${BOLD}Enter secret directly${RESET}" >&2
+            echo -e "    Use environment variable" >&2
+        else
+            echo -e "    Enter secret directly" >&2
+            echo -e "  ${CYAN}▶${RESET} ${BOLD}Use environment variable${RESET}" >&2
+        fi
+        echo "" >&2
+        echo -e "${GRAY}(Use ↑/↓ arrows, Enter to select)${RESET}" >&2
+    }
+
+    # Initial draw
+    draw_menu
+
+    # Read keys and navigate
+    while true; do
+        read -rsn1 key
+
+        if [[ $key == "" ]]; then
+            # Enter key pressed
+            echo "" >&2 # newline after selection
+
+            # Clear menu
+            echo -ne "\033[1A\033[2K" >&2 # Clear hint line
+            echo -ne "\033[1A\033[2K" >&2 # Clear empty line
+            echo -ne "\033[1A\033[2K" >&2 # Clear option 2
+            echo -ne "\033[1A\033[2K" >&2 # Clear option 1
+            echo -ne "\033[1A\033[2K" >&2 # Clear empty line after prompt
+            echo -ne "\033[1A\033[2K" >&2 # Clear prompt
+
+            break
+        elif [[ $key == $'\x1b' ]]; then
+            read -rsn2 key
+
+            case $key in
+                '[A'|'[B') # Up or Down arrow
+                    selected=$((1 - selected))
+                    ;;
+            esac
+
+            # Clear previous menu and redraw
+            echo -ne "\033[1A\033[2K" >&2
+            echo -ne "\033[1A\033[2K" >&2
+            echo -ne "\033[1A\033[2K" >&2
+            echo -ne "\033[1A\033[2K" >&2
+
+            draw_menu
+        fi
+    done
+
+    if [ $selected -eq 1 ]; then
+        # Use environment variable
         while true; do
             read -p "$(echo -e "${BOLD}Environment variable name${RESET}: ")" value
             value=$(clean_value "$value")
@@ -243,7 +340,6 @@ ask_secret_or_env_var_ref() {
             fi
 
             # Normalize to ${VAR_NAME} format
-            # Remove any $ or ${ or } to get just the var name
             local var_name=$(echo "$value" | sed 's/^\${\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)}\{0,1\}$/\1/')
 
             if [ -n "$var_name" ]; then
@@ -253,7 +349,7 @@ ask_secret_or_env_var_ref() {
             echo -e "${RED}Invalid environment variable name. Use alphanumeric characters and underscores.${RESET}" >&2
         done
     else
-        # Ask for actual secret (masked)
+        # Enter secret directly
         while true; do
             read -s -p "$(echo -e "${BOLD}$prompt${RESET}: ")" value
             echo "" >&2  # newline after hidden input
@@ -281,10 +377,69 @@ ask_secret_or_env_var() {
 ask_input_or_env_var() {
     local prompt="$1"
     local value
+    local selected=0
+    local key
 
     echo "" >&2
-    if ask_yes_no "Use an environment variable?"; then
-        # Ask for env var name (unmasked)
+
+    # Show selection menu
+    echo -e "${BOLD}How do you want to provide this?${RESET}" >&2
+    echo "" >&2
+
+    # Function to draw menu
+    draw_menu() {
+        if [ $selected -eq 0 ]; then
+            echo -e "  ${CYAN}▶${RESET} ${BOLD}Enter value directly${RESET}" >&2
+            echo -e "    Use environment variable" >&2
+        else
+            echo -e "    Enter value directly" >&2
+            echo -e "  ${CYAN}▶${RESET} ${BOLD}Use environment variable${RESET}" >&2
+        fi
+        echo "" >&2
+        echo -e "${GRAY}(Use ↑/↓ arrows, Enter to select)${RESET}" >&2
+    }
+
+    # Initial draw
+    draw_menu
+
+    # Read keys and navigate
+    while true; do
+        read -rsn1 key
+
+        if [[ $key == "" ]]; then
+            # Enter key pressed
+            echo "" >&2 # newline after selection
+
+            # Clear menu
+            echo -ne "\033[1A\033[2K" >&2 # Clear hint line
+            echo -ne "\033[1A\033[2K" >&2 # Clear empty line
+            echo -ne "\033[1A\033[2K" >&2 # Clear option 2
+            echo -ne "\033[1A\033[2K" >&2 # Clear option 1
+            echo -ne "\033[1A\033[2K" >&2 # Clear empty line after prompt
+            echo -ne "\033[1A\033[2K" >&2 # Clear prompt
+
+            break
+        elif [[ $key == $'\x1b' ]]; then
+            read -rsn2 key
+
+            case $key in
+                '[A'|'[B') # Up or Down arrow
+                    selected=$((1 - selected))
+                    ;;
+            esac
+
+            # Clear previous menu and redraw
+            echo -ne "\033[1A\033[2K" >&2
+            echo -ne "\033[1A\033[2K" >&2
+            echo -ne "\033[1A\033[2K" >&2
+            echo -ne "\033[1A\033[2K" >&2
+
+            draw_menu
+        fi
+    done
+
+    if [ $selected -eq 1 ]; then
+        # Use environment variable
         while true; do
             read -p "$(echo -e "${BOLD}Environment variable name${RESET}: ")" value
             value=$(clean_value "$value")
@@ -304,7 +459,7 @@ ask_input_or_env_var() {
             echo -e "${RED}Invalid environment variable name. Use alphanumeric characters and underscores.${RESET}" >&2
         done
     else
-        # Ask for actual input (unmasked)
+        # Enter value directly
         while true; do
             read -p "$(echo -e "${BOLD}$prompt${RESET}: ")" value
             value=$(clean_value "$value")
@@ -355,6 +510,30 @@ ask_secret() {
     done
 }
 
+ask_env_var_name() {
+    local prompt="$1"
+    local value
+
+    while true; do
+        read -p "$(echo -e "${BOLD}Environment variable name for $prompt${RESET}: ")" value
+        value=$(clean_value "$value")
+
+        if [ -z "$value" ]; then
+            echo -e "${RED}Environment variable name cannot be empty.${RESET}" >&2
+            continue
+        fi
+
+        # Normalize to ${VAR_NAME} format
+        local var_name=$(echo "$value" | sed 's/^\${\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)}\{0,1\}$/\1/')
+
+        if [ -n "$var_name" ]; then
+            echo "\${$var_name}"
+            return
+        fi
+        echo -e "${RED}Invalid environment variable name. Use alphanumeric characters and underscores.${RESET}" >&2
+    done
+}
+
 # Clean value by removing newlines, carriage returns, and trimming whitespace
 clean_value() {
     local value="$1"
@@ -365,20 +544,192 @@ ask_choice() {
     local prompt="$1"
     shift
     local options=("$@")
-    local choice
+    local selected=0
+    local key
 
+    # Show prompt
     echo -e "${BOLD}$prompt${RESET}"
+    echo ""
+
+    # Function to draw menu
+    draw_menu() {
+        for i in "${!options[@]}"; do
+            if [ $i -eq $selected ]; then
+                echo -e "  ${CYAN}▶${RESET} ${BOLD}${options[$i]}${RESET}"
+            else
+                echo -e "    ${options[$i]}"
+            fi
+        done
+        echo ""
+        echo -e "${GRAY}(Use ↑/↓ arrows, Enter to select)${RESET}"
+    }
+
+    # Initial draw
+    draw_menu
+
+    # Read keys and navigate
+    while true; do
+        # Read a single character
+        read -rsn1 key
+
+        # Handle different key types
+        if [[ $key == "" ]]; then
+            # Enter key pressed
+            CHOICE_RESULT=$selected
+            echo "" # newline after selection
+            return 0
+        elif [[ $key == $'\x1b' ]]; then
+            # Escape sequence (arrow keys)
+            read -rsn2 key # Read the rest of the escape sequence
+
+            case $key in
+                '[A') # Up arrow
+                    ((selected--))
+                    if [ $selected -lt 0 ]; then
+                        selected=$((${#options[@]} - 1))
+                    fi
+                    ;;
+                '[B') # Down arrow
+                    ((selected++))
+                    if [ $selected -ge ${#options[@]} ]; then
+                        selected=0
+                    fi
+                    ;;
+            esac
+
+            # Clear previous menu and redraw
+            for i in "${!options[@]}"; do
+                echo -ne "\033[1A\033[2K" # Move up one line and clear it
+            done
+            echo -ne "\033[1A\033[2K" # Clear the empty line
+            echo -ne "\033[1A\033[2K" # Clear the hint line
+
+            draw_menu
+        fi
+    done
+}
+
+# Multi-select with checkboxes (returns array in MULTI_SELECT_RESULT)
+# Usage: ask_multi_select "prompt" [--default-checked|--default-unchecked] "option1" "option2" ...
+ask_multi_select() {
+    local prompt="$1"
+    shift
+
+    # Check for default state flag
+    local default_checked=1
+    if [[ "$1" == "--default-checked" ]]; then
+        default_checked=1
+        shift
+    elif [[ "$1" == "--default-unchecked" ]]; then
+        default_checked=0
+        shift
+    fi
+
+    local options=("$@")
+    local selected=0
+    local key
+
+    # Track which items are checked
+    local -a checked=()
     for i in "${!options[@]}"; do
-        echo "  $((i+1)). ${options[$i]}"
+        checked[$i]=$default_checked
     done
 
+    # Show prompt
+    echo -e "${BOLD}$prompt${RESET}"
+    echo ""
+
+    # Function to draw menu
+    draw_menu() {
+        for i in "${!options[@]}"; do
+            local checkbox="[ ]"
+            if [ "${checked[$i]}" -eq 1 ]; then
+                checkbox="${GREEN}[✓]${RESET}"
+            fi
+
+            if [ $i -eq $selected ]; then
+                echo -e "  ${CYAN}▶${RESET} $checkbox ${BOLD}${options[$i]}${RESET}"
+            else
+                echo -e "    $checkbox ${options[$i]}"
+            fi
+        done
+        echo ""
+        echo -e "${GRAY}(Use ↑/↓ arrows, Space to toggle, Enter to confirm)${RESET}"
+    }
+
+    # Save current terminal state to a temp file (avoids variable expansion issues)
+    STTY_SAVE_FILE=$(mktemp)
+    stty -g > "$STTY_SAVE_FILE"
+
+    # Disable echo + canonical mode
+    stty -icanon -echo
+
+    # Initial draw
+    draw_menu
+
+    # Read keys and navigate
     while true; do
-        read -p "$(echo -e "\n${BOLD}Enter your choice${RESET} [1-${#options[@]}]: ")" choice
-        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#options[@]}" ]; then
-            CHOICE_RESULT=$((choice-1))
+        # Use dd to read exactly 1 byte - works reliably on macOS
+        key=$(dd bs=1 count=1 2>/dev/null)
+
+        # Check for Space (now properly captured on macOS)
+        if [[ $key == " " ]]; then
+            # Spacebar - toggle current item
+            if [ "${checked[$selected]}" -eq 1 ]; then
+                checked[$selected]=0
+            else
+                checked[$selected]=1
+            fi
+
+            # Clear and redraw
+            for i in "${!options[@]}"; do
+                echo -ne "\033[1A\033[2K"
+            done
+            echo -ne "\033[1A\033[2K" # Clear empty line
+            echo -ne "\033[1A\033[2K" # Clear hint line
+
+            draw_menu
+        elif [[ -z $key ]] || [[ $key == $'\n' ]] || [[ $key == $'\r' ]]; then
+            # Enter key pressed (empty string in -icanon mode) - collect selected items
+            MULTI_SELECT_RESULT=()
+            for i in "${!options[@]}"; do
+                if [ "${checked[$i]}" -eq 1 ]; then
+                    MULTI_SELECT_RESULT+=("${options[$i]}")
+                fi
+            done
+            # Restore terminal settings from saved file
+            stty $(cat "$STTY_SAVE_FILE")
+            rm -f "$STTY_SAVE_FILE"
+            echo "" # newline after selection
             return 0
+        elif [[ $key == $'\x1b' ]]; then
+            # Escape sequence - read next 2 bytes for arrow keys
+            rest=$(dd bs=1 count=2 2>/dev/null)
+
+            case $rest in
+                '[A') # Up arrow
+                    ((selected--))
+                    if [ $selected -lt 0 ]; then
+                        selected=$((${#options[@]} - 1))
+                    fi
+                    ;;
+                '[B') # Down arrow
+                    ((selected++))
+                    if [ $selected -ge ${#options[@]} ]; then
+                        selected=0
+                    fi
+                    ;;
+            esac
+
+            # Clear and redraw
+            for i in "${!options[@]}"; do
+                echo -ne "\033[1A\033[2K"
+            done
+            echo -ne "\033[1A\033[2K" # Clear empty line
+            echo -ne "\033[1A\033[2K" # Clear hint line
+
+            draw_menu
         fi
-        echo "Invalid choice. Please enter a number between 1 and ${#options[@]}." >&2
     done
 }
 
@@ -779,20 +1130,27 @@ Create one at: ${GITHUB_URL}/settings/tokens"
         # Fetch immediately
         fetch_from_github "$github_url" "$org" "$token" "$api_url"
 
-        if ! ask_yes_no "Add another GitHub organization?"; then
-            break
-        fi
-    done
+        # Ask what to do next
+        echo ""
+        ask_choice "What's next?" \
+            "Add another GitHub organization" \
+            "Add a different SCM provider" \
+            "Finalize repos.csv"
 
-    # Ask if user wants to add another SCM provider
-    echo ""
-    if ask_yes_no "Do you want to add another SCM provider?"; then
-        clear
-        return 0  # Continue to next provider
-    else
-        clear
-        return 1  # Done with SCM configuration
-    fi
+        case $CHOICE_RESULT in
+            0) # Add another GitHub org
+                continue
+                ;;
+            1) # Add different SCM
+                clear
+                return 0
+                ;;
+            2) # Done
+                clear
+                return 1
+                ;;
+        esac
+    done
 }
 
 # Fetch from GitHub
@@ -905,9 +1263,28 @@ Example: openrewrite/recipes"
             # Fetch immediately
             fetch_from_gitlab "$gitlab_domain" "$group" "$token"
 
-            if ! ask_yes_no "Add another GitLab group?"; then
-                break
-            fi
+            # Ask what to do next
+            echo ""
+            ask_choice "What's next?" \
+                "Add another GitLab group" \
+                "Add a different SCM provider" \
+                "Finalize repos.csv"
+
+            case $CHOICE_RESULT in
+                0) # Add another GitLab group
+                    continue
+                    ;;
+                1) # Add different SCM
+                    unset GITLAB_TOKEN
+                    clear
+                    return 0
+                    ;;
+                2) # Done
+                    unset GITLAB_TOKEN
+                    clear
+                    return 1
+                    ;;
+            esac
         done
     else
         # Fetch all accessible repositories
@@ -916,15 +1293,22 @@ Example: openrewrite/recipes"
 
     unset GITLAB_TOKEN
 
-    # Ask if user wants to add another SCM provider
+    # Ask what to do next (for "all accessible" path)
     echo ""
-    if ask_yes_no "Do you want to add another SCM provider?"; then
-        clear
-        return 0  # Continue to next provider
-    else
-        clear
-        return 1  # Done with SCM configuration
-    fi
+    ask_choice "What's next?" \
+        "Add a different SCM provider" \
+        "Finalize repos.csv"
+
+    case $CHOICE_RESULT in
+        0) # Add different SCM
+            clear
+            return 0
+            ;;
+        1) # Done
+            clear
+            return 1
+            ;;
+    esac
 }
 
 # Fetch from GitLab
@@ -1046,22 +1430,29 @@ Create one at: https://dev.azure.com/{org}/_usersSettings/tokens"
         # Fetch immediately
         fetch_from_azure "$org" "$project" "$pat"
 
-        if ! ask_yes_no "Add another Azure DevOps organization/project?"; then
-            break
-        fi
+        # Ask what to do next
+        echo ""
+        ask_choice "What's next?" \
+            "Add another Azure DevOps organization/project" \
+            "Add a different SCM provider" \
+            "Finalize repos.csv"
+
+        case $CHOICE_RESULT in
+            0) # Add another Azure org/project
+                continue
+                ;;
+            1) # Add different SCM
+                unset AZURE_DEVOPS_PAT
+                clear
+                return 0
+                ;;
+            2) # Done
+                unset AZURE_DEVOPS_PAT
+                clear
+                return 1
+                ;;
+        esac
     done
-
-    unset AZURE_DEVOPS_PAT
-
-    # Ask if user wants to add another SCM provider
-    echo ""
-    if ask_yes_no "Do you want to add another SCM provider?"; then
-        clear
-        return 0  # Continue to next provider
-    else
-        clear
-        return 1  # Done with SCM configuration
-    fi
 }
 
 # Fetch from Azure DevOps
@@ -1153,23 +1544,31 @@ Create one at: https://bitbucket.org/account/settings/app-passwords/"
         # Fetch immediately
         fetch_from_bitbucket_cloud "$workspace" "$username" "$app_password"
 
-        if ! ask_yes_no "Add another Bitbucket Cloud workspace?"; then
-            break
-        fi
+        # Ask what to do next
+        echo ""
+        ask_choice "What's next?" \
+            "Add another Bitbucket Cloud workspace" \
+            "Add a different SCM provider" \
+            "Finalize repos.csv"
+
+        case $CHOICE_RESULT in
+            0) # Add another workspace
+                continue
+                ;;
+            1) # Add different SCM
+                unset BITBUCKET_CLOUD_USERNAME
+                unset BITBUCKET_CLOUD_APP_PASSWORD
+                clear
+                return 0
+                ;;
+            2) # Done
+                unset BITBUCKET_CLOUD_USERNAME
+                unset BITBUCKET_CLOUD_APP_PASSWORD
+                clear
+                return 1
+                ;;
+        esac
     done
-
-    unset BITBUCKET_CLOUD_USERNAME
-    unset BITBUCKET_CLOUD_APP_PASSWORD
-
-    # Ask if user wants to add another SCM provider
-    echo ""
-    if ask_yes_no "Do you want to add another SCM provider?"; then
-        clear
-        return 0  # Continue to next provider
-    else
-        clear
-        return 1  # Done with SCM configuration
-    fi
 }
 
 # Fetch from Bitbucket Cloud
@@ -1256,22 +1655,29 @@ Create one at: ${BITBUCKET_DC_URL}/plugins/servlet/access-tokens/manage"
         # Fetch immediately
         fetch_from_bitbucket_data_center "$BITBUCKET_DC_URL" "$token" "$project"
 
-        if ! ask_yes_no "Add another Bitbucket Data Center project?"; then
-            break
-        fi
+        # Ask what to do next
+        echo ""
+        ask_choice "What's next?" \
+            "Add another Bitbucket Data Center project" \
+            "Add a different SCM provider" \
+            "Finalize repos.csv"
+
+        case $CHOICE_RESULT in
+            0) # Add another project
+                continue
+                ;;
+            1) # Add different SCM
+                unset BITBUCKET_DC_TOKEN
+                clear
+                return 0
+                ;;
+            2) # Done
+                unset BITBUCKET_DC_TOKEN
+                clear
+                return 1
+                ;;
+        esac
     done
-
-    unset BITBUCKET_DC_TOKEN
-
-    # Ask if user wants to add another SCM provider
-    echo ""
-    if ask_yes_no "Do you want to add another SCM provider?"; then
-        clear
-        return 0  # Continue to next provider
-    else
-        clear
-        return 1  # Done with SCM configuration
-    fi
 }
 
 # Fetch from Bitbucket Data Center
@@ -1332,6 +1738,7 @@ ask_csv_normalization() {
     print_section "Organization Structure"
 
     print_context "Repositories can be organized using org columns:
+  - None: No organization columns
   - Simple: Use 'ALL' for a flat structure
   - Hierarchical: Extract org hierarchy from repository paths (excluding repo name)
 
@@ -1341,13 +1748,25 @@ Example hierarchical org columns for 'openrewrite/recipes/java/security':
 For GitHub (e.g., 'openrewrite/rewrite'):
   org1=openrewrite, org2=ALL"
 
-    if ask_yes_no "Use hierarchical organization structure?"; then
-        USE_HIERARCHICAL_ORGS=true
-        print_success "Using hierarchical organization structure"
-    else
-        USE_HIERARCHICAL_ORGS=false
-        print_success "Using simple organization structure (ALL)"
-    fi
+    ask_choice "Organization structure?" \
+        "None (no org columns)" \
+        "Simple (flat structure with 'ALL')" \
+        "Hierarchical (extract from repository paths)"
+
+    case $CHOICE_RESULT in
+        0) # None
+            USE_HIERARCHICAL_ORGS="none"
+            print_success "No organization columns will be added"
+            ;;
+        1) # Simple
+            USE_HIERARCHICAL_ORGS=false
+            print_success "Using simple organization structure (ALL)"
+            ;;
+        2) # Hierarchical
+            USE_HIERARCHICAL_ORGS=true
+            print_success "Using hierarchical organization structure"
+            ;;
+    esac
 
     echo ""
 
@@ -1467,7 +1886,10 @@ generate_repos_csv() {
     local temp_data="$TEMP_DIR/data_with_orgs.txt"
 
     # First pass: Generate all data rows and track max org depth
-    local max_org_depth=1
+    local max_org_depth=0
+    if [ "$USE_HIERARCHICAL_ORGS" = false ]; then
+        max_org_depth=1  # Simple mode has 1 org column (ALL)
+    fi
     > "$temp_data"
 
     for csv_file in "${REPO_SOURCES[@]}"; do
@@ -1482,7 +1904,10 @@ generate_repos_csv() {
             origin=$(echo "$origin" | sed 's/^"//;s/"$//')
             path=$(echo "$path" | sed 's/^"//;s/"$//')
 
-            if [ "$USE_HIERARCHICAL_ORGS" = true ]; then
+            if [ "$USE_HIERARCHICAL_ORGS" = "none" ]; then
+                # No org columns
+                echo "$cloneUrl|$branch|$origin|$path" >> "$temp_data"
+            elif [ "$USE_HIERARCHICAL_ORGS" = true ]; then
                 # Extract org hierarchy from path (deepest to shallowest)
                 # Exclude the last segment (repository name)
                 IFS='/' read -ra parts <<< "$path"
@@ -1508,6 +1933,7 @@ generate_repos_csv() {
                 # Store row data with org columns separated by |
                 echo "$cloneUrl|$branch|$origin|$path|${org_columns[*]}" >> "$temp_data"
             else
+                # Simple: just ALL
                 echo "$cloneUrl|$branch|$origin|$path|ALL" >> "$temp_data"
             fi
         done < <(tail -n +2 "$csv_file")
@@ -1662,53 +2088,36 @@ ask_jdk_versions() {
         print_section "JDK Versions" "$progress"
 
         echo "The Moderne CLI needs access to all JDK versions used by your Java projects to"
-        echo "successfully build LSTs. We'll install JDK 8, 11, 17, 21, and 25 by default."
+        echo "successfully build LSTs."
         echo ""
 
-        print_context "${BOLD}Why all versions?\033[22m${GRAY} This ensures compatibility with projects targeting any Java version.
+        print_context "${BOLD}Why multiple versions?\033[22m${GRAY} Ensures compatibility with projects targeting any Java version.
 The additional disk space (~2GB) is worth avoiding build failures.
 
-${BOLD}Safe to skip:\033[22m${GRAY} If you're certain your projects only use specific JDK versions, you can
-disable the ones you don't need to save space."
+${BOLD}Deselect unused versions:\033[22m${GRAY} Use Space to uncheck JDK versions you definitely don't need."
 
-        if ask_yes_no "Keep all JDK versions (8, 11, 17, 21, 25)?"; then
-            ENABLED_JDKS=("8" "11" "17" "21" "25")
-            print_success "All JDK versions will be installed"
-        else
+        echo ""
+        ask_multi_select "Select JDK versions to install:" --default-checked "JDK 8" "JDK 11" "JDK 17" "JDK 21" "JDK 25"
+
+        # Extract just the version numbers from results
+        ENABLED_JDKS=()
+        for item in "${MULTI_SELECT_RESULT[@]}"; do
+            # Extract number from "JDK XX"
+            local version=$(echo "$item" | grep -o '[0-9]\+')
+            ENABLED_JDKS+=("$version")
+        done
+
+        if [ ${#ENABLED_JDKS[@]} -eq 0 ]; then
             echo ""
-            echo -e "${BOLD}Select which JDK versions to include:${RESET}"
-
-            local selected_jdks=()
-
-            if ask_yes_no "  Include JDK 8?"; then
-                selected_jdks+=("8")
-            fi
-
-            if ask_yes_no "  Include JDK 11?"; then
-                selected_jdks+=("11")
-            fi
-
-            if ask_yes_no "  Include JDK 17?"; then
-                selected_jdks+=("17")
-            fi
-
-            if ask_yes_no "  Include JDK 21?"; then
-                selected_jdks+=("21")
-            fi
-
-            if ask_yes_no "  Include JDK 25?"; then
-                selected_jdks+=("25")
-            fi
-
-            if [ ${#selected_jdks[@]} -eq 0 ]; then
-                echo -e "\n${RED}Error: At least one JDK version must be selected!${RESET}"
-                echo -e "${YELLOW}Defaulting to all JDK versions.${RESET}"
-                ENABLED_JDKS=("8" "11" "17" "21" "25")
-            else
-                ENABLED_JDKS=("${selected_jdks[@]}")
-                print_success "Selected JDK versions: ${ENABLED_JDKS[*]}"
-            fi
+            echo -e "${RED}Error: At least one JDK version must be selected!${RESET}"
+            echo -e "${YELLOW}Please select at least one JDK version.${RESET}"
+            echo ""
+            read -p "Press Enter to try again..."
+            clear
+            continue
         fi
+
+        print_success "Selected JDK versions: ${ENABLED_JDKS[*]}"
 
         # Confirm selection
         echo ""
@@ -1740,55 +2149,55 @@ ask_modcli_config() {
 
         print_context "Choose how to provide the Moderne CLI to the container.
 
-${BOLD}Download from Maven Central:\033[22m${GRAY} Automatically fetches the specified version during build.
+${BOLD}Download options:\033[22m${GRAY} Automatically fetches from Maven Central during build.
+  • Latest stable: Recommended for production use
+  • Latest staging: Pre-release version with newest features
+  • Specific version: Pin to a known version for reproducibility
+
 ${BOLD}Supply JAR directly:\033[22m${GRAY} You provide mod.jar in the build context (faster builds, version control)."
 
         ask_choice "How do you want to provide the Moderne CLI?" \
-            "Download from Maven Central (recommended)" \
-            "Supply JAR directly (mod.jar in build context)"
+            "Download latest stable (recommended)" \
+            "Download latest staging" \
+            "Download specific version" \
+            "Supply JAR directly"
 
         case $CHOICE_RESULT in
-            0) CLI_SOURCE="download";;
-            1) CLI_SOURCE="local";;
+            0)
+                CLI_SOURCE="download"
+                CLI_VERSION_TYPE="stable"
+                print_success "Will download: latest stable"
+                ;;
+            1)
+                CLI_SOURCE="download"
+                CLI_VERSION_TYPE="staging"
+                print_success "Will download: latest staging"
+                ;;
+            2)
+                CLI_SOURCE="download"
+                CLI_VERSION_TYPE="specific"
+                echo ""
+                read -p "$(echo -e "${BOLD}Enter version number${RESET} (e.g., 3.0.0): ")" CLI_SPECIFIC_VERSION
+                if [ -z "$CLI_SPECIFIC_VERSION" ]; then
+                    echo -e "${YELLOW}No version specified, defaulting to latest stable${RESET}"
+                    CLI_VERSION_TYPE="stable"
+                    print_success "Will download: latest stable"
+                else
+                    print_success "Will download: $CLI_SPECIFIC_VERSION"
+                fi
+                ;;
+            3)
+                CLI_SOURCE="local"
+                echo ""
+                CLI_JAR_PATH=$(ask_optional_path "Enter path to mod.jar file (default: mod.jar in build context)")
+                if [ -z "$CLI_JAR_PATH" ]; then
+                    CLI_JAR_PATH="mod.jar"
+                    print_success "Will use mod.jar from build context"
+                else
+                    print_success "Will use JAR from: $CLI_JAR_PATH"
+                fi
+                ;;
         esac
-
-        if [ "$CLI_SOURCE" = "download" ]; then
-            echo ""
-            print_context "Select which version to download.
-
-${BOLD}Latest stable:\033[22m${GRAY} Recommended for production use.
-${BOLD}Latest staging:\033[22m${GRAY} Pre-release version with newest features.
-${BOLD}Specific version:\033[22m${GRAY} Pin to a known version for reproducibility."
-
-            ask_choice "Which version do you want?" \
-                "Latest stable (recommended)" \
-                "Latest staging" \
-                "Specific version"
-
-            case $CHOICE_RESULT in
-                0) CLI_VERSION_TYPE="stable";;
-                1) CLI_VERSION_TYPE="staging";;
-                2)
-                    CLI_VERSION_TYPE="specific"
-                    read -p "$(echo -e "${BOLD}Enter version number${RESET} (e.g., 3.0.0): ")" CLI_SPECIFIC_VERSION
-                    if [ -z "$CLI_SPECIFIC_VERSION" ]; then
-                        echo -e "${YELLOW}No version specified, defaulting to latest stable${RESET}"
-                        CLI_VERSION_TYPE="stable"
-                    fi
-                    ;;
-            esac
-
-            print_success "Will download: $CLI_VERSION_TYPE$([ "$CLI_VERSION_TYPE" = "specific" ] && echo " ($CLI_SPECIFIC_VERSION)")"
-        else
-            echo ""
-            CLI_JAR_PATH=$(ask_optional_path "Enter path to mod.jar file (default: mod.jar in build context)")
-            if [ -z "$CLI_JAR_PATH" ]; then
-                CLI_JAR_PATH="mod.jar"
-                print_success "Will use mod.jar from build context"
-            else
-                print_success "Will use JAR from: $CLI_JAR_PATH"
-            fi
-        fi
 
         # Ask for Moderne tenant configuration
         echo ""
@@ -1806,83 +2215,106 @@ recipes), provide your tenant name."
             print_success "Tenant URL: $tenant_url"
             echo ""
 
-            if ask_yes_no "Do you want to supply a Moderne API token now?"; then
-                echo ""
-                echo -e "${BOLD}Supply a Moderne API token.${RESET}"
-                echo ""
-                echo -e "${CYAN}You can create a token at:${RESET}"
-                echo -e "  ${tenant_url}/settings/access-token"
-                echo ""
+            echo -e "${BOLD}Moderne API token${RESET}"
+            echo ""
+            echo -e "${CYAN}You can create a token at:${RESET}"
+            echo -e "  ${tenant_url}/settings/access-token"
+            echo ""
 
-                while true; do
-                    # Use a temp variable to avoid shadowing environment variables
-                    local token_input=$(ask_secret_or_env_var_ref "Moderne API token")
-                    token_input=$(clean_value "$token_input")
+            ask_choice "How do you want to provide the Moderne API token?" \
+                "Enter secret directly" \
+                "Use environment variable" \
+                "Skip (tenant will NOT be configured)"
 
-                    if [ -n "$token_input" ]; then
-                        # Validate the token (expand env var references first for validation)
-                        local token_to_validate="$token_input"
-                        local is_env_var=false
+            case $CHOICE_RESULT in
+                0|1)
+                    # Enter directly or use env var
+                    local provide_directly=$([[ $CHOICE_RESULT -eq 0 ]] && echo "true" || echo "false")
 
-                        if is_env_var_reference "$token_input"; then
-                            is_env_var=true
-                            # Expand BEFORE assigning to MODERNE_TOKEN to avoid shadowing
-                            token_to_validate=$(expand_env_var "$token_input")
+                    while true; do
+                        echo ""
+                        # Use a temp variable to avoid shadowing environment variables
+                        local token_input
+                        if $provide_directly; then
+                            token_input=$(ask_secret "Moderne API token")
+                        else
+                            token_input=$(ask_env_var_name "Moderne API token")
+                        fi
+                        token_input=$(clean_value "$token_input")
 
-                            if [ -z "$token_to_validate" ]; then
-                                # Env var not set - that's okay, they can set it later
-                                print_warning "Environment variable $token_input is not currently set"
-                                print_success "Will use $token_input (set this before running docker-compose)"
+                        if [ -n "$token_input" ]; then
+                            # Validate the token (expand env var references first for validation)
+                            local token_to_validate="$token_input"
+                            local is_env_var=false
+
+                            if is_env_var_reference "$token_input"; then
+                                is_env_var=true
+                                # Expand BEFORE assigning to MODERNE_TOKEN to avoid shadowing
+                                token_to_validate=$(expand_env_var "$token_input")
+
+                                if [ -z "$token_to_validate" ]; then
+                                    # Env var not set - that's okay, they can set it later
+                                    print_warning "Environment variable $token_input is not currently set"
+                                    print_success "Will use $token_input (set this before running docker-compose)"
+                                    MODERNE_TOKEN="$token_input"
+                                    break
+                                else
+                                    echo ""
+                                    echo -e "${CYAN}Found $token_input in environment, validating...${RESET}"
+                                fi
+                            fi
+
+                            # Validate the token
+                            if ! $is_env_var; then
+                                echo ""
+                                echo -e "${CYAN}Validating token...${RESET}"
+                            fi
+
+                            if validate_moderne_token "$api_url" "$token_to_validate"; then
+                                if $is_env_var; then
+                                    print_success "Token from $token_input validated successfully"
+                                else
+                                    print_success "Token validated successfully"
+                                fi
                                 MODERNE_TOKEN="$token_input"
                                 break
                             else
+                                if $is_env_var; then
+                                    print_error "Token validation failed for $token_input"
+                                    print_warning "The token in $token_input may be invalid or expired"
+                                    echo -e "${GRAY}Current value: ${token_to_validate:0:20}...${RESET}"
+                                else
+                                    print_error "Token validation failed"
+                                    print_warning "The token may be invalid or the tenant URL may be incorrect"
+                                fi
                                 echo ""
-                                echo -e "${CYAN}Found $token_input in environment, validating...${RESET}"
+                                if ask_yes_no "Try again?"; then
+                                    continue
+                                else
+                                    MODERNE_TOKEN=""
+                                    print_warning "You can add the token to .env later"
+                                    break
+                                fi
                             fi
-                        fi
-
-                        # Validate the token
-                        if ! $is_env_var; then
-                            echo ""
-                            echo -e "${CYAN}Validating token...${RESET}"
-                        fi
-
-                        if validate_moderne_token "$api_url" "$token_to_validate"; then
-                            if $is_env_var; then
-                                print_success "Token from $token_input validated successfully"
-                            else
-                                print_success "Token validated successfully"
-                            fi
-                            MODERNE_TOKEN="$token_input"
-                            break
                         else
-                            if $is_env_var; then
-                                print_error "Token validation failed for $token_input"
-                                print_warning "The token in $token_input may be invalid or expired"
-                                echo -e "${GRAY}Current value: ${token_to_validate:0:20}...${RESET}"
-                            else
-                                print_error "Token validation failed"
-                                print_warning "The token may be invalid or the tenant URL may be incorrect"
-                            fi
-                            echo ""
-                            if ask_yes_no "Try again?"; then
-                                continue
-                            else
-                                MODERNE_TOKEN=""
-                                print_warning "You can add the token to .env later"
-                                break
-                            fi
+                            MODERNE_TOKEN=""
+                            print_warning "You can add the token to .env later"
+                            break
                         fi
-                    else
-                        MODERNE_TOKEN=""
-                        print_warning "You can add the token to .env later"
-                        break
-                    fi
-                done
-            else
-                MODERNE_TOKEN=""
-                print_success "You can add a token to .env later if needed"
-            fi
+                    done
+                    ;;
+                2)
+                    # Skip - clear tenant configuration
+                    MODERNE_TENANT=""
+                    MODERNE_TOKEN=""
+                    print_warning "Tenant configuration skipped - Moderne platform will NOT be configured"
+                    echo ""
+                    print_context "To use Moderne later, you'll need to:
+  1. Set MODERNE_TENANT in .env
+  2. Set MODERNE_TOKEN in .env
+  3. Rebuild the Docker image"
+                    ;;
+            esac
         else
             MODERNE_TOKEN=""
             print_success "Skipping Moderne platform configuration"
@@ -2113,52 +2545,69 @@ ask_maven_build_config() {
         echo "Maven is a popular build tool for Java projects."
         echo ""
 
-        print_context "${BOLD}Maven wrappers (mvnw):\033[22m${GRAY} Many projects include wrapper scripts that don't require Maven to be pre-installed.
-${BOLD}Pre-installed Maven:\033[22m${GRAY} Older projects or specific scenarios may need Maven available globally."
-
-        if ! ask_yes_no "Do any of your repositories use Maven?"; then
-            clear
-            return
-        fi
+        print_context "${BOLD}Maven wrapper (mvnw):\033[22m${GRAY} Many projects include wrapper scripts that don't require pre-installation.
+${BOLD}Pre-installed Maven:\033[22m${GRAY} Needed for older projects or when mvnw is not available."
 
         echo ""
-        if ask_yes_no "Do you need Maven pre-installed? (Say 'no' if all projects use mvnw wrapper)"; then
-            ENABLE_MAVEN=true
+        ask_choice "Maven build tool configuration" \
+            "Install Maven 3.9.11 (default, recommended)" \
+            "Install specific Maven version" \
+            "Skip (not needed - projects use mvnw wrapper or no Maven projects)"
 
-            # Ask for Maven version with validation
-            while true; do
-                read -p "$(echo -e "${BOLD}Maven version${RESET} (press Enter for default) [$MAVEN_VERSION]: ")" user_maven_version
+        case $CHOICE_RESULT in
+            0)
+                ENABLE_MAVEN=true
+                MAVEN_VERSION="3.9.11"
+                print_success "Maven 3.9.11 will be installed"
+                ;;
+            1)
+                ENABLE_MAVEN=true
+                # Ask for Maven version with validation
+                while true; do
+                    echo ""
+                    read -p "$(echo -e "${BOLD}Maven version${RESET} (e.g., 3.9.11): ")" user_maven_version
 
-                if [ -z "$user_maven_version" ]; then
-                    # User pressed Enter, use default
-                    break
-                fi
-
-                # Validate semver format (MAJOR.MINOR.PATCH)
-                if [[ "$user_maven_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                    MAVEN_VERSION="$user_maven_version"
-                    break
-                else
-                    echo -e "${RED}Invalid version format. Maven versions must follow semver (e.g., 3.9.11)${RESET}"
-                    if ! ask_yes_no "Try again?"; then
-                        # Keep default version
-                        break
+                    if [ -z "$user_maven_version" ]; then
+                        echo -e "${RED}Version cannot be empty${RESET}"
+                        if ! ask_yes_no "Try again?"; then
+                            # Use default version
+                            MAVEN_VERSION="3.9.11"
+                            print_success "Using default Maven 3.9.11"
+                            break
+                        fi
+                        continue
                     fi
-                fi
-            done
 
-            print_success "Maven $MAVEN_VERSION will be installed"
-        else
-            print_success "Maven will not be installed (projects will use wrappers)"
-        fi
+                    # Validate semver format (MAJOR.MINOR.PATCH)
+                    if [[ "$user_maven_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                        MAVEN_VERSION="$user_maven_version"
+                        print_success "Maven $MAVEN_VERSION will be installed"
+                        break
+                    else
+                        echo -e "${RED}Invalid version format. Maven versions must follow semver (e.g., 3.9.11)${RESET}"
+                        if ! ask_yes_no "Try again?"; then
+                            # Use default version
+                            MAVEN_VERSION="3.9.11"
+                            print_success "Using default Maven 3.9.11"
+                            break
+                        fi
+                    fi
+                done
+                ;;
+            2)
+                ENABLE_MAVEN=false
+                print_success "Maven will not be installed (projects use wrappers or not needed)"
+                ;;
+        esac
 
-        # Maven settings.xml configuration
+        # Maven settings.xml configuration (applies to both Maven and mvnw)
         echo ""
         echo -e "${BOLD}Maven Settings${RESET}"
-        print_context "If your Maven builds require custom settings (private repositories, mirrors, profiles,
-authentication), you can provide a settings.xml file.
+        print_context "Maven and mvnw (wrapper) projects can use custom settings.xml for private repositories,
+mirrors, profiles, or authentication.
 
-${BOLD}What this does:\033[22m${GRAY} Copies your settings.xml to /root/.m2/ and configures mod CLI to use it."
+${BOLD}What this does:\033[22m${GRAY} Copies your settings.xml to /root/.m2/ and configures mod CLI to use it.
+${BOLD}Applies to:\033[22m${GRAY} Both pre-installed Maven and Maven wrapper (mvnw) projects."
 
         if ask_yes_no "Do you need custom Maven settings.xml?"; then
             while true; do
@@ -2230,32 +2679,45 @@ ask_gradle_build_config() {
         echo "Gradle is a popular build tool for Java and Kotlin projects."
         echo ""
 
-        print_context "${BOLD}Gradle wrappers (gradlew):\033[22m${GRAY} Many projects include wrapper scripts that don't require Gradle to be pre-installed.
-${BOLD}Pre-installed Gradle:\033[22m${GRAY} Older projects or specific scenarios may need Gradle available globally."
-
-        if ! ask_yes_no "Do any of your repositories use Gradle?"; then
-            clear
-            return
-        fi
+        print_context "${BOLD}Gradle wrapper (gradlew):\033[22m${GRAY} Many projects include wrapper scripts that don't require pre-installation.
+${BOLD}Pre-installed Gradle:\033[22m${GRAY} Needed for older projects or when gradlew is not available."
 
         echo ""
-        if ask_yes_no "Do you need Gradle pre-installed? (Say 'no' if all projects use gradlew wrapper)"; then
-            ENABLE_GRADLE=true
+        ask_choice "Gradle build tool configuration" \
+            "Install Gradle 8.14 (default, recommended)" \
+            "Install specific Gradle version" \
+            "Skip (not needed - projects use gradlew wrapper or no Gradle projects)"
 
-            echo ""
-            echo -e "${BOLD}Enter Gradle version (default: 8.14):${RESET}"
-            read -r version_input
-            if [ -n "$version_input" ]; then
-                GRADLE_VERSION="$version_input"
-            fi
-        fi
+        case $CHOICE_RESULT in
+            0)
+                ENABLE_GRADLE=true
+                GRADLE_VERSION="8.14"
+                print_success "Gradle 8.14 will be installed"
+                ;;
+            1)
+                ENABLE_GRADLE=true
+                echo ""
+                read -p "$(echo -e "${BOLD}Gradle version${RESET} (e.g., 8.14): ")" version_input
+                if [ -n "$version_input" ]; then
+                    GRADLE_VERSION="$version_input"
+                    print_success "Gradle $GRADLE_VERSION will be installed"
+                else
+                    GRADLE_VERSION="8.14"
+                    print_success "Using default Gradle 8.14"
+                fi
+                ;;
+            2)
+                ENABLE_GRADLE=false
+                print_success "Gradle will not be installed (projects use wrappers or not needed)"
+                ;;
+        esac
 
         echo ""
         echo -e "${BOLD}Selected configuration:${RESET}"
         if [ "$ENABLE_GRADLE" = true ]; then
             echo -e "  Gradle: Version $GRADLE_VERSION will be installed"
         else
-            echo -e "  Gradle: Not installed (projects use wrappers)"
+            echo -e "  Gradle: Not installed (projects use wrappers or not needed)"
         fi
         echo ""
         if ask_yes_no "Is this correct?"; then
@@ -2316,35 +2778,32 @@ ask_language_runtimes() {
         print_context "While the Moderne CLI primarily processes Java/Kotlin projects, your repositories
 may have multi-language components that require additional runtimes for successful builds.
 
-Answer 'yes' if any of your repositories need these runtimes."
+Select any runtimes your repositories need (or leave all unchecked if not needed)."
 
-        # Android
-        echo -e "${BOLD}Android SDK${RESET}"
-        echo "Required for Android applications. Installs API platforms 25-33 (~5GB)."
-        if ask_yes_no "Do you have Android projects?"; then
-            ENABLE_ANDROID=true
-        fi
+        echo ""
+        ask_multi_select "Select language runtimes to install:" --default-unchecked \
+            "Android SDK (API 25-33, ~5GB)" \
+            "Node.js 20.x" \
+            "Python 3.11" \
+            ".NET SDK 8.0"
 
-        # Node.js
-        echo -e "\n${BOLD}Node.js${RESET}"
-        echo "Required for projects with frontend components or JavaScript/TypeScript code."
-        if ask_yes_no "Do you need Node.js?"; then
-            ENABLE_NODE=true
-        fi
-
-        # Python
-        echo -e "\n${BOLD}Python 3.11${RESET}"
-        echo "Needed for Python projects or build scripts with Python dependencies."
-        if ask_yes_no "Do you need Python?"; then
-            ENABLE_PYTHON=true
-        fi
-
-        # .NET
-        echo -e "\n${BOLD}.NET SDK${RESET}"
-        echo "Required for .NET/C# projects. Installs .NET 6.0 and 8.0 SDKs."
-        if ask_yes_no "Do you have .NET projects?"; then
-            ENABLE_DOTNET=true
-        fi
+        # Parse results
+        for item in "${MULTI_SELECT_RESULT[@]}"; do
+            case "$item" in
+                "Android SDK"*)
+                    ENABLE_ANDROID=true
+                    ;;
+                "Node.js"*)
+                    ENABLE_NODE=true
+                    ;;
+                "Python"*)
+                    ENABLE_PYTHON=true
+                    ;;
+                ".NET SDK"*)
+                    ENABLE_DOTNET=true
+                    ;;
+            esac
+        done
 
         echo ""
         echo -e "${BOLD}Selected configuration:${RESET}"
@@ -2352,7 +2811,7 @@ Answer 'yes' if any of your repositories need these runtimes."
         [ "$ENABLE_ANDROID" = true ] && echo -e "  Android SDK: Will be installed" && any_selected=true
         [ "$ENABLE_NODE" = true ] && echo -e "  Node.js 20.x: Will be installed" && any_selected=true
         [ "$ENABLE_PYTHON" = true ] && echo -e "  Python 3.11: Will be installed" && any_selected=true
-        [ "$ENABLE_DOTNET" = true ] && echo -e "  .NET SDK 6.0/8.0: Will be installed" && any_selected=true
+        [ "$ENABLE_DOTNET" = true ] && echo -e "  .NET SDK 8.0: Will be installed" && any_selected=true
         [ "$any_selected" = false ] && echo -e "  No additional language runtimes"
         echo ""
         if ask_yes_no "Is this correct?"; then
@@ -2509,27 +2968,39 @@ ask_git_auth() {
         echo ""
 
         print_context "${BOLD}SSH authentication:\033[22m${GRAY} Uses SSH keys for Git operations. Place your SSH keys in a .ssh/ directory.
-${BOLD}HTTPS authentication:\033[22m${GRAY} Uses a .git-credentials file with personal access tokens."
+${BOLD}HTTPS authentication:\033[22m${GRAY} Uses a .git-credentials file with personal access tokens.
 
-        # Ask about SSH
-        if ask_yes_no "Do you need SSH authentication?"; then
-            ENABLE_GIT_SSH=true
-
-            # Create .ssh directory
-            local build_dir=$(dirname "$OUTPUT_DOCKERFILE")
-            local ssh_dir="$build_dir/.ssh"
-            if [ ! -d "$ssh_dir" ]; then
-                mkdir -p "$ssh_dir"
-                print_success "Created .ssh/ directory in build context"
-            fi
-        fi
+You can select both, one, or neither."
 
         echo ""
+        ask_multi_select "Select Git authentication methods (if needed):" --default-unchecked \
+            "SSH authentication" \
+            "HTTPS authentication"
 
-        # Ask about HTTPS
-        if ask_yes_no "Do you need HTTPS authentication?"; then
-            ENABLE_GIT_HTTPS=true
+        # Process selections
+        ENABLE_GIT_SSH=false
+        ENABLE_GIT_HTTPS=false
 
+        for item in "${MULTI_SELECT_RESULT[@]}"; do
+            case "$item" in
+                "SSH authentication")
+                    ENABLE_GIT_SSH=true
+                    # Create .ssh directory
+                    local build_dir=$(dirname "$OUTPUT_DOCKERFILE")
+                    local ssh_dir="$build_dir/.ssh"
+                    if [ ! -d "$ssh_dir" ]; then
+                        mkdir -p "$ssh_dir"
+                        print_success "Created .ssh/ directory in build context"
+                    fi
+                    ;;
+                "HTTPS authentication")
+                    ENABLE_GIT_HTTPS=true
+                    ;;
+            esac
+        done
+
+        # If HTTPS was selected, ask about existing .git-credentials file
+        if [ "$ENABLE_GIT_HTTPS" = true ]; then
             echo ""
             if ask_yes_no "Do you already have a .git-credentials file?"; then
                 print_success "HTTPS authentication will use your existing .git-credentials file"
