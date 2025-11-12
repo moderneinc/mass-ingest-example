@@ -1222,10 +1222,21 @@ Create at: ${GITHUB_URL}/settings/tokens (select 'Tokens (classic)' type)"
             print_success "Found ${#discovered_orgs[@]} organization(s)"
             echo ""
 
-            # Build options array with discovered orgs + manual option + done option
+            # Limit display to first 20 orgs to avoid overwhelming menus
+            local max_display=20
+            local -a display_orgs=()
+            local display_count=${#discovered_orgs[@]}
+            if [ $display_count -gt $max_display ]; then
+                display_count=$max_display
+                print_warning "Showing first $max_display of ${#discovered_orgs[@]} organizations"
+                echo ""
+            fi
+
+            # Build options array with limited orgs + manual option + done option
             local -a select_options=()
-            for org in "${discovered_orgs[@]}"; do
-                select_options+=("$org")
+            for (( i=0; i<$display_count; i++ )); do
+                select_options+=("${discovered_orgs[$i]}")
+                display_orgs+=("${discovered_orgs[$i]}")
             done
             select_options+=("Manually add organization/user")
 
@@ -1238,8 +1249,8 @@ Create at: ${GITHUB_URL}/settings/tokens (select 'Tokens (classic)' type)"
 
             # Process selection
             local selected_index=$CHOICE_RESULT
-            local manual_add_idx=${#discovered_orgs[@]}
-            local done_idx=$((${#discovered_orgs[@]} + 1))
+            local manual_add_idx=${#display_orgs[@]}
+            local done_idx=$((${#display_orgs[@]} + 1))
 
             if [ $selected_index -eq $manual_add_idx ]; then
                 # Manual add selected
@@ -1253,7 +1264,7 @@ Create at: ${GITHUB_URL}/settings/tokens (select 'Tokens (classic)' type)"
                 return 0
             else
                 # Discovered org selected
-                local org="${discovered_orgs[$selected_index]}"
+                local org="${display_orgs[$selected_index]}"
                 GITHUB_ORGS+=("$org")
                 fetch_from_github "$github_url" "$org" "$token" "$api_url"
             fi
