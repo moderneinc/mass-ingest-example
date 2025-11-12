@@ -2280,15 +2280,16 @@ show_phase2_introduction() {
     echo -e "${CYAN}${BOLD}What we'll configure:${RESET}"
     echo ""
     echo -e "  ${CYAN}1.${RESET} ${BOLD}JDK versions${RESET} - Java Development Kits (8, 11, 17, 21, 25)"
-    echo -e "  ${CYAN}2.${RESET} ${BOLD}Moderne CLI${RESET} - Version and authentication"
-    echo -e "  ${CYAN}3.${RESET} ${BOLD}Artifact repository${RESET} - Where to publish LST artifacts (Artifactory, etc.)"
-    echo -e "  ${CYAN}4.${RESET} ${BOLD}Build tools${RESET} - Maven, Gradle, Bazel"
-    echo -e "  ${CYAN}5.${RESET} ${BOLD}Language runtimes${RESET} - Node.js, Python, .NET, Android SDK"
-    echo -e "  ${CYAN}6.${RESET} ${BOLD}Scalability options${RESET} - AWS CLI and AWS Batch support"
-    echo -e "  ${CYAN}7.${RESET} ${BOLD}Security${RESET} - SSL certificates for HTTPS connections"
-    echo -e "  ${CYAN}8.${RESET} ${BOLD}Git authentication${RESET} - For cloning private repositories"
-    echo -e "  ${CYAN}9.${RESET} ${BOLD}Performance${RESET} - CPU and memory settings"
-    echo -e "  ${CYAN}10.${RESET} ${BOLD}Docker Compose${RESET} - Container orchestration (optional)"
+    echo -e "  ${CYAN}2.${RESET} ${BOLD}Moderne CLI${RESET} - Version and source"
+    echo -e "  ${CYAN}3.${RESET} ${BOLD}Moderne tenant${RESET} - Platform authentication (optional)"
+    echo -e "  ${CYAN}4.${RESET} ${BOLD}Artifact repository${RESET} - Where to publish LST artifacts (Artifactory, etc.)"
+    echo -e "  ${CYAN}5.${RESET} ${BOLD}Build tools${RESET} - Maven, Gradle, Bazel"
+    echo -e "  ${CYAN}6.${RESET} ${BOLD}Language runtimes${RESET} - Node.js, Python, .NET, Android SDK"
+    echo -e "  ${CYAN}7.${RESET} ${BOLD}Scalability options${RESET} - AWS CLI and AWS Batch support"
+    echo -e "  ${CYAN}8.${RESET} ${BOLD}Security${RESET} - SSL certificates for HTTPS connections"
+    echo -e "  ${CYAN}9.${RESET} ${BOLD}Git authentication${RESET} - For cloning private repositories"
+    echo -e "  ${CYAN}10.${RESET} ${BOLD}Performance${RESET} - CPU and memory settings"
+    echo -e "  ${CYAN}11.${RESET} ${BOLD}Docker Compose${RESET} - Container orchestration (optional)"
     echo ""
     echo -e "${CYAN}${BOLD}Why Docker?${RESET}"
     echo ""
@@ -2362,8 +2363,6 @@ ask_modcli_config() {
         CLI_VERSION_TYPE="${CLI_VERSION_TYPE:-stable}"
         CLI_SPECIFIC_VERSION="${CLI_SPECIFIC_VERSION:-}"
         CLI_JAR_PATH="${CLI_JAR_PATH:-}"
-        MODERNE_TENANT="${MODERNE_TENANT:-}"
-        MODERNE_TOKEN="${MODERNE_TOKEN:-}"
 
         print_section "Moderne CLI Configuration" "$progress"
 
@@ -2419,10 +2418,35 @@ ${BOLD}Supply JAR directly:\033[22m${GRAY} You provide mod.jar in the build cont
                 ;;
         esac
 
-        # Ask for Moderne tenant configuration
+        # Confirm configuration
         echo ""
-        echo -e "${BOLD}Moderne Platform Configuration (Optional)${RESET}"
+        echo -e "${BOLD}Selected configuration:${RESET}"
+        if [ "$CLI_SOURCE" = "download" ]; then
+            echo -e "  Moderne CLI: Download from Maven Central ($CLI_VERSION_TYPE$([ "$CLI_VERSION_TYPE" = "specific" ] && echo " - $CLI_SPECIFIC_VERSION"))"
+        else
+            echo -e "  Moderne CLI: Local JAR file ($CLI_JAR_PATH)"
+        fi
+
         echo ""
+        if ask_yes_no "Is this correct?"; then
+            break
+        fi
+        clear
+    done
+
+    clear
+}
+
+# Moderne tenant configuration
+ask_moderne_tenant_config() {
+    local progress="$1"
+    while true; do
+        # Reset for restart (preserve environment variables)
+        MODERNE_TENANT="${MODERNE_TENANT:-}"
+        MODERNE_TOKEN="${MODERNE_TOKEN:-}"
+
+        print_section "Moderne Tenant Configuration (Optional)" "$progress"
+
         print_context "Connect to Moderne platform to upload code analysis results and run
 automated refactorings across your repositories."
         echo ""
@@ -2543,12 +2567,6 @@ automated refactorings across your repositories."
         # Confirm configuration
         echo ""
         echo -e "${BOLD}Selected configuration:${RESET}"
-        if [ "$CLI_SOURCE" = "download" ]; then
-            echo -e "  Moderne CLI: Download from Maven Central ($CLI_VERSION_TYPE$([ "$CLI_VERSION_TYPE" = "specific" ] && echo " - $CLI_SPECIFIC_VERSION"))"
-        else
-            echo -e "  Moderne CLI: Local JAR file ($CLI_JAR_PATH)"
-        fi
-
         if [ -n "$MODERNE_TENANT" ]; then
             echo -e "  Tenant: https://${MODERNE_TENANT}.moderne.io"
             if [ -n "$MODERNE_TOKEN" ]; then
@@ -2565,6 +2583,8 @@ automated refactorings across your repositories."
             else
                 echo -e "  Token: ${GRAY}(not configured)${RESET}"
             fi
+        else
+            echo -e "  Tenant: ${GRAY}(not configured)${RESET}"
         fi
 
         echo ""
@@ -3644,72 +3664,6 @@ show_combined_summary() {
     fi
     echo ""
 
-    print_section "Configuration Summary"
-
-    # repos.csv summary
-    echo -e "${BOLD}Repository Discovery:${RESET}"
-    local total_repos=0
-    for result in "${FETCH_RESULTS[@]}"; do
-        IFS='|' read -r provider status count <<< "$result"
-        if [ "$status" = "Success" ]; then
-            echo -e "  ${GREEN}✓${RESET} $provider: $count repositories"
-            total_repos=$((total_repos + count))
-        fi
-    done
-    echo -e "  ${BOLD}Total: $total_repos repositories${RESET}"
-    echo ""
-
-    # Dockerfile summary
-    echo -e "${BOLD}Docker Environment:${RESET}"
-    echo -e "  ${GREEN}✓${RESET} JDK versions: ${ENABLED_JDKS[*]}"
-
-    if [ "$CLI_SOURCE" = "local" ]; then
-        echo -e "  ${GREEN}✓${RESET} Moderne CLI (from local mod.jar)"
-    else
-        if [ "$CLI_VERSION_TYPE" = "stable" ]; then
-            echo -e "  ${GREEN}✓${RESET} Moderne CLI (latest stable)"
-        elif [ "$CLI_VERSION_TYPE" = "staging" ]; then
-            echo -e "  ${GREEN}✓${RESET} Moderne CLI (latest staging)"
-        else
-            echo -e "  ${GREEN}✓${RESET} Moderne CLI (version $CLI_SPECIFIC_VERSION)"
-        fi
-    fi
-
-    if [ -n "$MODERNE_TENANT" ]; then
-        echo -e "  ${GREEN}✓${RESET} Moderne tenant: https://${MODERNE_TENANT}.moderne.io"
-        if [ -n "$MODERNE_TOKEN" ]; then
-            echo -e "  ${GREEN}✓${RESET} Moderne token: configured"
-        fi
-    fi
-
-    if [ -n "$PUBLISH_URL" ]; then
-        echo -e "  ${GREEN}✓${RESET} Artifact repository: configured"
-        if [ "$PUBLISH_AUTH_METHOD" = "userpass" ]; then
-            echo -e "  ${GREEN}✓${RESET} Authentication: username/password"
-        else
-            echo -e "  ${GREEN}✓${RESET} Authentication: token"
-        fi
-    fi
-
-    [ "$ENABLE_MAVEN" = true ] && echo -e "  ${GREEN}✓${RESET} Apache Maven $MAVEN_VERSION"
-    [ "$ENABLE_GRADLE" = true ] && echo -e "  ${GREEN}✓${RESET} Gradle $GRADLE_VERSION"
-    [ "$ENABLE_BAZEL" = true ] && echo -e "  ${GREEN}✓${RESET} Bazel"
-    [ "$ENABLE_ANDROID" = true ] && echo -e "  ${GREEN}✓${RESET} Android SDK"
-    [ "$ENABLE_NODE" = true ] && echo -e "  ${GREEN}✓${RESET} Node.js 20.x"
-    [ "$ENABLE_PYTHON" = true ] && echo -e "  ${GREEN}✓${RESET} Python 3.11"
-    [ "$ENABLE_DOTNET" = true ] && echo -e "  ${GREEN}✓${RESET} .NET SDK 6.0/8.0"
-    [ "$ENABLE_AWS_CLI" = true ] && echo -e "  ${GREEN}✓${RESET} AWS CLI v2"
-    [ "$ENABLE_AWS_BATCH" = true ] && echo -e "  ${GREEN}✓${RESET} AWS Batch support"
-
-    if [ "$ENABLE_GIT_SSH" = true ] || [ "$ENABLE_GIT_HTTPS" = true ]; then
-        local auth_types=()
-        [ "$ENABLE_GIT_SSH" = true ] && auth_types+=("SSH")
-        [ "$ENABLE_GIT_HTTPS" = true ] && auth_types+=("HTTPS")
-        echo -e "  ${GREEN}✓${RESET} Git authentication: ${auth_types[*]}"
-    fi
-
-    echo ""
-
     print_section "Next Steps"
 
     local step=1
@@ -3853,16 +3807,17 @@ main() {
     # Show Phase 2 introduction
     show_phase2_introduction
 
-    ask_jdk_versions "Step 1/10"
-    ask_modcli_config "Step 2/10"
-    ask_artifact_repository_config "Step 3/10"
-    ask_build_tools_config "Step 4/10"
-    ask_language_runtimes "Step 5/10"
-    ask_scalability_options "Step 6/10"
-    ask_security_config "Step 7/10"
-    ask_git_auth "Step 8/10"
-    ask_runtime_config "Step 9/10"
-    ask_docker_compose "Step 10/10"
+    ask_jdk_versions "Step 1/11"
+    ask_modcli_config "Step 2/11"
+    ask_moderne_tenant_config "Step 3/11"
+    ask_artifact_repository_config "Step 4/11"
+    ask_build_tools_config "Step 5/11"
+    ask_language_runtimes "Step 6/11"
+    ask_scalability_options "Step 7/11"
+    ask_security_config "Step 8/11"
+    ask_git_auth "Step 9/11"
+    ask_runtime_config "Step 10/11"
+    ask_docker_compose "Step 11/11"
 
     # Show configuration preview
     clear
