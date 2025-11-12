@@ -245,6 +245,21 @@ ask_question() {
     echo "$response"
 }
 
+# Wait for Enter key (ignore other keys like arrows)
+wait_for_enter() {
+    local prompt="${1:-Press Enter to continue...}"
+    echo -ne "${BOLD}$prompt${RESET}"
+
+    # Wait for Enter, ignore other keys (no echo)
+    while true; do
+        read -rsn1 key
+        if [[ $key == "" ]]; then
+            echo "" # Add newline after Enter is pressed
+            break
+        fi
+    done
+}
+
 # Check if a value is an environment variable reference
 is_env_var_reference() {
     local value="$1"
@@ -951,7 +966,7 @@ show_welcome() {
     echo -e "${GRAY}(Press Ctrl+C at any time to cancel)${RESET}"
     echo ""
 
-    read -p "$(echo -e "${BOLD}Ready? Press Enter to start...${RESET}")"
+    wait_for_enter "Ready? Press Enter to start..."
     clear
 }
 
@@ -1014,7 +1029,7 @@ show_repos_csv_introduction() {
     echo -e "  ${CYAN}4.${RESET} Generate repos.csv with all discovered repositories"
     echo ""
 
-    read -p "$(echo -e "${BOLD}Press Enter to continue...${RESET}")"
+    wait_for_enter
     return 1  # Need to generate repos.csv
 }
 
@@ -2270,7 +2285,7 @@ show_phase2_introduction() {
     echo "repos.csv to generate Lossless Semantic Trees (LSTs) for all your code."
     echo ""
 
-    read -p "$(echo -e "${BOLD}Press Enter to continue...${RESET}")"
+    wait_for_enter
     clear
 }
 
@@ -2305,7 +2320,7 @@ ${BOLD}Deselect unused versions:\033[22m${GRAY} Use Space to uncheck JDK version
             echo -e "${RED}Error: At least one JDK version must be selected!${RESET}"
             echo -e "${YELLOW}Please select at least one JDK version.${RESET}"
             echo ""
-            read -p "Press Enter to try again..."
+            wait_for_enter "Press Enter to try again..."
             clear
             continue
         fi
@@ -3756,8 +3771,6 @@ show_combined_summary() {
     echo "  • Moderne CLI: https://docs.moderne.io/user-documentation/moderne-cli"
     echo "  • Mass Ingest: https://github.com/moderneinc/mass-ingest-example"
     echo ""
-
-    echo -e "${GREEN}${BOLD}Happy ingesting! 🚀${RESET}\n"
 }
 
 # ============================================================================
@@ -3917,6 +3930,7 @@ main() {
 
     # Generate files
     if ask_yes_no "Generate Docker environment with this configuration?" "Yes, generate now" "No, cancel"; then
+        clear
         generate_dockerfile
 
         if [ "$GENERATE_DOCKER_COMPOSE" = true ]; then
