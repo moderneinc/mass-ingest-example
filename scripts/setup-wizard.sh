@@ -3515,7 +3515,16 @@ generate_dockerfile() {
     fi
 
     # Always include runner (with placeholder replacement)
-    sed -e "s|{{JAVA_OPTIONS}}|$JAVA_OPTIONS|g" \
+    # Format Java options: escape leading dashes and quote each option separately
+    local formatted_java_options=""
+    for opt in $JAVA_OPTIONS; do
+        # Escape leading dash
+        local escaped_opt="${opt/#-/\\-}"
+        formatted_java_options="$formatted_java_options \"$escaped_opt\""
+    done
+    formatted_java_options="${formatted_java_options# }" # Trim leading space
+
+    sed -e "s|{{JAVA_OPTIONS}}|$formatted_java_options|g" \
         -e "s|{{DATA_DIR}}|$DATA_DIR|g" \
         "$TEMPLATES_DIR/99-runner.Dockerfile" >> "$output"
 
