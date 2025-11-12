@@ -1222,23 +1222,35 @@ Create at: ${GITHUB_URL}/settings/tokens (select 'Tokens (classic)' type)"
             print_success "Found ${#discovered_orgs[@]} organization(s)"
             echo ""
 
-            # Build options array with discovered orgs + manual option
+            # Build options array with discovered orgs + manual option + done option
             local -a select_options=()
             for org in "${discovered_orgs[@]}"; do
                 select_options+=("$org")
             done
             select_options+=("Manually add organization/user")
 
+            # Only show "Done" if at least one org has been added
+            if [ ${#GITHUB_ORGS[@]} -gt 0 ]; then
+                select_options+=("Done adding GitHub organizations")
+            fi
+
             ask_choice "Select organization to fetch from:" "${select_options[@]}"
 
             # Process selection
             local selected_index=$CHOICE_RESULT
-            if [ $selected_index -eq ${#discovered_orgs[@]} ]; then
-                # Manual add selected (last option)
+            local manual_add_idx=${#discovered_orgs[@]}
+            local done_idx=$((${#discovered_orgs[@]} + 1))
+
+            if [ $selected_index -eq $manual_add_idx ]; then
+                # Manual add selected
                 echo ""
                 local org=$(ask_input "Organization name (or GitHub username for personal repos)")
                 GITHUB_ORGS+=("$org")
                 fetch_from_github "$github_url" "$org" "$token" "$api_url"
+            elif [ ${#GITHUB_ORGS[@]} -gt 0 ] && [ $selected_index -eq $done_idx ]; then
+                # Done adding - return to SCM selection menu
+                clear
+                return 0
             else
                 # Discovered org selected
                 local org="${discovered_orgs[$selected_index]}"
