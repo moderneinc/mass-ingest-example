@@ -800,11 +800,11 @@ validate_moderne_token() {
     else
         # Show curl command for debugging
         echo "" >&2
-        echo -e "${GRAY}Debug: Test this connection yourself with:${RESET}" >&2
-        echo -e "${GRAY}curl -X POST \"$graphql_url\" \\${RESET}" >&2
-        echo -e "${GRAY}  -H \"Content-Type: application/json\" \\${RESET}" >&2
-        echo -e "${GRAY}  -H \"Authorization: Bearer YOUR_TOKEN\" \\${RESET}" >&2
-        echo -e "${GRAY}  -d '{\"query\":\"query test { accessTokens { id } }\"}'${RESET}" >&2
+        echo "Debug: Test this connection yourself with:" >&2
+        echo "curl -X POST \"$graphql_url\" \\" >&2
+        echo "  -H \"Content-Type: application/json\" \\" >&2
+        echo "  -H \"Authorization: Bearer YOUR_TOKEN\" \\" >&2
+        echo "  -d '{\"query\":\"query test { accessTokens { id } }\"}'" >&2
         echo "" >&2
         return 1
     fi
@@ -836,11 +836,11 @@ validate_artifact_repository() {
     else
         # Show curl command for debugging
         echo "" >&2
-        echo -e "${GRAY}Debug: Test this connection yourself with:${RESET}" >&2
+        echo "Debug: Test this connection yourself with:" >&2
         if [ "$auth_method" = "userpass" ]; then
-            echo -e "${GRAY}curl -L -u \"YOUR_USERNAME:YOUR_PASSWORD\" \"$url\"${RESET}" >&2
+            echo "curl -L -u \"YOUR_USERNAME:YOUR_PASSWORD\" \"$url\"" >&2
         else
-            echo -e "${GRAY}curl -L -H \"X-JFrog-Art-Api: YOUR_TOKEN\" \"$url\"${RESET}" >&2
+            echo "curl -L -H \"X-JFrog-Art-Api: YOUR_TOKEN\" \"$url\"" >&2
         fi
         echo "" >&2
         return 1
