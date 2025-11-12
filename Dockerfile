@@ -58,7 +58,7 @@ RUN if [ -n "${MODERNE_CLI_VERSION}" ]; then \
     fi
 
 # Create a shell script 'mod' that runs the moderne-cli JAR file
-RUN echo -e '#!/bin/sh\njava -jar /usr/local/bin/mod.jar "$@"' > /usr/local/bin/mod
+RUN printf '#!/bin/sh\njava -jar /usr/local/bin/mod.jar "$@"\n' > /usr/local/bin/mod
 
 # Make the 'mod' script executable
 RUN chmod +x /usr/local/bin/mod
@@ -247,6 +247,7 @@ ENV DATA_DIR=/var/moderne
 
 # Copy scripts
 COPY --chmod=755 publish.sh publish.sh
+COPY --chmod=755 effective-repos-csv effective-repos-csv
 
 # Optional: mount from host
 COPY repos.csv repos.csv

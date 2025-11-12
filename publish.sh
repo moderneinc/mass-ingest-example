@@ -85,6 +85,22 @@ ingest_repos() {
     mod git pull "$clone_dir"
     mod build "$clone_dir" --no-download
     mod publish "$clone_dir"
+
+    # Publish repos-lock.csv event if EVENT_LOCATION is configured
+    if [ -n "${EVENT_LOCATION:-}" ]; then
+      repos_lock_file="$clone_dir/.moderne/repos-lock.csv"
+      if [ -f "$repos_lock_file" ]; then
+        info "Publishing repos-lock.csv event to $EVENT_LOCATION"
+        if "${BASH_SOURCE%/*}/effective-repos-csv/publish-event.sh" "$repos_lock_file" "$EVENT_LOCATION"; then
+          info "Successfully published event"
+        else
+          info "Failed to publish event (will continue)"
+        fi
+      else
+        info "No repos-lock.csv file found at $repos_lock_file, skipping event publishing"
+      fi
+    fi
+
     mod log builds add "$clone_dir" "$DATA_DIR/log.zip" --last-build
     send_logs "org-$ORGANIZATION"
   else
@@ -212,6 +228,22 @@ build_and_upload_repos() {
   fi
 
   mod publish "$clone_dir"
+
+  # Publish repos-lock.csv event if EVENT_LOCATION is configured
+  if [ -n "${EVENT_LOCATION:-}" ]; then
+    repos_lock_file="$clone_dir/.moderne/repos-lock.csv"
+    if [ -f "$repos_lock_file" ]; then
+      info "Publishing repos-lock.csv event to $EVENT_LOCATION"
+      if "${BASH_SOURCE%/*}/effective-repos-csv/publish-event.sh" "$repos_lock_file" "$EVENT_LOCATION"; then
+        info "Successfully published event"
+      else
+        info "Failed to publish event (will continue)"
+      fi
+    else
+      info "No repos-lock.csv file found at $repos_lock_file, skipping event publishing"
+    fi
+  fi
+
   mod log builds add "$clone_dir" "$DATA_DIR/log.zip" --last-build
   return $ret
 }
