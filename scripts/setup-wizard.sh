@@ -2465,17 +2465,19 @@ automated refactorings across your repositories."
             echo -e "  ${tenant_url}/settings/access-token"
             echo ""
 
-            ask_choice "How do you want to provide the Moderne API token?" \
-                "Enter secret directly" \
-                "Use environment variable" \
-                "Skip (tenant will NOT be configured)"
+            # Token entry loop - allows retrying with different method
+            local token_configured=false
+            while ! $token_configured; do
+                ask_choice "How do you want to provide the Moderne API token?" \
+                    "Enter secret directly" \
+                    "Use environment variable" \
+                    "Skip (tenant will NOT be configured)"
 
-            case $CHOICE_RESULT in
-                0|1)
-                    # Enter directly or use env var
-                    local provide_directly=$([[ $CHOICE_RESULT -eq 0 ]] && echo "true" || echo "false")
+                case $CHOICE_RESULT in
+                    0|1)
+                        # Enter directly or use env var
+                        local provide_directly=$([[ $CHOICE_RESULT -eq 0 ]] && echo "true" || echo "false")
 
-                    while true; do
                         echo ""
                         # Use a temp variable to avoid shadowing environment variables
                         local token_input
@@ -2501,7 +2503,7 @@ automated refactorings across your repositories."
                                     print_warning "Environment variable $token_input is not currently set"
                                     print_success "Will use $token_input (set this before running docker-compose)"
                                     MODERNE_TOKEN="$token_input"
-                                    break
+                                    token_configured=true
                                 else
                                     echo ""
                                     echo -e "${CYAN}Found $token_input in environment, validating...${RESET}"
@@ -2509,56 +2511,58 @@ automated refactorings across your repositories."
                             fi
 
                             # Validate the token
-                            if ! $is_env_var; then
-                                echo ""
-                                echo -e "${CYAN}Validating token...${RESET}"
-                            fi
+                            if ! $token_configured; then
+                                if ! $is_env_var; then
+                                    echo ""
+                                    echo -e "${CYAN}Validating token...${RESET}"
+                                fi
 
-                            if validate_moderne_token "$api_url" "$token_to_validate"; then
-                                if $is_env_var; then
-                                    print_success "Token from $token_input validated successfully"
+                                if validate_moderne_token "$api_url" "$token_to_validate"; then
+                                    if $is_env_var; then
+                                        print_success "Token from $token_input validated successfully"
+                                    else
+                                        print_success "Token validated successfully"
+                                    fi
+                                    MODERNE_TOKEN="$token_input"
+                                    token_configured=true
                                 else
-                                    print_success "Token validated successfully"
-                                fi
-                                MODERNE_TOKEN="$token_input"
-                                break
-                            else
-                                if $is_env_var; then
-                                    print_error "Token validation failed for $token_input"
-                                    print_warning "The token in $token_input may be invalid or expired"
-                                    echo -e "${GRAY}Current value: ${token_to_validate:0:20}...${RESET}"
-                                else
-                                    print_error "Token validation failed"
-                                    print_warning "The token may be invalid or the tenant URL may be incorrect"
-                                fi
-                                echo ""
-                                if ask_yes_no "Retry token entry?" "Yes, try again" "No, skip token"; then
-                                    continue
-                                else
-                                    MODERNE_TOKEN=""
-                                    print_warning "You can add the token to .env later"
-                                    break
+                                    if $is_env_var; then
+                                        print_error "Token validation failed for $token_input"
+                                        print_warning "The token in $token_input may be invalid or expired"
+                                        echo -e "${GRAY}Current value: ${token_to_validate:0:20}...${RESET}"
+                                    else
+                                        print_error "Token validation failed"
+                                        print_warning "The token may be invalid or the tenant URL may be incorrect"
+                                    fi
+                                    echo ""
+                                    if ! ask_yes_no "Retry token entry?" "Yes, try again" "No, skip token"; then
+                                        MODERNE_TOKEN=""
+                                        print_warning "You can add the token to .env later"
+                                        token_configured=true
+                                    fi
+                                    # If retry is yes, loop continues and re-asks for method
                                 fi
                             fi
                         else
                             MODERNE_TOKEN=""
                             print_warning "You can add the token to .env later"
-                            break
+                            token_configured=true
                         fi
-                    done
-                    ;;
-                2)
-                    # Skip - clear tenant configuration
-                    MODERNE_TENANT=""
-                    MODERNE_TOKEN=""
-                    print_warning "Tenant configuration skipped - Moderne platform will NOT be configured"
-                    echo ""
-                    print_context "To use Moderne later, you'll need to:
+                        ;;
+                    2)
+                        # Skip - clear tenant configuration
+                        MODERNE_TENANT=""
+                        MODERNE_TOKEN=""
+                        print_warning "Tenant configuration skipped - Moderne platform will NOT be configured"
+                        echo ""
+                        print_context "To use Moderne later, you'll need to:
   1. Set MODERNE_TENANT in .env
   2. Set MODERNE_TOKEN in .env
   3. Rebuild the Docker image"
-                    ;;
-            esac
+                        token_configured=true
+                        ;;
+                esac
+            done
         else
             MODERNE_TOKEN=""
             print_success "Skipping Moderne platform configuration"
