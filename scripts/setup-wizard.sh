@@ -2620,7 +2620,7 @@ This must be a ${BOLD}Maven 2 format/layout${RESET} repository (e.g., JFrog Arti
         echo ""
         echo -e "${BOLD}Supply Maven 2 repository URL.${RESET}"
         echo ""
-        print_context "Example: https://artifactory.company.com/artifactory/moderne-ingest/"
+        print_context "Example: https://artifactory.company.com/artifactory/moderne-ingest"
 
         local url_input=$(ask_input_or_env_var "Maven 2 repository URL")
         url_input=$(clean_value "$url_input")
@@ -3598,7 +3598,7 @@ EOF
     else
         cat >> "$env_file" << 'EOF'
 # Configure your artifact repository
-PUBLISH_URL=https://your-artifactory.com/artifactory/moderne-ingest/
+PUBLISH_URL=https://your-artifactory.com/artifactory/moderne-ingest
 PUBLISH_USER=your-username
 PUBLISH_PASSWORD=your-password
 # PUBLISH_TOKEN=your-token
