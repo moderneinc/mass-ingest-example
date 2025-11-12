@@ -801,9 +801,9 @@ validate_moderne_token() {
         # Show curl command for debugging
         printf "\n" >&2
         printf "${GRAY}Debug: Test this connection yourself with:${RESET}\n" >&2
-        printf "${GRAY}curl -X POST \"$graphql_url\" \\\\${RESET}\n" >&2
-        printf "${GRAY}  -H \"Content-Type: application/json\" \\\\${RESET}\n" >&2
-        printf "${GRAY}  -H \"Authorization: Bearer YOUR_TOKEN\" \\\\${RESET}\n" >&2
+        printf "${GRAY}curl -X POST \"$graphql_url\" \\${RESET}\n" >&2
+        printf "${GRAY}  -H \"Content-Type: application/json\" \\${RESET}\n" >&2
+        printf "${GRAY}  -H \"Authorization: Bearer YOUR_TOKEN\" \\${RESET}\n" >&2
         printf "${GRAY}  -d '{\"query\":\"query test { accessTokens { id } }\"}\'${RESET}\n" >&2
         printf "\n" >&2
         return 1
