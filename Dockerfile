@@ -2,25 +2,25 @@
 # CORE SETUP (Required for all stages)
 ################################################################################
 
-FROM eclipse-temurin:8-jdk AS jdk8
-FROM eclipse-temurin:11-jdk AS jdk11
-FROM eclipse-temurin:17-jdk AS jdk17
-FROM eclipse-temurin:21-jdk AS jdk21
-FROM eclipse-temurin:25-jdk AS jdk25
+FROM amazoncorretto:8-alpine-jdk AS jdk8
+FROM amazoncorretto:11-alpine-jdk AS jdk11
+FROM amazoncorretto:17-alpine-jdk AS jdk17
+FROM amazoncorretto:21-alpine-jdk AS jdk21
+FROM amazoncorretto:25-alpine-jdk AS jdk25
 
 # UNCOMMENT if you use a custom maven image with settings
 # FROM <custom docker image> AS maven
 
 # Install dependencies for `mod` cli
 FROM jdk25 AS dependencies
-RUN apt-get -y update && apt-get install -y curl git git-lfs jq libxml2-utils unzip wget zip vim && git lfs install
+RUN apk update && apk add --no-cache curl git jq libxml2-utils unzip wget zip vim bash
 
 # Gather various JDK versions
-COPY --from=jdk8 /opt/java/openjdk /usr/lib/jvm/temurin-8-jdk
-COPY --from=jdk11 /opt/java/openjdk /usr/lib/jvm/temurin-11-jdk
-COPY --from=jdk17 /opt/java/openjdk /usr/lib/jvm/temurin-17-jdk
-COPY --from=jdk21 /opt/java/openjdk /usr/lib/jvm/temurin-21-jdk
-COPY --from=jdk25 /opt/java/openjdk /usr/lib/jvm/temurin-25-jdk
+COPY --from=jdk8 /usr/lib/jvm/default-jvm /usr/lib/jvm/corretto-8-jdk
+COPY --from=jdk11 /usr/lib/jvm/default-jvm /usr/lib/jvm/corretto-11-jdk
+COPY --from=jdk17 /usr/lib/jvm/default-jvm /usr/lib/jvm/corretto-17-jdk
+COPY --from=jdk21 /usr/lib/jvm/default-jvm /usr/lib/jvm/corretto-21-jdk
+COPY --from=jdk25 /usr/lib/jvm/default-jvm /usr/lib/jvm/corretto-25-jdk
 
 ################################################################################
 # MODERNE CLI SETUP
@@ -118,40 +118,25 @@ RUN ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 # RUN chmod +x /usr/local/bin/bazel
 
 # Node.js (uncomment for JavaScript/TypeScript projects)
-# RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-#     apt-get install -y --no-install-recommends nodejs
+# RUN apk add --no-cache nodejs npm
 
 # Python 3.11 (uncomment for Python projects)
-# Install prerequisites and COPY the deadsnakes PPA
-# RUN apt-get update && apt-get install -y \
-#     software-properties-common \
-#     && add-apt-repository ppa:deadsnakes/ppa \
-#     && apt-get update
+# RUN apk add --no-cache python3 python3-dev py3-pip py3-venv
 
-# # Install Python 3.11 and pip
-# RUN apt-get install -y \
-#     python3.11 \
-#     python3.11-venv \
-#     python3.11-dev \
-#     python3.11-distutils \
-#     && apt-get -y autoremove \
-#     && apt-get clean
+# # Create symbolic link for python3.11 if needed
+# RUN ln -sf /usr/bin/python3 /usr/bin/python3.11
 
-# # Set Python 3.11 as the default
-# RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
-#    update-alternatives --config python3
-
-# # Install pip for Python 3.11 using the bundled `ensurepip` and upgrade it
-# RUN python3.11 -m ensurepip --upgrade
-
-# # Update pip to the latest version for the installed Python 3.11
-# RUN python3.11 -m pip install --upgrade pip
-
-# RUN python3.11 -m pip install more-itertools cbor2
+# # Install Python packages
+# RUN python3 -m pip install --upgrade pip
+# RUN python3 -m pip install more-itertools cbor2
 
 # .NET SDK (uncomment for .NET projects)
-# RUN apt-get install -y dotnet-sdk-6.0
-# RUN apt-get install -y dotnet-sdk-8.0
+# # Note: Alpine requires manual installation of .NET SDK
+# RUN wget https://dot.net/v1/dotnet-install.sh && \
+#     chmod +x dotnet-install.sh && \
+#     ./dotnet-install.sh --channel 6.0 --install-dir /usr/share/dotnet && \
+#     ./dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet && \
+#     ln -s /usr/share/dotnet/dotnet /usr/local/bin/dotnet
 
 ################################################################################
 # OPTIONAL: Custom Maven Settings (uncomment if needed)
@@ -201,11 +186,11 @@ RUN git config --global credential.helper "store --file=/root/.git-credentials"
 
 # Configure trust store if self-signed certificates are in use for artifact repository, source control, or moderne tenant
 # COPY mycert.crt /root/mycert.crt
-# RUN /usr/lib/jvm/temurin-8-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-8-jdk/jre/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-11-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-11-jdk/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-17-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-17-jdk/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-21-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-21-jdk/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-25-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-25-jdk/lib/security/cacerts
+# RUN /usr/lib/jvm/corretto-8-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/corretto-8-jdk/jre/lib/security/cacerts -storepass changeit -noprompt
+# RUN /usr/lib/jvm/corretto-11-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/corretto-11-jdk/lib/security/cacerts -storepass changeit -noprompt
+# RUN /usr/lib/jvm/corretto-17-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/corretto-17-jdk/lib/security/cacerts -storepass changeit -noprompt
+# RUN /usr/lib/jvm/corretto-21-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/corretto-21-jdk/lib/security/cacerts -storepass changeit -noprompt
+# RUN /usr/lib/jvm/corretto-25-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/corretto-25-jdk/lib/security/cacerts -storepass changeit -noprompt
 # RUN mod config http trust-store edit java-home
 
 # mvnw scripts in maven projects may attempt to download maven-wrapper jars using wget.
