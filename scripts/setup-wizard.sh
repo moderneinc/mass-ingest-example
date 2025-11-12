@@ -117,14 +117,14 @@ CREATE_GIT_CREDENTIALS_TEMPLATE=false
 MAVEN_SETTINGS_FILE=""
 
 # Runtime config
-JAVA_OPTIONS="-Xmx4g -Xss3m"
+JAVA_OPTIONS="-XX:MaxRAMPercentage=60.0 -Xss3m"
 DATA_DIR="/var/moderne"
 
 # Helper
 CHOICE_RESULT=0
 
 # Output files
-OUTPUT_DOCKERFILE="Dockerfile.generated"
+OUTPUT_DOCKERFILE="Dockerfile"
 GENERATE_DOCKER_COMPOSE=false
 OUTPUT_DOCKER_COMPOSE="docker-compose.yml"
 OUTPUT_ENV=".env"
@@ -3187,10 +3187,10 @@ ask_runtime_config() {
         echo -e "${BOLD}JVM Options${RESET}"
         print_context "Configure JVM options for the Moderne CLI runtime. These affect memory allocation
 and stack size for LST processing."
-        echo "Default: -Xmx4g -Xss3m (4GB max heap, 3MB stack size)"
+        echo "Default: -XX:MaxRAMPercentage=60.0 -Xss3m (60% of container memory, 3MB stack size)"
         echo ""
 
-        local default_java_opts="-Xmx4g -Xss3m"
+        local default_java_opts="-XX:MaxRAMPercentage=60.0 -Xss3m"
         read -p "$(echo -e "${BOLD}Java options${RESET} (press Enter for default) [${default_java_opts}]: ")" user_java_opts
         if [ -n "$user_java_opts" ]; then
             JAVA_OPTIONS="$user_java_opts"
@@ -3346,6 +3346,12 @@ generate_dockerfile() {
     if [ ! -d "$TEMPLATES_DIR" ]; then
         print_error "Templates directory not found: $TEMPLATES_DIR"
         exit 1
+    fi
+
+    # Backup existing Dockerfile if it exists
+    if [ -f "$output" ]; then
+        mv "$output" "${output}.original"
+        echo -e "${GRAY}Backed up existing $output to ${output}.original${RESET}"
     fi
 
     # Start fresh
