@@ -201,11 +201,11 @@ RUN git config --global credential.helper "store --file=/root/.git-credentials"
 
 # Configure trust store if self-signed certificates are in use for artifact repository, source control, or moderne tenant
 # COPY mycert.crt /root/mycert.crt
-# RUN /usr/lib/jvm/temurin-8-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-8-jdk/jre/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-11-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-11-jdk/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-17-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-17-jdk/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-21-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-21-jdk/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-25-jdk/bin/keytool -import -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-25-jdk/lib/security/cacerts
+# RUN /usr/lib/jvm/temurin-8-jdk/bin/keytool -import -noprompt -storepass changeit -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-8-jdk/jre/lib/security/cacerts
+# RUN /usr/lib/jvm/temurin-11-jdk/bin/keytool -import -noprompt -storepass changeit -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-11-jdk/lib/security/cacerts
+# RUN /usr/lib/jvm/temurin-17-jdk/bin/keytool -import -noprompt -storepass changeit -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-17-jdk/lib/security/cacerts
+# RUN /usr/lib/jvm/temurin-21-jdk/bin/keytool -import -noprompt -storepass changeit -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-21-jdk/lib/security/cacerts
+# RUN /usr/lib/jvm/temurin-25-jdk/bin/keytool -import -noprompt -storepass changeit -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-25-jdk/lib/security/cacerts
 # RUN mod config http trust-store edit java-home
 
 # mvnw scripts in maven projects may attempt to download maven-wrapper jars using wget.
