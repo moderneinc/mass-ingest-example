@@ -3371,9 +3371,9 @@ generate_certs_section() {
     for jdk in "${ENABLED_JDKS[@]}"; do
         if [ "$jdk" = "8" ]; then
             # JDK 8 has cacerts in a different location
-            echo "RUN /usr/lib/jvm/temurin-${jdk}-jdk/bin/keytool -import -noprompt -file /root/${cert_basename} -keystore /usr/lib/jvm/temurin-${jdk}-jdk/jre/lib/security/cacerts -storepass changeit" >> "$output"
+            echo "RUN /usr/lib/jvm/temurin-${jdk}-jdk/bin/keytool -import -noprompt -storepass changeit -file /root/${cert_basename} -keystore /usr/lib/jvm/temurin-${jdk}-jdk/jre/lib/security/cacerts" >> "$output"
         else
-            echo "RUN /usr/lib/jvm/temurin-${jdk}-jdk/bin/keytool -import -noprompt -file /root/${cert_basename} -keystore /usr/lib/jvm/temurin-${jdk}-jdk/lib/security/cacerts -storepass changeit" >> "$output"
+            echo "RUN /usr/lib/jvm/temurin-${jdk}-jdk/bin/keytool -import -noprompt -storepass changeit -file /root/${cert_basename} -keystore /usr/lib/jvm/temurin-${jdk}-jdk/lib/security/cacerts" >> "$output"
         fi
     done
 
