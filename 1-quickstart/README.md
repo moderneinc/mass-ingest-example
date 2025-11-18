@@ -15,7 +15,10 @@ This example demonstrates the simplest way to run mass-ingest: a single Docker c
 ## Prerequisites
 
 - Docker installed
-- Access to an artifact repository (Artifactory, Nexus, etc.) with Maven 2 format support
+- Access to one of the following storage options:
+  - Amazon S3 bucket or S3-compatible storage (MinIO, etc.)
+  - Artifactory with Maven 2 format support
+  - Nexus or other Maven-compatible repository
 - A `repos.csv` file listing repositories to ingest
 
 ## Quick start
@@ -52,7 +55,93 @@ docker build -t mass-ingest:quickstart --build-arg MODERNE_CLI_VERSION=3.50.0 ..
 
 ### 3. Run the container
 
-Credentials are configured at runtime (not baked into the image):
+Credentials are configured at runtime (not baked into the image). You can use S3, Artifactory, or any Maven-compatible repository.
+
+#### Option A: Using S3 Storage
+
+For S3 or S3-compatible storage (like MinIO):
+
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  -v $(pwd)/data:/var/moderne \
+  -e PUBLISH_URL=s3://your-bucket \
+  -e S3_PROFILE=default \
+  mass-ingest:quickstart
+```
+
+
+S3 environment variables:
+- `PUBLISH_URL` - S3 bucket URL (must start with `s3://`)
+- `S3_PROFILE` - AWS profile name for credentials (optional, uses AWS credential chain by default)
+- `S3_REGION` - AWS region for cross-region bucket access (optional)
+- `S3_ENDPOINT` - S3 endpoint URL (optional, for S3-compatible services like MinIO)
+
+**Note on AWS Credentials:**
+When running on AWS (EC2/ECS/Fargate), the container automatically uses IAM roles:
+- EC2: Uses instance profile
+- ECS/Fargate: Uses task role
+- No S3_PROFILE needed when IAM roles are configured
+
+For local testing in containers, use one of:
+
+**Option 1: Environment Variables (Simplest)**
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  -v $(pwd)/data:/var/moderne \
+  -e PUBLISH_URL=s3://your-bucket/lsts/ \
+  -e AWS_ACCESS_KEY_ID=your-access-key \
+  -e AWS_SECRET_ACCESS_KEY=your-secret-key \
+  -e AWS_REGION=us-east-1 \
+  mass-ingest:quickstart
+```
+
+**Option 2: Mount AWS Credentials File**
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  -v $(pwd)/data:/var/moderne \
+  -v ~/.aws:/root/.aws:ro \
+  -e PUBLISH_URL=s3://your-bucket/lsts/ \
+  -e S3_PROFILE=your-profile \
+  mass-ingest:quickstart
+```
+
+**Option 3: Use AWS SSO/CLI Credentials** (if using AWS SSO)
+```bash
+# First, ensure you're logged in via AWS SSO
+aws sso login --profile your-profile
+
+# Export credentials from your profile
+eval $(aws configure export-credentials --profile your-profile --format env)
+
+docker run --rm \
+  -p 8080:8080 \
+  -v $(pwd)/data:/var/moderne \
+  -e PUBLISH_URL=s3://your-bucket/lsts/ \
+  -e AWS_ACCESS_KEY_ID \
+  -e AWS_SECRET_ACCESS_KEY \
+  -e AWS_SESSION_TOKEN \
+  -e AWS_REGION \
+  mass-ingest:quickstart
+```
+
+Example with MinIO:
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  -v $(pwd)/data:/var/moderne \
+  -e PUBLISH_URL=s3://moderne-lsts/ingest/ \
+  -e S3_ENDPOINT=https://minio.example.com \
+  -e S3_REGION=us-east-1 \
+  -e S3_PROFILE=minio-profile \
+  mass-ingest:quickstart
+```
+
+#### Option B: Using Maven/Artifactory
+
+For traditional artifact repositories:
 
 ```bash
 docker run --rm \
@@ -64,12 +153,14 @@ docker run --rm \
   mass-ingest:quickstart
 ```
 
-Required environment variables:
+Maven/Artifactory environment variables:
 - `PUBLISH_URL` - Artifact repository URL
 - `PUBLISH_USER` + `PUBLISH_PASSWORD` - Repository credentials (OR use PUBLISH_TOKEN)
 - `PUBLISH_TOKEN` - Artifactory API token (alternative to user/password)
 
-Optional environment variables:
+#### Common Optional Variables
+
+Optional environment variables for all storage types:
 - `MODERNE_TOKEN` - Moderne platform token
 - `MODERNE_TENANT` - Moderne tenant url (e.g., "https://app.moderne.io" or "https://tenant.moderne.io")
 

@@ -29,6 +29,10 @@ Architecture:
 - AWS CLI configured
 - ECR repository or Docker registry
 - repos.csv file with repositories to ingest
+- Access to one of the following storage options:
+  - Amazon S3 bucket for LST storage
+  - Artifactory with Maven 2 format support
+  - Nexus or other Maven-compatible repository
 
 ## Quick start
 
@@ -107,6 +111,27 @@ aws secretsmanager create-secret \
 
 #### 3c. Publishing credentials
 
+Choose one of the following storage options:
+
+**Option A: S3 Storage**
+
+S3 uses IAM roles by default (no secrets needed). The Terraform configuration automatically grants S3 permissions when you specify the bucket name.
+
+For cross-region access or specific AWS profiles, create optional secrets:
+
+```bash
+aws secretsmanager create-secret \
+  --name mass-ingest/s3-config \
+  --secret-string '{"profile": "your-aws-profile", "region": "us-west-2", "endpoint": "https://s3.amazonaws.com"}'
+```
+
+Notes:
+- `profile` - Optional, uses IAM instance profile/task role by default
+- `region` - Optional, for cross-region bucket access
+- `endpoint` - Optional, for S3-compatible services like MinIO
+
+**Option B: Maven/Artifactory Repository**
+
 For password authentication:
 
 ```bash
@@ -137,16 +162,27 @@ image_registry            = "<your-registry>/mass-ingest"
 image_tag                 = "latest"
 moderne_tenant            = "https://app.moderne.io"  # or your tenant url
 moderne_token             = "arn:aws:secretsmanager:region:account:secret:mass-ingest/moderne-token"
-moderne_publish_url       = "https://artifactory.example.com/artifactory/moderne-ingest/"
 
-# Set either username+password/token or SSH authentication
-# moderne_git_credentials   = "arn:aws:secretsmanager:region:account:secret:mass-ingest/git-credentials"
-# moderne_ssh_credentials   = "arn:aws:secretsmanager:region:account:secret:mass-ingest/ssh-private-key"
+# Storage configuration - choose one option:
 
+# Option A: S3 Storage
+moderne_publish_url       = "s3://your-bucket/path/to/lsts/"
+s3_bucket_name           = "your-bucket"  # Required for IAM permissions
+# Optional: S3 configuration from Secrets Manager
+# moderne_s3_profile       = "arn:aws:secretsmanager:region:account:secret:mass-ingest/s3-config:profile::"
+# moderne_s3_region        = "arn:aws:secretsmanager:region:account:secret:mass-ingest/s3-config:region::"
+# moderne_s3_endpoint      = "arn:aws:secretsmanager:region:account:secret:mass-ingest/s3-config:endpoint::"
+
+# Option B: Maven/Artifactory Repository
+# moderne_publish_url       = "https://artifactory.example.com/artifactory/moderne-ingest/"
 # Set either user+password or token for publishing
 # moderne_publish_user      = "arn:aws:secretsmanager:region:account:secret:mass-ingest/publishing:username::"
 # moderne_publish_password  = "arn:aws:secretsmanager:region:account:secret:mass-ingest/publishing:password::"
 # moderne_publish_token     = "arn:aws:secretsmanager:region:account:secret:mass-ingest/publishing:token::"
+
+# Git authentication - set either username+password/token or SSH
+# moderne_git_credentials   = "arn:aws:secretsmanager:region:account:secret:mass-ingest/git-credentials"
+# moderne_ssh_credentials   = "arn:aws:secretsmanager:region:account:secret:mass-ingest/ssh-private-key"
 
 default_tags = {
   Environment = "production"
@@ -167,10 +203,28 @@ This creates:
 - Batch compute environment (EC2 instances)
 - Batch job queue
 - Job definitions (chunk + processor)
-- IAM roles and policies
+- IAM roles and policies (including S3 access if `s3_bucket_name` is set)
 - EventBridge schedule (daily at midnight UTC)
 - Security groups
 - CloudWatch log groups
+
+#### AWS IAM Configuration for S3
+
+When using S3 storage, the Terraform automatically configures:
+
+1. **ECS Task Role**: Grants S3 permissions to the container tasks
+2. **EC2 Instance Role**: Grants S3 permissions via instance profile
+3. **Chunk Task Role**: Read-only S3 access for repos.csv
+
+The system uses the AWS SDK credential chain automatically:
+- In ECS/Fargate: Uses IAM task role
+- On EC2: Uses IAM instance profile
+- No S3_PROFILE needed when running on AWS infrastructure
+
+For local testing or non-AWS environments, you can specify:
+- `S3_PROFILE` - AWS profile name
+- `S3_REGION` - For cross-region bucket access
+- `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` - Direct credentials
 
 ### 6. Trigger manually (optional)
 

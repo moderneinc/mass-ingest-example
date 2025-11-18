@@ -66,6 +66,33 @@ variable "moderne_publish_token" {
   # example = "arn:aws:secretsmanager:us-east-1:123456789012:secret:mass-ingest/publishing:password::"
 }
 
+variable "moderne_s3_profile" {
+  type = string
+  default = ""
+  # example = "arn:aws:secretsmanager:us-east-1:123456789012:secret:mass-ingest/s3-config:profile::"
+  description = "AWS profile name for S3 access (optional, uses IAM instance profile by default)"
+}
+
+variable "moderne_s3_endpoint" {
+  type = string
+  default = ""
+  # example = "arn:aws:secretsmanager:us-east-1:123456789012:secret:mass-ingest/s3-config:endpoint::"
+  description = "S3 endpoint URL for S3-compatible services like MinIO (optional)"
+}
+
+variable "moderne_s3_region" {
+  type = string
+  default = ""
+  # example = "arn:aws:secretsmanager:us-east-1:123456789012:secret:mass-ingest/s3-config:region::"
+  description = "S3 region for cross-region bucket access (optional)"
+}
+
+variable "s3_bucket_name" {
+  type        = string
+  default     = ""
+  description = "S3 bucket name for LST storage (optional, only needed if using S3 for artifact storage)"
+}
+
 variable "ingest_csv_file" {
   type = string
   default = "repos.csv"
