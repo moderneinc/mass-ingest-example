@@ -761,6 +761,12 @@ ask_optional_path() {
     local path
 
     read -p "$(echo -e "${BOLD}$prompt${RESET} (or press Enter to skip): ")" path
+
+    # Expand tilde if present
+    if [[ "$path" =~ ^~ ]]; then
+        path="${path/#\~/$HOME}"
+    fi
+
     echo "$path"
 }
 
@@ -2290,17 +2296,18 @@ show_phase2_introduction() {
     echo ""
     echo -e "${CYAN}${BOLD}What we'll configure:${RESET}"
     echo ""
-    echo -e "  ${CYAN}1.${RESET} ${BOLD}JDK versions${RESET} - Java Development Kits (8, 11, 17, 21, 25)"
-    echo -e "  ${CYAN}2.${RESET} ${BOLD}Moderne CLI${RESET} - Version and source"
-    echo -e "  ${CYAN}3.${RESET} ${BOLD}Moderne tenant${RESET} - Platform authentication (optional)"
-    echo -e "  ${CYAN}4.${RESET} ${BOLD}Artifact repository${RESET} - Where to publish LST artifacts (Artifactory, etc.)"
-    echo -e "  ${CYAN}5.${RESET} ${BOLD}Build tools${RESET} - Maven, Gradle, Bazel"
-    echo -e "  ${CYAN}6.${RESET} ${BOLD}Language runtimes${RESET} - Node.js, Python, .NET, Android SDK"
-    echo -e "  ${CYAN}7.${RESET} ${BOLD}Scalability options${RESET} - AWS CLI and AWS Batch support"
-    echo -e "  ${CYAN}8.${RESET} ${BOLD}Security${RESET} - SSL certificates for HTTPS connections"
-    echo -e "  ${CYAN}9.${RESET} ${BOLD}Git authentication${RESET} - For cloning private repositories"
-    echo -e "  ${CYAN}10.${RESET} ${BOLD}Performance${RESET} - CPU and memory settings"
-    echo -e "  ${CYAN}11.${RESET} ${BOLD}Docker Compose${RESET} - Container orchestration (optional)"
+    echo -e "  ${CYAN}1.${RESET} ${BOLD}Base image type${RESET} - Debian or Alpine"
+    echo -e "  ${CYAN}2.${RESET} ${BOLD}JDK versions${RESET} - Java Development Kits (8, 11, 17, 21, 25)"
+    echo -e "  ${CYAN}3.${RESET} ${BOLD}Moderne CLI${RESET} - Version and source"
+    echo -e "  ${CYAN}4.${RESET} ${BOLD}Moderne tenant${RESET} - Platform authentication (optional)"
+    echo -e "  ${CYAN}5.${RESET} ${BOLD}Artifact repository${RESET} - Where to publish LST artifacts (Artifactory, etc.)"
+    echo -e "  ${CYAN}6.${RESET} ${BOLD}Build tools${RESET} - Maven, Gradle, Bazel"
+    echo -e "  ${CYAN}7.${RESET} ${BOLD}Language runtimes${RESET} - Node.js, Python, .NET, Android SDK"
+    echo -e "  ${CYAN}8.${RESET} ${BOLD}Scalability options${RESET} - AWS CLI and AWS Batch support"
+    echo -e "  ${CYAN}9.${RESET} ${BOLD}Security${RESET} - SSL certificates for HTTPS connections"
+    echo -e "  ${CYAN}10.${RESET} ${BOLD}Git authentication${RESET} - For cloning private repositories"
+    echo -e "  ${CYAN}11.${RESET} ${BOLD}Performance${RESET} - CPU and memory settings"
+    echo -e "  ${CYAN}12.${RESET} ${BOLD}Docker Compose${RESET} - Container orchestration (optional)"
     echo ""
     echo -e "${CYAN}${BOLD}Why Docker?${RESET}"
     echo ""
@@ -2310,6 +2317,57 @@ show_phase2_introduction() {
     echo ""
 
     wait_for_enter
+    clear
+}
+
+# Base image type selection
+ask_base_image_type() {
+    local progress="$1"
+    while true; do
+        print_section "Base Image Type" "$progress"
+
+        print_context "Choose the base image type for your Docker environment.
+
+${BOLD}Debian-based (eclipse-temurin:X-jdk):\033[22m${GRAY}
+  • Broader compatibility with most tools and libraries
+  • Uses glibc (standard C library)
+  • Slightly larger image size (~50-100MB more per JDK)
+  • Recommended for most use cases
+
+${BOLD}Alpine-based (eclipse-temurin:X-jdk-alpine):\033[22m${GRAY}
+  • Smaller image size (uses musl instead of glibc)
+  • May have compatibility issues with some Java libraries using JNI
+  • Good for production deployments where size matters
+  • Some tools install differently"
+
+        ask_choice "Select base image type:" \
+            "Debian-based (recommended)" \
+            "Alpine-based"
+
+        case $CHOICE_RESULT in
+            0)
+                BASE_IMAGE_TYPE="debian"
+                BASE_IMAGE_SUFFIX=""
+                print_success "Using Debian-based images (eclipse-temurin:X-jdk)"
+                ;;
+            1)
+                BASE_IMAGE_TYPE="alpine"
+                BASE_IMAGE_SUFFIX="-alpine"
+                print_success "Using Alpine-based images (eclipse-temurin:X-jdk-alpine)"
+                ;;
+        esac
+
+        # Confirm selection
+        echo ""
+        echo -e "${BOLD}Selected configuration:${RESET}"
+        echo -e "  Base image: ${BASE_IMAGE_TYPE}"
+        echo ""
+        if ask_yes_no "Is this correct?"; then
+            break
+        fi
+        clear
+    done
+
     clear
 }
 
@@ -3340,16 +3398,22 @@ generate_base_section() {
     local output="$1"
     local highest_jdk=$(get_highest_jdk)
 
-    # Generate FROM statements for selected JDKs
+    # Generate FROM statements for selected JDKs with base image suffix
     for jdk in "${ENABLED_JDKS[@]}"; do
-        echo "FROM eclipse-temurin:${jdk}-jdk AS jdk${jdk}" >> "$output"
+        echo "FROM eclipse-temurin:${jdk}-jdk${BASE_IMAGE_SUFFIX} AS jdk${jdk}" >> "$output"
     done
     echo "" >> "$output"
 
     # Install dependencies (using highest JDK as base)
     echo "# Install dependencies for \`mod\` cli" >> "$output"
     echo "FROM jdk${highest_jdk} AS dependencies" >> "$output"
-    echo "RUN apt-get -y update && apt-get install -y curl git git-lfs jq libxml2-utils unzip wget zip vim && git lfs install" >> "$output"
+
+    # Use appropriate package manager based on base image type
+    if [ "$BASE_IMAGE_TYPE" = "alpine" ]; then
+        echo "RUN apk update && apk add --no-cache curl git git-lfs jq libxml2-utils unzip wget zip vim && git lfs install" >> "$output"
+    else
+        echo "RUN apt-get -y update && apt-get install -y curl git git-lfs jq libxml2-utils unzip wget zip vim && git lfs install" >> "$output"
+    fi
     echo "" >> "$output"
 
     # Copy selected JDK versions
@@ -3383,17 +3447,27 @@ generate_certs_section() {
     echo "RUN echo \"ca_certificate = /root/${cert_basename}\" > /root/.wgetrc" >> "$output"
 }
 
+# Get template file path - check shared/ first, then base image type directory
+get_template() {
+    local template_name="$1"
+    local shared_path="$TEMPLATES_DIR/shared/$template_name"
+    local specific_path="$TEMPLATES_DIR/$BASE_IMAGE_TYPE/$template_name"
+
+    if [ -f "$shared_path" ]; then
+        echo "$shared_path"
+    elif [ -f "$specific_path" ]; then
+        echo "$specific_path"
+    else
+        print_error "Template not found: $template_name (checked shared/ and $BASE_IMAGE_TYPE/)"
+        exit 1
+    fi
+}
+
 # Generate the Dockerfile
 generate_dockerfile() {
     print_section "Generating Dockerfile"
 
     local output="$OUTPUT_DOCKERFILE"
-
-    # Check if templates exist
-    if [ ! -d "$TEMPLATES_DIR" ]; then
-        print_error "Templates directory not found: $TEMPLATES_DIR"
-        exit 1
-    fi
 
     # Backup existing Dockerfile if it exists
     if [ -f "$output" ]; then
@@ -3411,7 +3485,7 @@ generate_dockerfile() {
     # Add Moderne CLI (download or local)
     if [ "$CLI_SOURCE" = "local" ]; then
         sed -e "s|{{CLI_JAR_PATH}}|$CLI_JAR_PATH|g" \
-            "$TEMPLATES_DIR/00-modcli-local.Dockerfile" >> "$output"
+            "$(get_template '00-modcli-local.Dockerfile')" >> "$output"
     else
         # Download - replace placeholders for stage and version
         local cli_stage=""
@@ -3426,58 +3500,58 @@ generate_dockerfile() {
 
         sed -e "s|{{CLI_STAGE}}|$cli_stage|g" \
             -e "s|{{CLI_VERSION}}|$cli_version|g" \
-            "$TEMPLATES_DIR/00-modcli-download.Dockerfile" >> "$output"
+            "$(get_template '00-modcli-download.Dockerfile')" >> "$output"
     fi
     echo "" >> "$output"
 
     # Add build tools
     if [ "$ENABLE_GRADLE" = true ]; then
         # Replace hardcoded Gradle version with user's chosen version
-        sed "s/8\.14/$GRADLE_VERSION/g" "$TEMPLATES_DIR/10-gradle.Dockerfile" >> "$output"
+        sed "s/8\.14/$GRADLE_VERSION/g" "$(get_template '10-gradle.Dockerfile')" >> "$output"
         echo "" >> "$output"
     fi
 
     if [ "$ENABLE_MAVEN" = true ]; then
         # Replace hardcoded Maven version with user's chosen version
-        sed "s/ENV MAVEN_VERSION=.*/ENV MAVEN_VERSION=$MAVEN_VERSION/" "$TEMPLATES_DIR/11-maven.Dockerfile" >> "$output"
+        sed "s/ENV MAVEN_VERSION=.*/ENV MAVEN_VERSION=$MAVEN_VERSION/" "$(get_template '11-maven.Dockerfile')" >> "$output"
         echo "" >> "$output"
     fi
 
     # Add language runtimes
     if [ "$ENABLE_ANDROID" = true ]; then
-        cat "$TEMPLATES_DIR/20-android.Dockerfile" >> "$output"
+        cat "$(get_template '20-android.Dockerfile')" >> "$output"
         echo "" >> "$output"
     fi
 
     if [ "$ENABLE_BAZEL" = true ]; then
-        cat "$TEMPLATES_DIR/21-bazel.Dockerfile" >> "$output"
+        cat "$(get_template '21-bazel.Dockerfile')" >> "$output"
         echo "" >> "$output"
     fi
 
     if [ "$ENABLE_NODE" = true ]; then
-        cat "$TEMPLATES_DIR/22-node.Dockerfile" >> "$output"
+        cat "$(get_template '22-node.Dockerfile')" >> "$output"
         echo "" >> "$output"
     fi
 
     if [ "$ENABLE_PYTHON" = true ]; then
-        cat "$TEMPLATES_DIR/23-python.Dockerfile" >> "$output"
+        cat "$(get_template '23-python.Dockerfile')" >> "$output"
         echo "" >> "$output"
     fi
 
     if [ "$ENABLE_DOTNET" = true ]; then
-        cat "$TEMPLATES_DIR/24-dotnet.Dockerfile" >> "$output"
+        cat "$(get_template '24-dotnet.Dockerfile')" >> "$output"
         echo "" >> "$output"
     fi
 
     # Add AWS CLI
     if [ "$ENABLE_AWS_CLI" = true ]; then
-        cat "$TEMPLATES_DIR/15-aws-cli.Dockerfile" >> "$output"
+        cat "$(get_template '15-aws-cli.Dockerfile')" >> "$output"
         echo "" >> "$output"
     fi
 
     # Add AWS Batch support
     if [ "$ENABLE_AWS_BATCH" = true ]; then
-        cat "$TEMPLATES_DIR/16-aws-batch.Dockerfile" >> "$output"
+        cat "$(get_template '16-aws-batch.Dockerfile')" >> "$output"
         echo "" >> "$output"
     fi
 
@@ -3485,7 +3559,7 @@ generate_dockerfile() {
     if [ -n "$MAVEN_SETTINGS_FILE" ]; then
         # Replace placeholder with actual filename
         local settings_basename=$(basename "$MAVEN_SETTINGS_FILE")
-        sed "s|{{SETTINGS_FILE}}|$settings_basename|g" "$TEMPLATES_DIR/32-maven-settings.Dockerfile" >> "$output"
+        sed "s|{{SETTINGS_FILE}}|$settings_basename|g" "$(get_template '32-maven-settings.Dockerfile')" >> "$output"
         echo "" >> "$output"
     fi
 
@@ -3526,7 +3600,7 @@ generate_dockerfile() {
 
     sed -e "s|{{JAVA_OPTIONS}}|$formatted_java_options|g" \
         -e "s|{{DATA_DIR}}|$DATA_DIR|g" \
-        "$TEMPLATES_DIR/99-runner.Dockerfile" >> "$output"
+        "$(get_template '99-runner.Dockerfile')" >> "$output"
 
     print_success "Dockerfile generated: $output"
 }
@@ -3831,17 +3905,18 @@ main() {
     # Show Phase 2 introduction
     show_phase2_introduction
 
-    ask_jdk_versions "Step 1/11"
-    ask_modcli_config "Step 2/11"
-    ask_moderne_tenant_config "Step 3/11"
-    ask_artifact_repository_config "Step 4/11"
-    ask_build_tools_config "Step 5/11"
-    ask_language_runtimes "Step 6/11"
-    ask_scalability_options "Step 7/11"
-    ask_security_config "Step 8/11"
-    ask_git_auth "Step 9/11"
-    ask_runtime_config "Step 10/11"
-    ask_docker_compose "Step 11/11"
+    ask_base_image_type "Step 1/12"
+    ask_jdk_versions "Step 2/12"
+    ask_modcli_config "Step 3/12"
+    ask_moderne_tenant_config "Step 4/12"
+    ask_artifact_repository_config "Step 5/12"
+    ask_build_tools_config "Step 6/12"
+    ask_language_runtimes "Step 7/12"
+    ask_scalability_options "Step 8/12"
+    ask_security_config "Step 9/12"
+    ask_git_auth "Step 10/12"
+    ask_runtime_config "Step 11/12"
+    ask_docker_compose "Step 12/12"
 
     # Show configuration preview
     clear
