@@ -247,10 +247,34 @@ send_logs() {
   local index=$1
   local timestamp=$(date +"%Y%m%d%H%M")
 
-  # TODO: Implement S3 log upload using AWS CLI
-  # Example: aws s3 cp "$DATA_DIR/log.zip" "${PUBLISH_URL}/.logs/$index/$timestamp/ingest-log-cli-$timestamp-$index.zip"
+  # Upload logs to S3
   if [[ "${PUBLISH_URL:-}" == "s3://"* ]]; then
-    info "S3 log upload not yet implemented - logs are in $DATA_DIR/log.zip"
+    # Construct S3 path for logs
+    logs_path="${PUBLISH_URL}/.logs/$index/$timestamp/ingest-log-cli-$timestamp-$index.zip"
+    info "Uploading logs to $logs_path"
+
+    # Build AWS S3 command with optional parameters
+    S3_CMD=(aws s3 cp "$DATA_DIR/log.zip" "$logs_path")
+
+    # Add profile if specified
+    if [ -n "${S3_PROFILE:-}" ]; then
+      S3_CMD+=(--profile "${S3_PROFILE}")
+    fi
+
+    # Add region if specified
+    if [ -n "${S3_REGION:-}" ]; then
+      S3_CMD+=(--region "${S3_REGION}")
+    fi
+
+    # Add endpoint if specified (for S3-compatible services)
+    if [ -n "${S3_ENDPOINT:-}" ]; then
+      S3_CMD+=(--endpoint-url "${S3_ENDPOINT}")
+    fi
+
+    # Execute the upload
+    if ! "${S3_CMD[@]}"; then
+      info "Failed to upload logs to S3"
+    fi
   # if PUBLISH_USER and PUBLISH_PASSWORD are set, or PUBLISH_TOKEN is set, publish logs
   elif [[ -n "${PUBLISH_USER:-}" && -n "${PUBLISH_PASSWORD:-}" ]]; then
     logs_url=$PUBLISH_URL/io/moderne/ingest-log/$index/$timestamp/ingest-log-cli-$timestamp-$index.zip

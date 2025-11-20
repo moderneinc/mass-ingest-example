@@ -223,10 +223,38 @@ function Send-Logs() {
 
   $Timestamp = Get-Date -Format "yyyyMMddHHmm"
 
-  # TODO: Implement S3 log upload using AWS CLI
-  # Example: aws s3 cp $env:DATA_DIR\log.zip $env:PUBLISH_URL/.logs/$Index/$Timestamp/ingest-log-cli-$Timestamp-$Index.zip
+  # Upload logs to S3
   if ($env:PUBLISH_URL -and $env:PUBLISH_URL.StartsWith("s3://")) {
-    Write-Info "S3 log upload not yet implemented - logs are in $env:DATA_DIR\log.zip"
+    # Construct S3 path for logs
+    $LogsPath = "$env:PUBLISH_URL/.logs/$Index/$Timestamp/ingest-log-cli-$Timestamp-$Index.zip"
+    Write-Info "Uploading logs to $LogsPath"
+
+    # Build AWS S3 command with optional parameters
+    $S3Cmd = @("aws", "s3", "cp", "$env:DATA_DIR\log.zip", $LogsPath)
+
+    # Add profile if specified
+    if ($env:S3_PROFILE) {
+      $S3Cmd += "--profile"
+      $S3Cmd += $env:S3_PROFILE
+    }
+
+    # Add region if specified
+    if ($env:S3_REGION) {
+      $S3Cmd += "--region"
+      $S3Cmd += $env:S3_REGION
+    }
+
+    # Add endpoint if specified (for S3-compatible services)
+    if ($env:S3_ENDPOINT) {
+      $S3Cmd += "--endpoint-url"
+      $S3Cmd += $env:S3_ENDPOINT
+    }
+
+    # Execute the upload
+    & $S3Cmd[0] $S3Cmd[1..($S3Cmd.Length-1)]
+    if (-not $?) {
+      Write-Info "Failed to upload logs to S3"
+    }
   }
   # if PUBLISH_USER and PUBLISH_PASSWORD are set, publish logs
   elseif ($env:PUBLISH_USER -and $env:PUBLISH_PASSWORD) {
