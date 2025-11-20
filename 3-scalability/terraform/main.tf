@@ -331,15 +331,10 @@ resource "aws_iam_role_policy" "processor_s3_access" {
       {
         "Effect": "Allow",
         "Action": [
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject",
-          "s3:ListBucket",
-          "s3:GetBucketLocation"
+          "s3:PutObject"
         ],
         "Resource": [
-          "arn:aws:s3:::${var.s3_bucket_name}/*",
-          "arn:aws:s3:::${var.s3_bucket_name}"
+          "arn:aws:s3:::${var.s3_bucket_name}/*"
         ]
       }
     ]
