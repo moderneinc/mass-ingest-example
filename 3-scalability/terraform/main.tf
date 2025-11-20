@@ -226,13 +226,10 @@ resource "aws_iam_role_policy" "chunk_s3_access" {
       {
         "Effect": "Allow",
         "Action": [
-          "s3:GetObject",
-          "s3:ListBucket",
-          "s3:GetBucketLocation"
+          "s3:GetObject"
         ],
         "Resource": [
-          "arn:aws:s3:::${var.s3_bucket_name}/*",
-          "arn:aws:s3:::${var.s3_bucket_name}"
+          "arn:aws:s3:::${var.s3_bucket_name}/*"
         ]
       }
     ]
