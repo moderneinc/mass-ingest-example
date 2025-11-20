@@ -161,9 +161,6 @@ configure_credentials() {
     # Execute the command
     info "Running: ${S3_CONFIG_CMD[*]}"
     "${S3_CONFIG_CMD[@]}"
-
-    # Verify configuration was set
-    mod config lsts artifacts show
   # Maven repository configuration
   elif [ -n "${PUBLISH_URL:-}" ] && [ -n "${PUBLISH_USER:-}" ] && [ -n "${PUBLISH_PASSWORD:-}" ]; then
     info "Configuring Maven artifact repository with username/password"
@@ -250,9 +247,10 @@ send_logs() {
   local index=$1
   local timestamp=$(date +"%Y%m%d%H%M")
 
-  # Skip log upload for S3 - logs will be stored with LSTs in S3
+  # TODO: Implement S3 log upload using AWS CLI
+  # Example: aws s3 cp "$DATA_DIR/log.zip" "${PUBLISH_URL}/.logs/$index/$timestamp/ingest-log-cli-$timestamp-$index.zip"
   if [[ "${PUBLISH_URL:-}" == "s3://"* ]]; then
-    info "Log storage handled by S3 with LST artifacts"
+    info "S3 log upload not yet implemented - logs are in $DATA_DIR/log.zip"
   # if PUBLISH_USER and PUBLISH_PASSWORD are set, or PUBLISH_TOKEN is set, publish logs
   elif [[ -n "${PUBLISH_USER:-}" && -n "${PUBLISH_PASSWORD:-}" ]]; then
     logs_url=$PUBLISH_URL/io/moderne/ingest-log/$index/$timestamp/ingest-log-cli-$timestamp-$index.zip

@@ -59,67 +59,69 @@ Credentials are configured at runtime (not baked into the image). You can use S3
 
 #### Option A: Using S3 Storage
 
-For S3 or S3-compatible storage (like MinIO):
+For S3 or S3-compatible storage, the Moderne CLI supports all standard AWS credential providers.
 
+**S3 Configuration Variables:**
+- `PUBLISH_URL` - S3 bucket URL (must start with `s3://`)
+- `S3_PROFILE` - AWS profile name (optional, uses AWS credential chain by default)
+- `S3_REGION` - AWS region (optional, for cross-region bucket access)
+- `S3_ENDPOINT` - S3 endpoint URL (optional, for S3-compatible services like MinIO)
+
+**AWS Authentication:**
+The container supports all standard AWS authentication methods:
+- IAM roles (automatic on EC2/ECS/Fargate)
+- Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
+- AWS credentials file with profiles
+- AWS SSO
+- For detailed options, see [AWS CLI Configuration documentation](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html)
+
+**Option 1: Using AWS Environment Variables (Simplest)**
 ```bash
 docker run --rm \
   -p 8080:8080 \
   -v $(pwd)/data:/var/moderne \
   -e PUBLISH_URL=s3://your-bucket \
-  -e S3_PROFILE=default \
-  mass-ingest:quickstart
-```
-
-
-S3 environment variables:
-- `PUBLISH_URL` - S3 bucket URL (must start with `s3://`)
-- `S3_PROFILE` - AWS profile name for credentials (optional, uses AWS credential chain by default)
-- `S3_REGION` - AWS region for cross-region bucket access (optional)
-- `S3_ENDPOINT` - S3 endpoint URL (optional, for S3-compatible services like MinIO)
-
-**Note on AWS Credentials:**
-When running on AWS (EC2/ECS/Fargate), the container automatically uses IAM roles:
-- EC2: Uses instance profile
-- ECS/Fargate: Uses task role
-- No S3_PROFILE needed when IAM roles are configured
-
-For local testing in containers, use one of:
-
-**Option 1: Environment Variables (Simplest)**
-```bash
-docker run --rm \
-  -p 8080:8080 \
-  -v $(pwd)/data:/var/moderne \
-  -e PUBLISH_URL=s3://your-bucket/lsts/ \
   -e AWS_ACCESS_KEY_ID=your-access-key \
   -e AWS_SECRET_ACCESS_KEY=your-secret-key \
   -e AWS_REGION=us-east-1 \
   mass-ingest:quickstart
 ```
 
-**Option 2: Mount AWS Credentials File**
+**Option 2: Using AWS Profile**
 ```bash
 docker run --rm \
   -p 8080:8080 \
   -v $(pwd)/data:/var/moderne \
   -v ~/.aws:/root/.aws:ro \
-  -e PUBLISH_URL=s3://your-bucket/lsts/ \
+  -e PUBLISH_URL=s3://your-bucket \
   -e S3_PROFILE=your-profile \
   mass-ingest:quickstart
 ```
 
-**Option 3: Use AWS SSO/CLI Credentials** (if using AWS SSO)
+**Option 3: Using AWS SSO**
 ```bash
-# First, ensure you're logged in via AWS SSO
+# First, login via AWS SSO
 aws sso login --profile your-profile
 
-# Export credentials from your profile
+# Run with mounted AWS config
+docker run --rm \
+  -p 8080:8080 \
+  -v $(pwd)/data:/var/moderne \
+  -v ~/.aws:/root/.aws:ro \
+  -e PUBLISH_URL=s3://your-bucket \
+  -e S3_PROFILE=your-profile \
+  mass-ingest:quickstart
+```
+
+**Option 4: Using Temporary Credentials**
+```bash
+# Export credentials from AWS CLI (works with SSO, assume-role, etc.)
 eval $(aws configure export-credentials --profile your-profile --format env)
 
 docker run --rm \
   -p 8080:8080 \
   -v $(pwd)/data:/var/moderne \
-  -e PUBLISH_URL=s3://your-bucket/lsts/ \
+  -e PUBLISH_URL=s3://your-bucket \
   -e AWS_ACCESS_KEY_ID \
   -e AWS_SECRET_ACCESS_KEY \
   -e AWS_SESSION_TOKEN \
@@ -127,15 +129,16 @@ docker run --rm \
   mass-ingest:quickstart
 ```
 
-Example with MinIO:
+**Example with MinIO (S3-compatible):**
 ```bash
 docker run --rm \
   -p 8080:8080 \
   -v $(pwd)/data:/var/moderne \
-  -e PUBLISH_URL=s3://moderne-lsts/ingest/ \
+  -e PUBLISH_URL=s3://moderne-lsts \
   -e S3_ENDPOINT=https://minio.example.com \
-  -e S3_REGION=us-east-1 \
-  -e S3_PROFILE=minio-profile \
+  -e AWS_ACCESS_KEY_ID=minio-access-key \
+  -e AWS_SECRET_ACCESS_KEY=minio-secret-key \
+  -e AWS_REGION=us-east-1 \
   mass-ingest:quickstart
 ```
 

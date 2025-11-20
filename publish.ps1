@@ -125,9 +125,6 @@ function Configure-Credentials() {
     # Execute the command
     Write-Info "Running: $($S3ConfigCmd -join ' ')"
     & $S3ConfigCmd[0] $S3ConfigCmd[1..($S3ConfigCmd.Length-1)]
-
-    # Verify configuration was set
-    mod config lsts artifacts show
   }
   # Maven repository configuration
   elseif ($env:PUBLISH_URL -and $env:PUBLISH_USER -and $env:PUBLISH_PASSWORD) {
@@ -226,9 +223,10 @@ function Send-Logs() {
 
   $Timestamp = Get-Date -Format "yyyyMMddHHmm"
 
-  # Skip log upload for S3 - logs will be stored with LSTs in S3
+  # TODO: Implement S3 log upload using AWS CLI
+  # Example: aws s3 cp $env:DATA_DIR\log.zip $env:PUBLISH_URL/.logs/$Index/$Timestamp/ingest-log-cli-$Timestamp-$Index.zip
   if ($env:PUBLISH_URL -and $env:PUBLISH_URL.StartsWith("s3://")) {
-    Write-Info "Log storage handled by S3 with LST artifacts"
+    Write-Info "S3 log upload not yet implemented - logs are in $env:DATA_DIR\log.zip"
   }
   # if PUBLISH_USER and PUBLISH_PASSWORD are set, publish logs
   elseif ($env:PUBLISH_USER -and $env:PUBLISH_PASSWORD) {

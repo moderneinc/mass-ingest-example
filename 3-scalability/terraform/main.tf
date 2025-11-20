@@ -73,32 +73,6 @@ resource "aws_iam_role_policy_attachment" "ecs_service_ec2_role" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
 }
 
-# S3 access policy for EC2 instance role (for S3-based artifact storage via instance profile)
-resource "aws_iam_role_policy" "ecs_instance_s3_access" {
-  count = var.s3_bucket_name != "" ? 1 : 0
-  name  = "s3-access"
-  role  = aws_iam_role.ecs_instance_role.name
-
-  policy = jsonencode({
-    "Version": "2012-10-17",
-    "Statement": [
-      {
-        "Effect": "Allow",
-        "Action": [
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject",
-          "s3:ListBucket",
-          "s3:GetBucketLocation"
-        ],
-        "Resource": [
-          "arn:aws:s3:::${var.s3_bucket_name}/*",
-          "arn:aws:s3:::${var.s3_bucket_name}"
-        ]
-      }
-    ]
-  })
-}
 
 resource "aws_iam_service_linked_role" "batch" {
     aws_service_name = "batch.amazonaws.com"
@@ -216,7 +190,7 @@ resource "aws_iam_role_policy" "chunk_batch_access" {
 
 # S3 read access policy for chunk task role (for reading repos.csv from S3)
 resource "aws_iam_role_policy" "chunk_s3_access" {
-  count = var.s3_bucket_name != "" ? 1 : 0
+  count = var.moderne_s3_bucket_name != "" ? 1 : 0
   name  = "s3-read-access"
   role  = aws_iam_role.chunk_task_role.name
 
@@ -229,7 +203,7 @@ resource "aws_iam_role_policy" "chunk_s3_access" {
           "s3:GetObject"
         ],
         "Resource": [
-          "arn:aws:s3:::${var.s3_bucket_name}/*"
+          "arn:aws:s3:::${var.moderne_s3_bucket_name}/*"
         ]
       }
     ]
@@ -321,7 +295,7 @@ resource "aws_iam_role_policy" "processor_secrets_access" {
 
 # S3 access policy for processor task role (for S3-based artifact storage)
 resource "aws_iam_role_policy" "processor_s3_access" {
-  count = var.s3_bucket_name != "" ? 1 : 0
+  count = var.moderne_s3_bucket_name != "" ? 1 : 0
   name  = "s3-access"
   role  = aws_iam_role.processor_task_role.name
 
@@ -334,7 +308,7 @@ resource "aws_iam_role_policy" "processor_s3_access" {
           "s3:PutObject"
         ],
         "Resource": [
-          "arn:aws:s3:::${var.s3_bucket_name}/*"
+          "arn:aws:s3:::${var.moderne_s3_bucket_name}/*"
         ]
       }
     ]
@@ -358,16 +332,36 @@ resource "aws_batch_job_definition" "processor_job_definition" {
       },
     ],
     executionRoleArn = aws_iam_role.processor_task_role.arn,
-    environment = [
-      {
-        name = "MODERNE_TENANT",
-        value = var.moderne_tenant,
-      },
-      {
-        name = "PUBLISH_URL",
-        value = var.moderne_publish_url,
-      },
-    ],
+    environment = concat(
+      [
+        {
+          name = "MODERNE_TENANT",
+          value = var.moderne_tenant,
+        },
+        {
+          name = "PUBLISH_URL",
+          value = var.moderne_publish_url,
+        },
+      ],
+      var.moderne_s3_profile != "" ? [
+        {
+          name = "S3_PROFILE",
+          value = var.moderne_s3_profile,
+        },
+      ] : [],
+      var.moderne_s3_endpoint != "" ? [
+        {
+          name = "S3_ENDPOINT",
+          value = var.moderne_s3_endpoint,
+        },
+      ] : [],
+      var.moderne_s3_region != "" ? [
+        {
+          name = "S3_REGION",
+          value = var.moderne_s3_region,
+        },
+      ] : [],
+    ),
     secrets = concat(
       var.moderne_token != "" ? [
         {
@@ -387,27 +381,6 @@ resource "aws_batch_job_definition" "processor_job_definition" {
         {
           name = "GIT_SSH_CREDENTIALS",
           valueFrom = var.moderne_ssh_credentials,
-        },
-      ] : [],
-
-      var.moderne_s3_profile != "" ? [
-        {
-          name = "S3_PROFILE",
-          valueFrom = var.moderne_s3_profile,
-        },
-      ] : [],
-
-      var.moderne_s3_endpoint != "" ? [
-        {
-          name = "S3_ENDPOINT",
-          valueFrom = var.moderne_s3_endpoint,
-        },
-      ] : [],
-
-      var.moderne_s3_region != "" ? [
-        {
-          name = "S3_REGION",
-          valueFrom = var.moderne_s3_region,
         },
       ] : [],
 

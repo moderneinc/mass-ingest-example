@@ -117,18 +117,12 @@ Choose one of the following storage options:
 
 S3 uses IAM roles by default (no secrets needed). The Terraform configuration automatically grants S3 permissions when you specify the bucket name.
 
-For cross-region access or specific AWS profiles, create optional secrets:
+S3 configuration is handled through Terraform variables (not secrets):
+- `moderne_s3_profile` - AWS profile name (optional, uses IAM instance profile/task role by default)
+- `moderne_s3_region` - AWS region for cross-region bucket access (optional)
+- `moderne_s3_endpoint` - S3 endpoint URL for S3-compatible services like MinIO (optional)
 
-```bash
-aws secretsmanager create-secret \
-  --name mass-ingest/s3-config \
-  --secret-string '{"profile": "your-aws-profile", "region": "us-west-2", "endpoint": "https://s3.amazonaws.com"}'
-```
-
-Notes:
-- `profile` - Optional, uses IAM instance profile/task role by default
-- `region` - Optional, for cross-region bucket access
-- `endpoint` - Optional, for S3-compatible services like MinIO
+These are configured directly in your `terraform.tfvars` file as shown in step 4 below.
 
 **Option B: Maven/Artifactory Repository**
 
@@ -166,12 +160,12 @@ moderne_token             = "arn:aws:secretsmanager:region:account:secret:mass-i
 # Storage configuration - choose one option:
 
 # Option A: S3 Storage
-moderne_publish_url       = "s3://your-bucket/path/to/lsts/"
-s3_bucket_name           = "your-bucket"  # Required for IAM permissions
-# Optional: S3 configuration from Secrets Manager
-# moderne_s3_profile       = "arn:aws:secretsmanager:region:account:secret:mass-ingest/s3-config:profile::"
-# moderne_s3_region        = "arn:aws:secretsmanager:region:account:secret:mass-ingest/s3-config:region::"
-# moderne_s3_endpoint      = "arn:aws:secretsmanager:region:account:secret:mass-ingest/s3-config:endpoint::"
+moderne_publish_url       = "s3://your-bucket"
+moderne_s3_bucket_name   = "your-bucket"  # Required for IAM permissions
+# Optional: S3 configuration parameters
+# moderne_s3_profile       = "default"            # AWS profile name
+# moderne_s3_region        = "us-west-2"          # For cross-region bucket access
+# moderne_s3_endpoint      = "https://minio.example.com"  # For S3-compatible services
 
 # Option B: Maven/Artifactory Repository
 # moderne_publish_url       = "https://artifactory.example.com/artifactory/moderne-ingest/"
@@ -203,7 +197,7 @@ This creates:
 - Batch compute environment (EC2 instances)
 - Batch job queue
 - Job definitions (chunk + processor)
-- IAM roles and policies (including S3 access if `s3_bucket_name` is set)
+- IAM roles and policies (including S3 access if `moderne_s3_bucket_name` is set)
 - EventBridge schedule (daily at midnight UTC)
 - Security groups
 - CloudWatch log groups
@@ -212,9 +206,8 @@ This creates:
 
 When using S3 storage, the Terraform automatically configures:
 
-1. **ECS Task Role**: Grants S3 permissions to the container tasks
-2. **EC2 Instance Role**: Grants S3 permissions via instance profile
-3. **Chunk Task Role**: Read-only S3 access for repos.csv
+1. **Chunk Task Role**: Read-only S3 access (GetObject) for reading repos.csv from S3
+2. **Processor Task Role**: Write-only S3 access (PutObject) for storing LST artifacts
 
 The system uses the AWS SDK credential chain automatically:
 - In ECS/Fargate: Uses IAM task role
