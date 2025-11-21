@@ -75,7 +75,7 @@ The container supports all standard AWS authentication methods:
 - AWS SSO
 - For detailed options, see [AWS CLI Configuration documentation](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html)
 
-**Option 1: Using AWS Environment Variables (Simplest)**
+**Example 1: Using AWS Environment Variables (Simplest)**
 ```bash
 docker run --rm \
   -p 8080:8080 \
@@ -87,7 +87,7 @@ docker run --rm \
   mass-ingest:quickstart
 ```
 
-**Option 2: Using AWS Profile**
+**Example 2: Using AWS Profile**
 ```bash
 docker run --rm \
   -p 8080:8080 \
@@ -98,7 +98,7 @@ docker run --rm \
   mass-ingest:quickstart
 ```
 
-**Option 3: Using AWS SSO**
+**Example 3: Using AWS SSO**
 ```bash
 # First, login via AWS SSO
 aws sso login --profile your-profile
@@ -113,7 +113,7 @@ docker run --rm \
   mass-ingest:quickstart
 ```
 
-**Option 4: Using Temporary Credentials**
+**Example 4: Using Temporary Credentials**
 ```bash
 # Export credentials from AWS CLI (works with SSO, assume-role, etc.)
 eval $(aws configure export-credentials --profile your-profile --format env)

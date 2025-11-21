@@ -118,7 +118,6 @@ Choose one of the following storage options:
 S3 uses IAM roles by default (no secrets needed). The Terraform configuration automatically grants S3 permissions when you specify the bucket name.
 
 S3 configuration is handled through Terraform variables (not secrets):
-- `moderne_s3_profile` - AWS profile name (optional, uses IAM instance profile/task role by default)
 - `moderne_s3_region` - AWS region for cross-region bucket access (optional)
 - `moderne_s3_endpoint` - S3 endpoint URL for S3-compatible services like MinIO (optional)
 
@@ -163,7 +162,6 @@ moderne_token             = "arn:aws:secretsmanager:region:account:secret:mass-i
 moderne_publish_url       = "s3://your-bucket"
 moderne_s3_bucket_name   = "your-bucket"  # Required for IAM permissions
 # Optional: S3 configuration parameters
-# moderne_s3_profile       = "default"            # AWS profile name
 # moderne_s3_region        = "us-west-2"          # For cross-region bucket access
 # moderne_s3_endpoint      = "https://minio.example.com"  # For S3-compatible services
 
@@ -212,12 +210,10 @@ When using S3 storage, the Terraform automatically configures:
 The system uses the AWS SDK credential chain automatically:
 - In ECS/Fargate: Uses IAM task role
 - On EC2: Uses IAM instance profile
-- No S3_PROFILE needed when running on AWS infrastructure
 
-For local testing or non-AWS environments, you can specify:
-- `S3_PROFILE` - AWS profile name
+For cross-region access, you can specify:
 - `S3_REGION` - For cross-region bucket access
-- `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` - Direct credentials
+- `S3_ENDPOINT` - For S3-compatible services like MinIO
 
 ### 6. Trigger manually (optional)
 

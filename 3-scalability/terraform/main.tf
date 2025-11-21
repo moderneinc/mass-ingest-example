@@ -343,12 +343,6 @@ resource "aws_batch_job_definition" "processor_job_definition" {
           value = var.moderne_publish_url,
         },
       ],
-      var.moderne_s3_profile != "" ? [
-        {
-          name = "S3_PROFILE",
-          value = var.moderne_s3_profile,
-        },
-      ] : [],
       var.moderne_s3_endpoint != "" ? [
         {
           name = "S3_ENDPOINT",

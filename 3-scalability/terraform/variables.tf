@@ -66,13 +66,6 @@ variable "moderne_publish_token" {
   # example = "arn:aws:secretsmanager:us-east-1:123456789012:secret:mass-ingest/publishing:password::"
 }
 
-variable "moderne_s3_profile" {
-  type = string
-  default = ""
-  description = "AWS profile name for S3 access (optional, uses IAM instance profile by default)"
-  # example = "default"
-}
-
 variable "moderne_s3_endpoint" {
   type = string
   default = ""
