@@ -18,7 +18,10 @@ This example adds comprehensive observability to mass-ingest using:
 ## Prerequisites
 
 - Docker and Docker Compose installed
-- Access to an artifact repository (Artifactory, Nexus, etc.)
+- Access to one of the following storage options:
+  - Amazon S3 bucket or S3-compatible storage (MinIO, etc.)
+  - Artifactory with Maven 2 format support
+  - Nexus or other Maven-compatible repository
 - A `repos.csv` file listing repositories to ingest
 
 ## Quick start
@@ -47,8 +50,17 @@ Copy the example environment file:
 cp .env.example .env
 ```
 
-Edit `.env` with your credentials:
+Edit `.env` with your credentials. Choose one of the storage options:
 
+**Option A: S3 Storage**
+```bash
+PUBLISH_URL=s3://your-bucket/path/to/lsts/
+S3_PROFILE=default                       # Optional: AWS profile name
+S3_REGION=us-west-2                      # Optional: For cross-region bucket access
+S3_ENDPOINT=https://minio.example.com    # Optional: For S3-compatible services
+```
+
+**Option B: Maven/Artifactory**
 ```bash
 PUBLISH_URL=https://your-artifactory.com/artifactory/moderne-ingest/
 PUBLISH_USER=your-username

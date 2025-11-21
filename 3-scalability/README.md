@@ -29,6 +29,10 @@ Architecture:
 - AWS CLI configured
 - ECR repository or Docker registry
 - repos.csv file with repositories to ingest
+- Access to one of the following storage options:
+  - Amazon S3 bucket for LST storage
+  - Artifactory with Maven 2 format support
+  - Nexus or other Maven-compatible repository
 
 ## Quick start
 
@@ -107,6 +111,20 @@ aws secretsmanager create-secret \
 
 #### 3c. Publishing credentials
 
+Choose one of the following storage options:
+
+**Option A: S3 Storage**
+
+S3 uses IAM roles by default (no secrets needed). The Terraform configuration automatically grants S3 permissions when you specify the bucket name.
+
+S3 configuration is handled through Terraform variables (not secrets):
+- `moderne_s3_region` - AWS region for cross-region bucket access (optional)
+- `moderne_s3_endpoint` - S3 endpoint URL for S3-compatible services like MinIO (optional)
+
+These are configured directly in your `terraform.tfvars` file as shown in step 4 below.
+
+**Option B: Maven/Artifactory Repository**
+
 For password authentication:
 
 ```bash
@@ -137,16 +155,26 @@ image_registry            = "<your-registry>/mass-ingest"
 image_tag                 = "latest"
 moderne_tenant            = "https://app.moderne.io"  # or your tenant url
 moderne_token             = "arn:aws:secretsmanager:region:account:secret:mass-ingest/moderne-token"
-moderne_publish_url       = "https://artifactory.example.com/artifactory/moderne-ingest/"
 
-# Set either username+password/token or SSH authentication
-# moderne_git_credentials   = "arn:aws:secretsmanager:region:account:secret:mass-ingest/git-credentials"
-# moderne_ssh_credentials   = "arn:aws:secretsmanager:region:account:secret:mass-ingest/ssh-private-key"
+# Storage configuration - choose one option:
 
+# Option A: S3 Storage
+moderne_publish_url       = "s3://your-bucket"
+moderne_s3_bucket_name   = "your-bucket"  # Required for IAM permissions
+# Optional: S3 configuration parameters
+# moderne_s3_region        = "us-west-2"          # For cross-region bucket access
+# moderne_s3_endpoint      = "https://minio.example.com"  # For S3-compatible services
+
+# Option B: Maven/Artifactory Repository
+# moderne_publish_url       = "https://artifactory.example.com/artifactory/moderne-ingest/"
 # Set either user+password or token for publishing
 # moderne_publish_user      = "arn:aws:secretsmanager:region:account:secret:mass-ingest/publishing:username::"
 # moderne_publish_password  = "arn:aws:secretsmanager:region:account:secret:mass-ingest/publishing:password::"
 # moderne_publish_token     = "arn:aws:secretsmanager:region:account:secret:mass-ingest/publishing:token::"
+
+# Git authentication - set either username+password/token or SSH
+# moderne_git_credentials   = "arn:aws:secretsmanager:region:account:secret:mass-ingest/git-credentials"
+# moderne_ssh_credentials   = "arn:aws:secretsmanager:region:account:secret:mass-ingest/ssh-private-key"
 
 default_tags = {
   Environment = "production"
@@ -167,10 +195,25 @@ This creates:
 - Batch compute environment (EC2 instances)
 - Batch job queue
 - Job definitions (chunk + processor)
-- IAM roles and policies
+- IAM roles and policies (including S3 access if `moderne_s3_bucket_name` is set)
 - EventBridge schedule (daily at midnight UTC)
 - Security groups
 - CloudWatch log groups
+
+#### AWS IAM Configuration for S3
+
+When using S3 storage, the Terraform automatically configures:
+
+1. **Chunk Task Role**: Read-only S3 access (GetObject) for reading repos.csv from S3
+2. **Processor Task Role**: Write-only S3 access (PutObject) for storing LST artifacts
+
+The system uses the AWS SDK credential chain automatically:
+- In ECS/Fargate: Uses IAM task role
+- On EC2: Uses IAM instance profile
+
+For cross-region access, you can specify:
+- `S3_REGION` - For cross-region bucket access
+- `S3_ENDPOINT` - For S3-compatible services like MinIO
 
 ### 6. Trigger manually (optional)
 

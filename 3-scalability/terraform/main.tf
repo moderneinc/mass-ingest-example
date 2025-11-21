@@ -73,6 +73,7 @@ resource "aws_iam_role_policy_attachment" "ecs_service_ec2_role" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
 }
 
+
 resource "aws_iam_service_linked_role" "batch" {
     aws_service_name = "batch.amazonaws.com"
 }
@@ -164,13 +165,13 @@ resource "aws_iam_role" "chunk_task_role" {
 }
 
 resource "aws_iam_role_policy_attachment" "chunk_ecs_task_execution_policy" {
-  role       = aws_iam_role.mass_ingest_chunk_task_role.name
+  role       = aws_iam_role.chunk_task_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
 resource "aws_iam_role_policy" "chunk_batch_access" {
   name = "secrets-access"
-  role = aws_iam_role.mass_ingest_chunk_task_role.name
+  role = aws_iam_role.chunk_task_role.name
 
   policy = jsonencode({
     "Version": "2012-10-17",
@@ -183,6 +184,28 @@ resource "aws_iam_role_policy" "chunk_batch_access" {
           aws_batch_job_definition.chunk_job_definition.arn,
         ]
       },
+    ]
+  })
+}
+
+# S3 read access policy for chunk task role (for reading repos.csv from S3)
+resource "aws_iam_role_policy" "chunk_s3_access" {
+  count = var.moderne_s3_bucket_name != "" ? 1 : 0
+  name  = "s3-read-access"
+  role  = aws_iam_role.chunk_task_role.name
+
+  policy = jsonencode({
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": [
+          "s3:GetObject"
+        ],
+        "Resource": [
+          "arn:aws:s3:::${var.moderne_s3_bucket_name}/*"
+        ]
+      }
     ]
   })
 }
@@ -270,6 +293,28 @@ resource "aws_iam_role_policy" "processor_secrets_access" {
   })
 }
 
+# S3 access policy for processor task role (for S3-based artifact storage)
+resource "aws_iam_role_policy" "processor_s3_access" {
+  count = var.moderne_s3_bucket_name != "" ? 1 : 0
+  name  = "s3-access"
+  role  = aws_iam_role.processor_task_role.name
+
+  policy = jsonencode({
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": [
+          "s3:PutObject"
+        ],
+        "Resource": [
+          "arn:aws:s3:::${var.moderne_s3_bucket_name}/*"
+        ]
+      }
+    ]
+  })
+}
+
 resource "aws_batch_job_definition" "processor_job_definition" {
   name = "${var.name}-processor-job-definition"
   type = "container"
@@ -287,16 +332,30 @@ resource "aws_batch_job_definition" "processor_job_definition" {
       },
     ],
     executionRoleArn = aws_iam_role.processor_task_role.arn,
-    environment = [
-      {
-        name = "MODERNE_TENANT",
-        value = var.moderne_tenant,
-      },
-      {
-        name = "PUBLISH_URL",
-        value = var.moderne_publish_url,
-      },
-    ],
+    environment = concat(
+      [
+        {
+          name = "MODERNE_TENANT",
+          value = var.moderne_tenant,
+        },
+        {
+          name = "PUBLISH_URL",
+          value = var.moderne_publish_url,
+        },
+      ],
+      var.moderne_s3_endpoint != "" ? [
+        {
+          name = "S3_ENDPOINT",
+          value = var.moderne_s3_endpoint,
+        },
+      ] : [],
+      var.moderne_s3_region != "" ? [
+        {
+          name = "S3_REGION",
+          value = var.moderne_s3_region,
+        },
+      ] : [],
+    ),
     secrets = concat(
       var.moderne_token != "" ? [
         {
@@ -324,7 +383,7 @@ resource "aws_batch_job_definition" "processor_job_definition" {
           name = "PUBLISH_TOKEN",
           valueFrom = var.moderne_publish_token,
         },
-      ] : [
+      ] : var.moderne_publish_user != "" ? [
         {
           name = "PUBLISH_USER",
           valueFrom = var.moderne_publish_user,
@@ -333,7 +392,7 @@ resource "aws_batch_job_definition" "processor_job_definition" {
           name = "PUBLISH_PASSWORD",
           valueFrom = var.moderne_publish_password,
         },
-      ],
+      ] : [],
     )
   })
   timeout {
