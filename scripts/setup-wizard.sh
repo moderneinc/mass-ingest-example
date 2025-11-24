@@ -184,8 +184,8 @@ ask_yes_no() {
     local selected=0
     local key
 
-    # Temporarily disable exit-on-error for interactive input
-    set +e
+    # Trap errors to log exactly what fails
+    trap 'echo "ERROR in ask_yes_no at line $LINENO: exit code $?, command: $BASH_COMMAND" >&2' ERR
 
     # Show prompt
     echo -e "${BOLD}$prompt${RESET}"
@@ -214,7 +214,7 @@ ask_yes_no() {
         if [[ $key == "" ]]; then
             # Enter key pressed
             echo "" # newline after selection
-            set -e  # Re-enable exit-on-error
+            trap - ERR  # Remove error trap
             if [ $selected -eq 0 ]; then
                 return 0  # Yes
             else
@@ -570,8 +570,8 @@ ask_choice() {
     local selected=0
     local key
 
-    # Temporarily disable exit-on-error for interactive input
-    set +e
+    # Trap errors to log exactly what fails
+    trap 'echo "ERROR in ask_choice at line $LINENO: exit code $?, command: $BASH_COMMAND" >&2' ERR
 
     # Show prompt
     echo -e "${BOLD}$prompt${RESET}"
@@ -603,7 +603,7 @@ ask_choice() {
             # Enter key pressed
             CHOICE_RESULT=$selected
             echo "" # newline after selection
-            set -e  # Re-enable exit-on-error
+            trap - ERR  # Remove error trap
             return 0
         elif [[ $key == $'\x1b' ]]; then
             # Escape sequence (arrow keys)
