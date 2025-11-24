@@ -118,7 +118,7 @@ RUN ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 # RUN chmod +x /usr/local/bin/bazel
 
 # Node.js (uncomment for JavaScript/TypeScript projects)
-# RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+# RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
 #     apt-get install -y --no-install-recommends nodejs
 
 # Python 3.11 (uncomment for Python projects)
