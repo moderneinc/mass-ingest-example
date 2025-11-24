@@ -184,6 +184,9 @@ ask_yes_no() {
     local selected=0
     local key
 
+    # Temporarily disable exit-on-error for interactive input
+    set +e
+
     # Show prompt
     echo -e "${BOLD}$prompt${RESET}"
     echo ""
@@ -211,6 +214,7 @@ ask_yes_no() {
         if [[ $key == "" ]]; then
             # Enter key pressed
             echo "" # newline after selection
+            set -e  # Re-enable exit-on-error
             if [ $selected -eq 0 ]; then
                 return 0  # Yes
             else
@@ -566,6 +570,9 @@ ask_choice() {
     local selected=0
     local key
 
+    # Temporarily disable exit-on-error for interactive input
+    set +e
+
     # Show prompt
     echo -e "${BOLD}$prompt${RESET}"
     echo ""
@@ -596,6 +603,7 @@ ask_choice() {
             # Enter key pressed
             CHOICE_RESULT=$selected
             echo "" # newline after selection
+            set -e  # Re-enable exit-on-error
             return 0
         elif [[ $key == $'\x1b' ]]; then
             # Escape sequence (arrow keys)
