@@ -97,14 +97,46 @@ function Configure-Credentials() {
   }
 
   # Configure artifact repository
-  if ($env:PUBLISH_URL -and $env:PUBLISH_USER -and $env:PUBLISH_PASSWORD) {
-    Write-Info "Configuring artifact repository with username/password"
+  # S3 configuration (S3 bucket URL should start with s3://)
+  if ($env:PUBLISH_URL -and $env:PUBLISH_URL.StartsWith("s3://")) {
+    Write-Info "Configuring S3 artifact repository: $env:PUBLISH_URL"
+
+    # Build the command with proper arguments
+    $S3ConfigCmd = @("mod", "config", "lsts", "artifacts", "s3", "edit", $env:PUBLISH_URL)
+
+    # Add endpoint if provided (for S3-compatible services)
+    if ($env:S3_ENDPOINT) {
+      $S3ConfigCmd += "--endpoint"
+      $S3ConfigCmd += $env:S3_ENDPOINT
+    }
+
+    # Add AWS profile if provided
+    if ($env:S3_PROFILE) {
+      $S3ConfigCmd += "--profile"
+      $S3ConfigCmd += $env:S3_PROFILE
+    }
+
+    # Add region if provided (for cross-region access)
+    if ($env:S3_REGION) {
+      $S3ConfigCmd += "--region"
+      $S3ConfigCmd += $env:S3_REGION
+    }
+
+    # Execute the command
+    Write-Info "Running: $($S3ConfigCmd -join ' ')"
+    & $S3ConfigCmd[0] $S3ConfigCmd[1..($S3ConfigCmd.Length-1)]
+  }
+  # Maven repository configuration
+  elseif ($env:PUBLISH_URL -and $env:PUBLISH_USER -and $env:PUBLISH_PASSWORD) {
+    Write-Info "Configuring Maven artifact repository with username/password"
     mod config lsts artifacts maven edit "$env:PUBLISH_URL" --user "$env:PUBLISH_USER" --password "$env:PUBLISH_PASSWORD"
-  } elseif ($env:PUBLISH_URL -and $env:PUBLISH_TOKEN) {
-    Write-Info "Configuring artifact repository with API token"
+  }
+  # Artifactory configuration
+  elseif ($env:PUBLISH_URL -and $env:PUBLISH_TOKEN) {
+    Write-Info "Configuring Artifactory artifact repository with API token"
     mod config lsts artifacts artifactory edit "$env:PUBLISH_URL" --jfrog-api-token "$env:PUBLISH_TOKEN"
   } else {
-    Write-Fatal "PUBLISH_URL and either PUBLISH_USER/PUBLISH_PASSWORD or PUBLISH_TOKEN must be supplied via environment variables"
+    Write-Fatal "PUBLISH_URL must be supplied via environment variable. For S3, use s3:// URL format. For Maven/Artifactory, also provide PUBLISH_USER/PUBLISH_PASSWORD or PUBLISH_TOKEN"
   }
 }
 
@@ -191,8 +223,41 @@ function Send-Logs() {
 
   $Timestamp = Get-Date -Format "yyyyMMddHHmm"
 
-  # if PUBLISH_USER and PUBLISH_PASSWORD are set, or PUBLISH_TOKEN is set, publish logs
-  if ($env:PUBLISH_USER -and $env:PUBLISH_PASSWORD) {
+  # Upload logs to S3
+  if ($env:PUBLISH_URL -and $env:PUBLISH_URL.StartsWith("s3://")) {
+    # Construct S3 path for logs
+    $LogsPath = "$env:PUBLISH_URL/.logs/$Index/$Timestamp/ingest-log-cli-$Timestamp-$Index.zip"
+    Write-Info "Uploading logs to $LogsPath"
+
+    # Build AWS S3 command with optional parameters
+    $S3Cmd = @("aws", "s3", "cp", "$env:DATA_DIR\log.zip", $LogsPath)
+
+    # Add profile if specified
+    if ($env:S3_PROFILE) {
+      $S3Cmd += "--profile"
+      $S3Cmd += $env:S3_PROFILE
+    }
+
+    # Add region if specified
+    if ($env:S3_REGION) {
+      $S3Cmd += "--region"
+      $S3Cmd += $env:S3_REGION
+    }
+
+    # Add endpoint if specified (for S3-compatible services)
+    if ($env:S3_ENDPOINT) {
+      $S3Cmd += "--endpoint-url"
+      $S3Cmd += $env:S3_ENDPOINT
+    }
+
+    # Execute the upload
+    & $S3Cmd[0] $S3Cmd[1..($S3Cmd.Length-1)]
+    if (-not $?) {
+      Write-Info "Failed to upload logs to S3"
+    }
+  }
+  # if PUBLISH_USER and PUBLISH_PASSWORD are set, publish logs
+  elseif ($env:PUBLISH_USER -and $env:PUBLISH_PASSWORD) {
     $SecurePassword = ConvertTo-SecureString -String $env:PUBLISH_PASSWORD -AsPlainText -Force
     $Credential = New-Object PSCredential($env:PUBLISH_USER, $SecurePassword)
     $LogsUrl = "$env:PUBLISH_URL/io/moderne/ingest-log/$Index/$Timestamp/ingest-log-cli-$Timestamp-$Index.zip"

@@ -136,14 +136,41 @@ configure_credentials() {
   fi
 
   # Configure artifact repository
-  if [ -n "${PUBLISH_URL:-}" ] && [ -n "${PUBLISH_USER:-}" ] && [ -n "${PUBLISH_PASSWORD:-}" ]; then
-    info "Configuring artifact repository with username/password"
+  # S3 configuration (S3 bucket URL should start with s3://)
+  if [[ "${PUBLISH_URL:-}" == "s3://"* ]]; then
+    info "Configuring S3 artifact repository: ${PUBLISH_URL}"
+
+    # Build the command with proper quoting
+    S3_CONFIG_CMD=(mod config lsts artifacts s3 edit "${PUBLISH_URL}")
+
+    # Add endpoint if provided (for S3-compatible services)
+    if [ -n "${S3_ENDPOINT:-}" ]; then
+      S3_CONFIG_CMD+=(--endpoint "${S3_ENDPOINT}")
+    fi
+
+    # Add AWS profile if provided
+    if [ -n "${S3_PROFILE:-}" ]; then
+      S3_CONFIG_CMD+=(--profile "${S3_PROFILE}")
+    fi
+
+    # Add region if provided (for cross-region access)
+    if [ -n "${S3_REGION:-}" ]; then
+      S3_CONFIG_CMD+=(--region "${S3_REGION}")
+    fi
+
+    # Execute the command
+    info "Running: ${S3_CONFIG_CMD[*]}"
+    "${S3_CONFIG_CMD[@]}"
+  # Maven repository configuration
+  elif [ -n "${PUBLISH_URL:-}" ] && [ -n "${PUBLISH_USER:-}" ] && [ -n "${PUBLISH_PASSWORD:-}" ]; then
+    info "Configuring Maven artifact repository with username/password"
     mod config lsts artifacts maven edit "${PUBLISH_URL}" --user "${PUBLISH_USER}" --password "${PUBLISH_PASSWORD}"
+  # Artifactory configuration
   elif [ -n "${PUBLISH_URL:-}" ] && [ -n "${PUBLISH_TOKEN:-}" ]; then
-    info "Configuring artifact repository with API token"
+    info "Configuring Artifactory artifact repository with API token"
     mod config lsts artifacts artifactory edit "${PUBLISH_URL}" --jfrog-api-token "${PUBLISH_TOKEN}"
   else
-    die "PUBLISH_URL and either PUBLISH_USER/PUBLISH_PASSWORD or PUBLISH_TOKEN must be supplied via environment variables"
+    die "PUBLISH_URL must be supplied via environment variable. For S3, use s3:// URL format. For Maven/Artifactory, also provide PUBLISH_USER/PUBLISH_PASSWORD or PUBLISH_TOKEN"
   fi
 }
 
@@ -220,14 +247,42 @@ send_logs() {
   local index=$1
   local timestamp=$(date +"%Y%m%d%H%M")
 
+  # Upload logs to S3
+  if [[ "${PUBLISH_URL:-}" == "s3://"* ]]; then
+    # Construct S3 path for logs
+    logs_path="${PUBLISH_URL}/.logs/$index/$timestamp/ingest-log-cli-$timestamp-$index.zip"
+    info "Uploading logs to $logs_path"
+
+    # Build AWS S3 command with optional parameters
+    S3_CMD=(aws s3 cp "$DATA_DIR/log.zip" "$logs_path")
+
+    # Add profile if specified
+    if [ -n "${S3_PROFILE:-}" ]; then
+      S3_CMD+=(--profile "${S3_PROFILE}")
+    fi
+
+    # Add region if specified
+    if [ -n "${S3_REGION:-}" ]; then
+      S3_CMD+=(--region "${S3_REGION}")
+    fi
+
+    # Add endpoint if specified (for S3-compatible services)
+    if [ -n "${S3_ENDPOINT:-}" ]; then
+      S3_CMD+=(--endpoint-url "${S3_ENDPOINT}")
+    fi
+
+    # Execute the upload
+    if ! "${S3_CMD[@]}"; then
+      info "Failed to upload logs to S3"
+    fi
   # if PUBLISH_USER and PUBLISH_PASSWORD are set, or PUBLISH_TOKEN is set, publish logs
-  if [[ -n "$PUBLISH_USER" && -n "$PUBLISH_PASSWORD" ]]; then
+  elif [[ -n "${PUBLISH_USER:-}" && -n "${PUBLISH_PASSWORD:-}" ]]; then
     logs_url=$PUBLISH_URL/io/moderne/ingest-log/$index/$timestamp/ingest-log-cli-$timestamp-$index.zip
     info "Uploading logs to $logs_url"
     if ! curl -s -S --insecure -u "$PUBLISH_USER":"$PUBLISH_PASSWORD" -X PUT "$logs_url" -T "$DATA_DIR/log.zip"; then
         info "Failed to publish logs"
     fi
-  elif [[ -n "$PUBLISH_TOKEN" ]]; then
+  elif [[ -n "${PUBLISH_TOKEN:-}" ]]; then
     logs_url=$PUBLISH_URL/io/moderne/ingest-log/$index/$timestamp/ingest-log-cli-$timestamp-$index.zip
     info "Uploading logs to $logs_url"
     if ! curl -s -S --insecure -H "Authorization: Bearer $PUBLISH_TOKEN" -X PUT "$logs_url" -T "$DATA_DIR/log.zip"; then

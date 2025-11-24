@@ -15,7 +15,10 @@ This example demonstrates the simplest way to run mass-ingest: a single Docker c
 ## Prerequisites
 
 - Docker installed
-- Access to an artifact repository (Artifactory, Nexus, etc.) with Maven 2 format support
+- Access to one of the following storage options:
+  - Amazon S3 bucket or S3-compatible storage (MinIO, etc.)
+  - Artifactory with Maven 2 format support
+  - Nexus or other Maven-compatible repository
 - A `repos.csv` file listing repositories to ingest
 
 ## Quick start
@@ -52,7 +55,96 @@ docker build -t mass-ingest:quickstart --build-arg MODERNE_CLI_VERSION=3.50.0 ..
 
 ### 3. Run the container
 
-Credentials are configured at runtime (not baked into the image):
+Credentials are configured at runtime (not baked into the image). You can use S3, Artifactory, or any Maven-compatible repository.
+
+#### Option A: Using S3 Storage
+
+For S3 or S3-compatible storage, the Moderne CLI supports all standard AWS credential providers.
+
+**S3 Configuration Variables:**
+- `PUBLISH_URL` - S3 bucket URL (must start with `s3://`)
+- `S3_PROFILE` - AWS profile name (optional, uses AWS credential chain by default)
+- `S3_REGION` - AWS region (optional, for cross-region bucket access)
+- `S3_ENDPOINT` - S3 endpoint URL (optional, for S3-compatible services like MinIO)
+
+**AWS Authentication:**
+The container supports all standard AWS authentication methods:
+- IAM roles (automatic on EC2/ECS/Fargate)
+- Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
+- AWS credentials file with profiles
+- AWS SSO
+- For detailed options, see [AWS CLI Configuration documentation](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html)
+
+**Example 1: Using AWS Environment Variables (Simplest)**
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  -v $(pwd)/data:/var/moderne \
+  -e PUBLISH_URL=s3://your-bucket \
+  -e AWS_ACCESS_KEY_ID=your-access-key \
+  -e AWS_SECRET_ACCESS_KEY=your-secret-key \
+  -e AWS_REGION=us-east-1 \
+  mass-ingest:quickstart
+```
+
+**Example 2: Using AWS Profile**
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  -v $(pwd)/data:/var/moderne \
+  -v ~/.aws:/root/.aws:ro \
+  -e PUBLISH_URL=s3://your-bucket \
+  -e S3_PROFILE=your-profile \
+  mass-ingest:quickstart
+```
+
+**Example 3: Using AWS SSO**
+```bash
+# First, login via AWS SSO
+aws sso login --profile your-profile
+
+# Run with mounted AWS config
+docker run --rm \
+  -p 8080:8080 \
+  -v $(pwd)/data:/var/moderne \
+  -v ~/.aws:/root/.aws:ro \
+  -e PUBLISH_URL=s3://your-bucket \
+  -e S3_PROFILE=your-profile \
+  mass-ingest:quickstart
+```
+
+**Example 4: Using Temporary Credentials**
+```bash
+# Export credentials from AWS CLI (works with SSO, assume-role, etc.)
+eval $(aws configure export-credentials --profile your-profile --format env)
+
+docker run --rm \
+  -p 8080:8080 \
+  -v $(pwd)/data:/var/moderne \
+  -e PUBLISH_URL=s3://your-bucket \
+  -e AWS_ACCESS_KEY_ID \
+  -e AWS_SECRET_ACCESS_KEY \
+  -e AWS_SESSION_TOKEN \
+  -e AWS_REGION \
+  mass-ingest:quickstart
+```
+
+**Example with MinIO (S3-compatible):**
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  -v $(pwd)/data:/var/moderne \
+  -e PUBLISH_URL=s3://moderne-lsts \
+  -e S3_ENDPOINT=https://minio.example.com \
+  -e AWS_ACCESS_KEY_ID=minio-access-key \
+  -e AWS_SECRET_ACCESS_KEY=minio-secret-key \
+  -e AWS_REGION=us-east-1 \
+  mass-ingest:quickstart
+```
+
+#### Option B: Using Maven/Artifactory
+
+For traditional artifact repositories:
 
 ```bash
 docker run --rm \
@@ -64,12 +156,14 @@ docker run --rm \
   mass-ingest:quickstart
 ```
 
-Required environment variables:
+Maven/Artifactory environment variables:
 - `PUBLISH_URL` - Artifact repository URL
 - `PUBLISH_USER` + `PUBLISH_PASSWORD` - Repository credentials (OR use PUBLISH_TOKEN)
 - `PUBLISH_TOKEN` - Artifactory API token (alternative to user/password)
 
-Optional environment variables:
+#### Common Optional Variables
+
+Optional environment variables for all storage types:
 - `MODERNE_TOKEN` - Moderne platform token
 - `MODERNE_TENANT` - Moderne tenant url (e.g., "https://app.moderne.io" or "https://tenant.moderne.io")
 
