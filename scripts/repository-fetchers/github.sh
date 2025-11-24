@@ -26,36 +26,72 @@ if [ -n "$token" ]; then
     while :; do
         request_url="${api_url}/orgs/${organization}/repos?page=${page}&per_page=${per_page}&type=all"
 
-        response=$(curl --silent --max-time 10 --header "Authorization: Bearer $token" "$request_url")
+        # Capture response with HTTP status code
+        temp_err_file=$(mktemp)
+        response=$(curl -sS --max-time 10 -w "\n%{http_code}" --header "Authorization: Bearer $token" "$request_url" 2>"$temp_err_file")
+        curl_exit=$?
+        curl_stderr=$(cat "$temp_err_file")
+        rm -f "$temp_err_file"
+
+        # Extract HTTP status code and body
+        http_code=$(echo "$response" | tail -n1)
+        body=$(echo "$response" | sed '$d')
 
         # Check if curl failed
-        if [ $? -ne 0 ]; then
-            echo "Error: Failed to fetch repositories from GitHub API." 1>&2
+        if [ $curl_exit -ne 0 ]; then
+            echo "Error: Failed to fetch repositories from GitHub API (curl exit code: $curl_exit)" 1>&2
+            echo "Show full error details? (y/n)" 1>&2
+            read -r show_details
+            if [[ "$show_details" =~ ^[Yy] ]]; then
+                echo "─────────────────────────────────────────────────────" 1>&2
+                echo "Request URL: $request_url" 1>&2
+                echo "HTTP Status: $http_code" 1>&2
+                echo "Curl stderr: $curl_stderr" 1>&2
+                echo "Response body:" 1>&2
+                echo "$body" 1>&2
+                echo "─────────────────────────────────────────────────────" 1>&2
+            fi
+            exit 1
+        fi
+
+        # Check HTTP status code
+        if [ "$http_code" != "200" ]; then
+            echo "Error: GitHub API returned HTTP $http_code" 1>&2
+            echo "Show full error details? (y/n)" 1>&2
+            read -r show_details
+            if [[ "$show_details" =~ ^[Yy] ]]; then
+                echo "─────────────────────────────────────────────────────" 1>&2
+                echo "Request URL: $request_url" 1>&2
+                echo "HTTP Status: $http_code" 1>&2
+                echo "Response body:" 1>&2
+                echo "$body" 1>&2
+                echo "─────────────────────────────────────────────────────" 1>&2
+            fi
             exit 1
         fi
 
         # Validate JSON response
-        if ! echo "$response" | jq -e '.' >/dev/null 2>&1; then
+        if ! echo "$body" | jq -e '.' >/dev/null 2>&1; then
             echo "Error: Invalid JSON response from GitHub API." 1>&2
             echo "Response saved to: github-fetch-error.html" 1>&2
-            echo "$response" > github-fetch-error.html
+            echo "$body" > github-fetch-error.html
             exit 1
         fi
 
         # Check if response is an error message (not an array)
-        if echo "$response" | jq -e 'if type == "array" then false else true end' >/dev/null 2>&1; then
-            error_msg=$(echo "$response" | jq -r '.message // "Unknown error"')
+        if echo "$body" | jq -e 'if type == "array" then false else true end' >/dev/null 2>&1; then
+            error_msg=$(echo "$body" | jq -r '.message // "Unknown error"')
             echo "Error: GitHub API error - $error_msg" 1>&2
             exit 1
         fi
 
         # Check if the response is empty, if so, break the loop
-        if [[ $(echo "$response" | jq '. | length') -eq 0 ]]; then
+        if [[ $(echo "$body" | jq '. | length') -eq 0 ]]; then
             break
         fi
 
         # Process and output data (exclude archived repos)
-        echo "$response" | jq -r '.[] | select(.archived == false) |
+        echo "$body" | jq -r '.[] | select(.archived == false) |
           .clone_url as $url |
           ($url | sub("https://"; "") | sub("/"; " ") | split(" ")[0]) as $origin |
           ($url | sub("https://[^/]+/"; "") | sub("\\.git$"; "")) as $path |

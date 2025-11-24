@@ -574,6 +574,46 @@ clean_value() {
     echo "$value" | tr -d '\n\r' | xargs
 }
 
+ask_url() {
+    local prompt="$1"
+    local default="$2"
+    local url_input
+
+    if [ -n "$default" ]; then
+        read -p "$(echo -e "${BOLD}$prompt${RESET} (press Enter for $default): ")" url_input
+        url_input=$(clean_value "$url_input")
+
+        if [ -z "$url_input" ]; then
+            echo "$default"
+            return
+        fi
+    else
+        url_input=$(ask_input "$prompt")
+    fi
+
+    # Add https:// if no scheme is present
+    if [[ ! "$url_input" =~ ^https?:// ]]; then
+        echo "https://$url_input"
+    else
+        echo "$url_input"
+    fi
+}
+
+show_error_details() {
+    local error_output="$1"
+    local command_desc="$2"
+
+    echo "" >&2
+    if ask_yes_no "Show full error details?" "Yes" "No"; then
+        echo "" >&2
+        echo -e "${BOLD}Error details for: $command_desc${RESET}" >&2
+        echo -e "${GRAY}─────────────────────────────────────────────────────${RESET}" >&2
+        echo "$error_output" >&2
+        echo -e "${GRAY}─────────────────────────────────────────────────────${RESET}" >&2
+        echo "" >&2
+    fi
+}
+
 ask_choice() {
     local prompt="$1"
     shift
@@ -1152,19 +1192,12 @@ configure_github() {
     print_context "We'll fetch all repositories from GitHub organization(s) or user account(s)."
 
     echo ""
-    read -p "$(echo -e "${BOLD}GitHub URL${RESET} (press Enter for github.com): ")" github_url_input
+    github_url=$(ask_url "GitHub URL" "https://github.com")
 
-    if [ -z "$github_url_input" ]; then
-        github_url="https://github.com"
+    if [ "$github_url" = "https://github.com" ]; then
         api_url="https://api.github.com"
         print_success "Using GitHub.com"
     else
-        # Add https:// if not present
-        if [[ ! "$github_url_input" =~ ^https?:// ]]; then
-            github_url="https://$github_url_input"
-        else
-            github_url="$github_url_input"
-        fi
         api_url="${github_url}/api/v3"
         print_success "Using GitHub Enterprise Server: $github_url"
     fi
@@ -1226,21 +1259,46 @@ Create at: ${GITHUB_URL}/settings/tokens (select 'Tokens (classic)' type)"
 
     local -a discovered_orgs=()
     local orgs_json=""
+    local error_output=""
+    local temp_err_file=$(mktemp)
 
-    if command -v gh &> /dev/null && [ -z "$token" ]; then
+    if command -v gh &> /dev/null && [ -z "$token" ] && [ "$FORCE_GITHUB_API_MODE" != "true" ]; then
         # Use GH CLI
         if [[ "$github_url" != "https://github.com" ]]; then
             export GH_HOST="${github_url#https://}"
         fi
-        orgs_json=$(gh api /user/orgs --jq '.[].login' 2>/dev/null | tr '\n' ' ' || true)
+        orgs_json=$(gh api /user/orgs --jq '.[].login' 2>"$temp_err_file" | tr '\n' ' ' || true)
+        error_output=$(cat "$temp_err_file")
     else
         # Use API with token
-        orgs_json=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$api_url/user/orgs" 2>/dev/null | grep -o '"login":"[^"]*"' | cut -d'"' -f4 | tr '\n' ' ' || true)
+        local response=$(curl -sS -w "\n%{http_code}" -H "Authorization: token $GITHUB_TOKEN" "$api_url/user/orgs" 2>"$temp_err_file")
+        local http_code=$(echo "$response" | tail -n1)
+        local body=$(echo "$response" | sed '$d')
+        local curl_stderr=$(cat "$temp_err_file")
+
+        if [ "$http_code" = "200" ]; then
+            orgs_json=$(echo "$body" | grep -o '"login":"[^"]*"' | cut -d'"' -f4 | tr '\n' ' ' || true)
+        else
+            # Build detailed error output
+            error_output="Request URL: $api_url/user/orgs"$'\n'
+            error_output+="HTTP Status Code: $http_code"$'\n'
+            if [ -n "$curl_stderr" ]; then
+                error_output+="Curl Error: $curl_stderr"$'\n'
+            fi
+            if [ -n "$body" ]; then
+                error_output+="Response Body:"$'\n'"$body"
+            fi
+        fi
     fi
+
+    rm -f "$temp_err_file"
 
     # Parse org names into array
     if [ -n "$orgs_json" ]; then
         read -ra discovered_orgs <<< "$orgs_json"
+    elif [ -n "$error_output" ]; then
+        print_warning "Failed to discover organizations automatically"
+        show_error_details "$error_output" "GitHub organization discovery"
     fi
 
     # Collect organizations and fetch immediately
@@ -1460,18 +1518,11 @@ configure_gitlab() {
     print_context "We'll fetch repositories from GitLab group(s) or all accessible repositories."
 
     echo ""
-    read -p "$(echo -e "${BOLD}GitLab URL${RESET} (press Enter for gitlab.com): ")" gitlab_url_input
+    gitlab_domain=$(ask_url "GitLab URL" "https://gitlab.com")
 
-    if [ -z "$gitlab_url_input" ]; then
-        gitlab_domain="https://gitlab.com"
+    if [ "$gitlab_domain" = "https://gitlab.com" ]; then
         print_success "Using GitLab.com"
     else
-        # Add https:// if not present
-        if [[ ! "$gitlab_url_input" =~ ^https?:// ]]; then
-            gitlab_domain="https://$gitlab_url_input"
-        else
-            gitlab_domain="$gitlab_url_input"
-        fi
         print_success "Using self-hosted GitLab: $gitlab_domain"
     fi
 
@@ -1872,7 +1923,7 @@ configure_bitbucket_data_center() {
     print_context "We'll fetch repositories from your Bitbucket Server/Data Center instance."
 
     # Server URL
-    BITBUCKET_DC_URL=$(ask_input "Bitbucket Data Center URL (e.g., https://bitbucket.company.com)")
+    BITBUCKET_DC_URL=$(ask_url "Bitbucket Data Center URL (e.g., https://bitbucket.company.com)")
 
     # Personal Access Token
     echo ""
