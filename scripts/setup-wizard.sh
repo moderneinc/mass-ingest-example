@@ -184,6 +184,9 @@ ask_yes_no() {
     local selected=0
     local key
 
+    # Temporarily disable exit-on-error for interactive input
+    set +e
+
     # Show prompt
     echo -e "${BOLD}$prompt${RESET}"
     echo ""
@@ -211,6 +214,7 @@ ask_yes_no() {
         if [[ $key == "" ]]; then
             # Enter key pressed
             echo "" # newline after selection
+            set -e  # Re-enable exit-on-error
             if [ $selected -eq 0 ]; then
                 return 0  # Yes
             else
@@ -289,6 +293,9 @@ ask_secret_or_env_var_ref() {
     local selected=0
     local key
 
+    # Temporarily disable exit-on-error for interactive input
+    set +e
+
     echo "" >&2
 
     # Show selection menu
@@ -363,6 +370,7 @@ ask_secret_or_env_var_ref() {
 
             if [ -n "$var_name" ]; then
                 echo "\${$var_name}"
+                set -e  # Re-enable exit-on-error
                 return
             fi
             echo -e "${RED}Invalid environment variable name. Use alphanumeric characters and underscores.${RESET}" >&2
@@ -375,6 +383,7 @@ ask_secret_or_env_var_ref() {
             value=$(clean_value "$value")
             if [ -n "$value" ]; then
                 echo "$value"
+                set -e  # Re-enable exit-on-error
                 return
             fi
             echo -e "${RED}$prompt cannot be empty.${RESET}" >&2
@@ -398,6 +407,9 @@ ask_input_or_env_var() {
     local value
     local selected=0
     local key
+
+    # Temporarily disable exit-on-error for interactive input
+    set +e
 
     echo "" >&2
 
@@ -473,6 +485,7 @@ ask_input_or_env_var() {
 
             if [ -n "$var_name" ]; then
                 echo "\${$var_name}"
+                set -e  # Re-enable exit-on-error
                 return
             fi
             echo -e "${RED}Invalid environment variable name. Use alphanumeric characters and underscores.${RESET}" >&2
@@ -484,6 +497,7 @@ ask_input_or_env_var() {
             value=$(clean_value "$value")
             if [ -n "$value" ]; then
                 echo "$value"
+                set -e  # Re-enable exit-on-error
                 return
             fi
             echo -e "${RED}$prompt cannot be empty.${RESET}" >&2
@@ -506,6 +520,7 @@ ask_input() {
             value=$(clean_value "$value")
             if [ -n "$value" ]; then
                 echo "$value"
+                set -e  # Re-enable exit-on-error
                 return
             fi
             echo -e "${RED}This field cannot be empty. Please enter a value.${RESET}" >&2
@@ -566,6 +581,9 @@ ask_choice() {
     local selected=0
     local key
 
+    # Temporarily disable exit-on-error for interactive input
+    set +e
+
     # Show prompt
     echo -e "${BOLD}$prompt${RESET}"
     echo ""
@@ -596,6 +614,7 @@ ask_choice() {
             # Enter key pressed
             CHOICE_RESULT=$selected
             echo "" # newline after selection
+            set -e  # Re-enable exit-on-error
             return 0
         elif [[ $key == $'\x1b' ]]; then
             # Escape sequence (arrow keys)
@@ -647,6 +666,9 @@ ask_multi_select() {
     local options=("$@")
     local selected=0
     local key
+
+    # Temporarily disable exit-on-error for interactive input
+    set +e
 
     # Track which items are checked
     local -a checked=()
@@ -724,6 +746,7 @@ ask_multi_select() {
                 stty sane
             fi
             echo "" # newline after selection
+            set -e  # Re-enable exit-on-error
             return 0
         elif [[ $key == $'\x1b' ]]; then
             # Escape sequence - read next 2 bytes for arrow keys
