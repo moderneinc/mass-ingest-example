@@ -95,13 +95,29 @@ mass-ingest-example/
 │   ├── observability/    # Grafana and Prometheus configs
 │   └── README.md
 │
-└── 3-scalability/        # AWS Batch production deployment
-    ├── chunk.sh          # Batch job partitioning script
-    ├── terraform/
-    │   ├── main.tf
-    │   ├── variables.tf
-    │   └── outputs.tf
-    └── README.md
+├── 3-scalability/        # AWS Batch production deployment
+│   ├── chunk.sh          # Batch job partitioning script
+│   ├── terraform/
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   └── README.md
+│
+└── diagnostics/          # Comprehensive diagnostic system
+    ├── diagnose.sh       # Main script with shared functions
+    └── checks/           # Modular check scripts
+        ├── system.sh     # CPUs, memory, disk space
+        ├── tools.sh      # git, curl, jq, etc.
+        ├── docker.sh     # CPU arch, emulation detection
+        ├── java.sh       # JDKs, JAVA_HOME
+        ├── cli.sh        # mod CLI version, config
+        ├── config.sh     # Env vars, credentials
+        ├── repos-csv.sh  # File validation, columns, origins
+        ├── network.sh    # Connectivity to all hosts
+        ├── ssl.sh        # SSL handshakes, cert expiry
+        ├── auth-publish.sh # Write/read/delete test
+        ├── auth-scm.sh   # Test clone with timeout
+        └── publish-latency.sh # Throughput and rate limiting
 ```
 
 ## Prerequisites (all stages)
@@ -181,6 +197,155 @@ All Dockerfiles support:
 
 We provide scripts to generate `repos.csv` from various sources:
 - [Repository Fetchers](https://github.com/moderneinc/repository-fetchers) - Scripts for GitHub, GitLab, Bitbucket, and more
+
+## Diagnostics
+
+The `diagnostics/` directory contains a comprehensive diagnostic system to validate your mass-ingest setup before starting ingestion.
+
+### Diagnostic mode (full validation)
+
+Run comprehensive diagnostics without starting ingestion:
+
+```bash
+DIAGNOSE=true docker compose up
+```
+
+This validates the entire setup and produces a detailed report:
+- System (CPUs, memory, disk space)
+- Required tools (git, curl, jq, unzip, tar)
+- Docker image (CPU architecture, emulation detection)
+- Java/JDKs (available JDKs, JAVA_HOME)
+- Moderne CLI (version, build config, proxy, trust store, tenant)
+- Configuration (env vars, credentials, git credentials)
+- repos.csv (file validation, columns, origins, sample entries)
+- Network (Maven Central, Gradle plugins, publish URL, SCM hosts)
+- SSL/Certificates (handshakes, expiry warnings)
+- Authentication (publish write/read/delete test, SCM clone test)
+- Publish latency (throughput testing, rate limit detection)
+
+The container exits with code 0 if all checks pass, or 1 if any failures are detected.
+
+**Use cases:**
+- Initial setup validation before first real run
+- After configuration changes before deploying
+- Troubleshooting when something stops working
+- Generating diagnostic output to send to Moderne support
+
+### Diagnostics at startup
+
+Set `DIAGNOSE_ON_START=true` to run diagnostics before ingestion starts:
+
+```bash
+docker run -e DIAGNOSE_ON_START=true ...
+```
+
+This runs all diagnostic checks and then proceeds to normal ingestion regardless of the results. Use this to capture diagnostic output in your logs while still attempting ingestion.
+
+### Running diagnostics directly
+
+You can run the main diagnostic script or individual checks:
+
+```bash
+# Full diagnostics
+./diagnostics/diagnose.sh
+
+# Individual checks can be run directly
+./diagnostics/checks/docker.sh
+./diagnostics/checks/network.sh
+./diagnostics/checks/auth-publish.sh
+```
+
+### Example output
+
+```
+Mass-ingest Diagnostics
+Generated: 2025-01-20 14:32 UTC
+
+=== System ===
+[PASS] CPUs: 4
+[PASS] Memory: 12.5GB / 16.0GB available
+[PASS] Disk (data): 45.2GB / 100.0GB available
+
+=== Required tools ===
+[PASS] git: 2.39.3
+[PASS] curl: 8.4.0
+[PASS] jq: 1.7
+[PASS] unzip: 6.00
+[PASS] tar: 1.35
+
+=== Docker image ===
+[PASS] Architecture: x86_64 (no emulation detected)
+[PASS] Base image: Ubuntu 24.04.1 LTS
+
+=== Java/JDKs ===
+[PASS] JAVA_HOME: /opt/java/openjdk
+       Detected JDKs (mod config java jdk list):
+         21.0.1-tem   $JAVA_HOME     /opt/java/openjdk
+         17.0.9-tem   OS directory   /usr/lib/jvm/temurin-17
+[PASS] 5 JDK(s) available in /usr/lib/jvm/
+
+=== Moderne CLI ===
+[PASS] CLI installed: v3.56.0
+       Configuration:
+         Trust store: default JVM
+         Proxy: not configured
+         LST artifacts: Maven (https://artifactory.company.com/moderne)
+         Build timeouts: default
+
+=== Configuration ===
+[PASS] DATA_DIR: /var/moderne (writable)
+[PASS] PUBLISH_URL: https://artifactory.company.com/moderne
+[PASS] Publish credentials: PUBLISH_USER/PASSWORD set
+       Git credentials:
+[PASS] HTTPS credentials: /root/.git-credentials (2 entries)
+
+=== repos.csv ===
+[PASS] File: /app/repos.csv (exists)
+[PASS] Repositories: 427
+[PASS] Required columns: cloneUrl, branch (present)
+[PASS] Additional columns: origin, path (present)
+       Repositories by origin:
+         github.com: 412 repos
+         gitlab.internal.com: 15 repos
+       Sample entries (first 3):
+         https://github.com/company/repo-one (main)
+         https://github.com/company/repo-two (main)
+
+=== Network ===
+[PASS] Maven Central: reachable (45ms)
+[PASS] Gradle plugins: reachable (52ms)
+[PASS] PUBLISH_URL: reachable (23ms)
+[PASS] github.com: reachable (31ms)
+[FAIL] gitlab.internal.com: unreachable
+
+=== SSL/Certificates ===
+[PASS] artifactory.company.com: SSL OK (expires in 285 days)
+[PASS] github.com: SSL OK (expires in 180 days)
+[PASS] repo1.maven.org: SSL OK (expires in 340 days)
+
+=== Authentication - Publish ===
+[PASS] Write test: succeeded (HTTP 201)
+[PASS] Read test: succeeded (HTTP 200)
+[PASS] Overwrite test: succeeded (HTTP 201)
+[PASS] Delete test: succeeded (HTTP 204)
+
+=== Authentication - SCM ===
+       Testing clone: repo-one (main)
+[PASS] Clone test: succeeded (12s)
+       Cleaned up test clone
+
+=== Publish latency ===
+       Running sequential latency test (10 requests)...
+       Sequential: min=23ms avg=45ms max=89ms
+[PASS] Average latency: 45ms
+       Running parallel throughput test (3 × 100 concurrent)...
+       Parallel batches: 1250ms, 1180ms, 1320ms (avg 12ms/req)
+[PASS] Parallel throughput: 12ms/request
+
+========================================
+RESULT: 1 failure(s), 0 warning(s), 24 passed
+========================================
+```
 
 ## Support and documentation
 
