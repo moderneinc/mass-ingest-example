@@ -64,15 +64,6 @@ if [ -n "${PUBLISH_URL:-}" ] && [[ "$PUBLISH_URL" == "https://"* ]]; then
     fi
 fi
 
-# Check Moderne tenant (if configured)
-if [ -n "${MODERNE_TENANT:-}" ] && [[ "$MODERNE_TENANT" == "https://"* ]]; then
-    TENANT_HOST=$(echo "$MODERNE_TENANT" | sed 's|https://||' | cut -d/ -f1)
-    if [ -n "$TENANT_HOST" ] && ! echo "$CHECKED_HOSTS" | grep -q "$TENANT_HOST"; then
-        check_ssl "$TENANT_HOST"
-        CHECKED_HOSTS="$CHECKED_HOSTS $TENANT_HOST"
-    fi
-fi
-
 # Check SCM hosts from repos.csv (HTTPS only)
 CSV_FILE="${REPOS_CSV:-/app/repos.csv}"
 if [ ! -f "$CSV_FILE" ]; then
