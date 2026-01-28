@@ -44,5 +44,20 @@ done
 if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
     info ""
     info "Missing tools can be installed with:"
-    info "  apt-get install ${MISSING_TOOLS[*]}"
+    # Detect package manager
+    if check_command apt-get; then
+        info "  apt-get install ${MISSING_TOOLS[*]}"
+    elif check_command dnf; then
+        info "  dnf install ${MISSING_TOOLS[*]}"
+    elif check_command yum; then
+        info "  yum install ${MISSING_TOOLS[*]}"
+    elif check_command apk; then
+        info "  apk add ${MISSING_TOOLS[*]}"
+    elif check_command pacman; then
+        info "  pacman -S ${MISSING_TOOLS[*]}"
+    elif check_command brew; then
+        info "  brew install ${MISSING_TOOLS[*]}"
+    else
+        info "  <package-manager> install ${MISSING_TOOLS[*]}"
+    fi
 fi
