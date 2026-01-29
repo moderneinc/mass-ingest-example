@@ -5,6 +5,11 @@
 # - High latency
 # - Rate limiting (HTTP 429, throttling headers)
 # - Latency degradation under load
+#
+# Environment variables:
+#   SKIP_LATENCY_TEST=true    Skip this check entirely
+#   LATENCY_PARALLEL_COUNT    Number of concurrent requests (default: 20)
+#   LATENCY_TIMEOUT           Timeout per batch in seconds (default: 30)
 
 # Source shared functions if run directly
 if [ -z "$SCRIPT_DIR" ]; then
@@ -12,6 +17,12 @@ if [ -z "$SCRIPT_DIR" ]; then
 fi
 
 section "Publish latency"
+
+# Allow skipping this test
+if [ "${SKIP_LATENCY_TEST:-}" = "true" ]; then
+    info "Skipped: SKIP_LATENCY_TEST=true"
+    return 0 2>/dev/null || exit 0
+fi
 
 if [ -z "${PUBLISH_URL:-}" ]; then
     info "Skipped: PUBLISH_URL not set"
@@ -23,6 +34,10 @@ if [[ "$PUBLISH_URL" == "s3://"* ]]; then
     info "Skipped: S3 latency testing not implemented"
     return 0 2>/dev/null || exit 0
 fi
+
+# Configurable parameters
+PARALLEL_COUNT="${LATENCY_PARALLEL_COUNT:-20}"
+BATCH_TIMEOUT="${LATENCY_TIMEOUT:-30}"
 
 # Build curl auth options
 do_curl() {
@@ -59,10 +74,10 @@ ARTIFACT_COUNT=${#TEST_ARTIFACTS[@]}
 
 for i in $(seq 1 10); do
     ARTIFACT="${TEST_ARTIFACTS[$((i % ARTIFACT_COUNT))]}"
-    START=$(date +%s.%N)
-    HTTP_CODE=$(do_curl -o /dev/null -w "%{http_code}" "$PUBLISH_URL/$ARTIFACT" 2>/dev/null || echo "000")
-    END=$(date +%s.%N)
-    LATENCY=$(awk "BEGIN {printf \"%d\", ($END - $START) * 1000}" 2>/dev/null)
+    START=$(get_time_ms)
+    HTTP_CODE=$(do_curl -o /dev/null -w "%{http_code}" "$PUBLISH_URL/$ARTIFACT" 2>/dev/null)
+    END=$(get_time_ms)
+    LATENCY=$((END - START))
 
     if [ "$HTTP_CODE" = "429" ]; then
         ((HTTP_429_COUNT++))
@@ -117,35 +132,72 @@ if [ "$COUNT" -ge 10 ]; then
     fi
 fi
 
-# Parallel throughput test - 3 batches of 100 concurrent requests
-info "Running parallel throughput test (3 × 100 concurrent)..."
-PARALLEL_COUNT=100
+# Parallel throughput test - 3 batches of concurrent requests
+info "Running parallel throughput test (3 × $PARALLEL_COUNT concurrent)..."
 BATCH_TIMES=()
+PARALLEL_FAILED=false
 
-for batch in 1 2 3; do
-    BATCH_START=$(date +%s.%N)
+# Run parallel test with timeout
+run_parallel_batch() {
+    local batch_pids=()
     for i in $(seq 1 $PARALLEL_COUNT); do
         ARTIFACT="${TEST_ARTIFACTS[$((i % ARTIFACT_COUNT))]}"
-        do_curl -o /dev/null "$PUBLISH_URL/$ARTIFACT" &
+        do_curl -o /dev/null --connect-timeout 10 --max-time 20 "$PUBLISH_URL/$ARTIFACT" &
+        batch_pids+=($!)
     done
-    wait
-    BATCH_END=$(date +%s.%N)
-    BATCH_TIME=$(awk "BEGIN {printf \"%d\", ($BATCH_END - $BATCH_START) * 1000}" 2>/dev/null)
+    # Wait for all with timeout
+    local waited=0
+    while [ $waited -lt $BATCH_TIMEOUT ]; do
+        local still_running=false
+        for pid in "${batch_pids[@]}"; do
+            if kill -0 "$pid" 2>/dev/null; then
+                still_running=true
+                break
+            fi
+        done
+        if [ "$still_running" = false ]; then
+            return 0
+        fi
+        sleep 1
+        ((waited++))
+    done
+    # Timeout - kill remaining processes
+    for pid in "${batch_pids[@]}"; do
+        kill "$pid" 2>/dev/null
+    done
+    return 1
+}
+
+for batch in 1 2 3; do
+    BATCH_START=$(get_time_ms)
+    if ! run_parallel_batch; then
+        warn "Parallel batch $batch timed out after ${BATCH_TIMEOUT}s"
+        PARALLEL_FAILED=true
+        break
+    fi
+    BATCH_END=$(get_time_ms)
+    BATCH_TIME=$((BATCH_END - BATCH_START))
     BATCH_TIMES+=("$BATCH_TIME")
 done
 
-BATCH1=${BATCH_TIMES[0]}
-BATCH2=${BATCH_TIMES[1]}
-BATCH3=${BATCH_TIMES[2]}
-PARALLEL_AVG=$(( (BATCH1 + BATCH2 + BATCH3) / 3 / PARALLEL_COUNT ))
+if [ "$PARALLEL_FAILED" = true ]; then
+    info "Parallel test incomplete - try with fewer concurrent requests:"
+    info "  LATENCY_PARALLEL_COUNT=10 ./diagnostics/diagnose.sh"
+    info "  Or skip: SKIP_LATENCY_TEST=true ./diagnostics/diagnose.sh"
+elif [ ${#BATCH_TIMES[@]} -eq 3 ]; then
+    BATCH1=${BATCH_TIMES[0]}
+    BATCH2=${BATCH_TIMES[1]}
+    BATCH3=${BATCH_TIMES[2]}
+    PARALLEL_AVG=$(( (BATCH1 + BATCH2 + BATCH3) / 3 / PARALLEL_COUNT ))
 
-info "Parallel batches: ${BATCH1}ms, ${BATCH2}ms, ${BATCH3}ms (avg ${PARALLEL_AVG}ms/req)"
+    info "Parallel batches: ${BATCH1}ms, ${BATCH2}ms, ${BATCH3}ms (avg ${PARALLEL_AVG}ms/req)"
 
-# Check for batch degradation
-if [ "$BATCH3" -gt $((BATCH1 * 2)) ]; then
-    warn "Batch degradation: ${BATCH1}ms -> ${BATCH3}ms (possible throttling)"
-else
-    pass "Parallel throughput: ${PARALLEL_AVG}ms/request"
+    # Check for batch degradation
+    if [ "$BATCH3" -gt $((BATCH1 * 2)) ] && [ "$BATCH1" -gt 0 ]; then
+        warn "Batch degradation: ${BATCH1}ms -> ${BATCH3}ms (possible throttling)"
+    else
+        pass "Parallel throughput: ${PARALLEL_AVG}ms/request"
+    fi
 fi
 
 # HTTP 429 check

@@ -100,23 +100,37 @@ check_command() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Get current time in milliseconds (works on GNU and BusyBox date)
+# BusyBox date doesn't support %N, so we fall back to seconds precision
+get_time_ms() {
+    local time_ns
+    time_ns=$(date +%s%N 2>/dev/null)
+    if [ ${#time_ns} -gt 10 ]; then
+        # GNU date with nanoseconds
+        echo "${time_ns:0:13}"
+    else
+        # BusyBox date - seconds only, multiply by 1000
+        echo "$(($(date +%s) * 1000))"
+    fi
+}
+
 # Check if a URL is reachable (returns HTTP 2xx/3xx)
 check_reachable() {
     local url="$1"
     local timeout="${2:-5}"
     local code
-    code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout "$timeout" "$url" 2>/dev/null || echo "000")
+    code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout "$timeout" "$url" 2>/dev/null)
     [[ "$code" =~ ^[23] ]]
 }
 
-# Measure latency to a URL in milliseconds (uses awk for portability)
+# Measure latency to a URL in milliseconds
 measure_latency() {
     local url="$1"
     local start end
-    start=$(date +%s.%N)
+    start=$(get_time_ms)
     curl -s -o /dev/null --connect-timeout 5 "$url" 2>/dev/null
-    end=$(date +%s.%N)
-    awk -v start="$start" -v end="$end" 'BEGIN {printf "%d", (end - start) * 1000}'
+    end=$(get_time_ms)
+    echo $((end - start))
 }
 
 # Get unique origins from repos.csv
@@ -148,7 +162,7 @@ format_bytes() {
 }
 
 # Export functions for child scripts
-export -f pass warn fail info section check_command check_reachable measure_latency get_origins format_bytes
+export -f pass warn fail info section check_command get_time_ms check_reachable measure_latency get_origins format_bytes
 
 ################################################################################
 # Main execution (skip if --functions-only)

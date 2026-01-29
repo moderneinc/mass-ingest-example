@@ -25,16 +25,17 @@ check_url() {
         CURL_ARGS+=(-H "Authorization: Bearer ${PUBLISH_TOKEN}")
     fi
 
-    START=$(date +%s.%N)
-    HTTP_CODE=$(curl "${CURL_ARGS[@]}" "$url" 2>/dev/null || echo "000")
-    END=$(date +%s.%N)
-    LATENCY=$(awk "BEGIN {printf \"%d\", ($END - $START) * 1000}" 2>/dev/null || echo "?")
+    START=$(get_time_ms)
+    HTTP_CODE=$(curl "${CURL_ARGS[@]}" "$url" 2>/dev/null)
+    local CURL_EXIT=$?
+    END=$(get_time_ms)
+    LATENCY=$((END - START))
 
     if [[ "$HTTP_CODE" =~ ^[23] ]]; then
         pass "$name: reachable (${LATENCY}ms)"
         return 0
-    elif [ "$HTTP_CODE" = "000" ]; then
-        fail "$name: unreachable (connection failed)"
+    elif [ $CURL_EXIT -ne 0 ] || [ "$HTTP_CODE" = "000" ]; then
+        fail "$name: unreachable (connection failed or DNS error)"
         return 1
     elif [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ]; then
         fail "$name: authentication failed (HTTP $HTTP_CODE)"
@@ -49,7 +50,13 @@ check_url() {
 if [ -n "${PUBLISH_URL:-}" ]; then
     if [[ "$PUBLISH_URL" == "s3://"* ]]; then
         if check_command aws; then
-            if aws s3 ls "$PUBLISH_URL" --max-items 1 >/dev/null 2>&1; then
+            # Build S3 options (same as auth-publish.sh)
+            S3_ARGS=()
+            [ -n "${S3_PROFILE:-}" ] && S3_ARGS+=(--profile "$S3_PROFILE")
+            [ -n "${S3_REGION:-}" ] && S3_ARGS+=(--region "$S3_REGION")
+            [ -n "${S3_ENDPOINT:-}" ] && S3_ARGS+=(--endpoint-url "$S3_ENDPOINT")
+
+            if aws s3 ls "$PUBLISH_URL" "${S3_ARGS[@]}" --max-items 1 >/dev/null 2>&1; then
                 pass "PUBLISH_URL: $PUBLISH_URL (S3 accessible)"
             else
                 warn "PUBLISH_URL: $PUBLISH_URL (S3 - cannot list, check credentials)"
@@ -59,18 +66,20 @@ if [ -n "${PUBLISH_URL:-}" ]; then
         fi
     else
         # Just check connectivity - 401/403 means server is reachable (auth tested in auth-publish)
-        START=$(date +%s.%N)
-        HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 "$PUBLISH_URL" 2>/dev/null || echo "000")
-        END=$(date +%s.%N)
-        LATENCY=$(awk "BEGIN {printf \"%d\", ($END - $START) * 1000}" 2>/dev/null || echo "?")
+        START=$(get_time_ms)
+        HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 "$PUBLISH_URL" 2>/dev/null)
+        CURL_EXIT=$?
+        END=$(get_time_ms)
+        LATENCY=$((END - START))
 
-        if [ "$HTTP_CODE" = "000" ]; then
-            fail "PUBLISH_URL: unreachable (connection failed)"
+        if [ $CURL_EXIT -ne 0 ] || [ "$HTTP_CODE" = "000" ]; then
+            fail "PUBLISH_URL: unreachable (connection failed or DNS error)"
+            info "Check network connectivity and DNS resolution"
         elif [[ "$HTTP_CODE" =~ ^[2345] ]]; then
             # 2xx, 3xx, 4xx, 5xx all mean the server responded
             pass "PUBLISH_URL: reachable (${LATENCY}ms)"
         else
-            warn "PUBLISH_URL: HTTP $HTTP_CODE (${LATENCY}ms)"
+            warn "PUBLISH_URL: unexpected response (HTTP $HTTP_CODE)"
         fi
     fi
 else
@@ -99,17 +108,21 @@ if [ -f "$CSV_FILE" ]; then
         info "SCM hosts (from repos.csv):"
         for host in $HOSTS; do
             if [ -n "$host" ]; then
-                START=$(date +%s.%N)
-                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 "https://$host" 2>/dev/null || echo "000")
-                END=$(date +%s.%N)
-                LATENCY=$(awk "BEGIN {printf \"%d\", ($END - $START) * 1000}" 2>/dev/null || echo "?")
+                START=$(get_time_ms)
+                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 "https://$host" 2>/dev/null)
+                CURL_EXIT=$?
+                END=$(get_time_ms)
+                LATENCY=$((END - START))
 
                 if [[ "$HTTP_CODE" =~ ^[23] ]]; then
                     pass "$host: reachable (${LATENCY}ms)"
-                elif [ "$HTTP_CODE" = "000" ]; then
-                    fail "$host: unreachable"
+                elif [ $CURL_EXIT -ne 0 ] || [ "$HTTP_CODE" = "000" ]; then
+                    fail "$host: unreachable (connection failed or DNS error)"
+                elif [[ "$HTTP_CODE" =~ ^[45] ]]; then
+                    # 4xx/5xx still means the server is reachable
+                    pass "$host: reachable (${LATENCY}ms)"
                 else
-                    info "$host: HTTP $HTTP_CODE (${LATENCY}ms)"
+                    warn "$host: unexpected response (HTTP $HTTP_CODE)"
                 fi
             fi
         done
