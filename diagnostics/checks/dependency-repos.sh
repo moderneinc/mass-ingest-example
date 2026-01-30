@@ -69,7 +69,7 @@ expand_env_vars() {
     echo "$value"
 }
 
-# Test a single repository
+# Test a single repository with latency measurement
 test_repo() {
     local url="$1"
     local username="$2"
@@ -81,15 +81,15 @@ test_repo() {
     password=$(expand_env_vars "$password")
     token=$(expand_env_vars "$token")
 
-    # Build curl args
-    local CURL_ARGS=(-s -o /dev/null -w '%{http_code}' --connect-timeout 5)
+    # Build curl args for auth
+    local curl_args=()
     local auth_info=""
 
     if [ -n "$token" ]; then
-        CURL_ARGS+=(-H "Authorization: Bearer $token")
+        curl_args+=(-H "Authorization: Bearer $token")
         auth_info=" (bearer auth)"
     elif [ -n "$username" ] && [ -n "$password" ]; then
-        CURL_ARGS+=(-u "${username}:${password}")
+        curl_args+=(-u "${username}:${password}")
         auth_info=" (basic auth)"
     fi
 
@@ -97,39 +97,48 @@ test_repo() {
     local host
     host=$(echo "$url" | sed 's|.*://||' | cut -d/ -f1)
 
-    # Test with a common artifact path
-    local test_url="${url%/}/org/apache/maven/plugins/maven-metadata.xml"
+    # Quick connectivity check first
+    local test_path="org/apache/maven/plugins/maven-metadata.xml"
+    local test_url="${url%/}/$test_path"
+    local http_code
+    http_code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 "${curl_args[@]}" "$test_url" 2>/dev/null)
+    local curl_exit=$?
 
-    local START END HTTP_CODE LATENCY
-    START=$(get_time_ms)
-    HTTP_CODE=$(curl "${CURL_ARGS[@]}" "$test_url" 2>/dev/null)
-    local CURL_EXIT=$?
-    END=$(get_time_ms)
-    LATENCY=$((END - START))
-
-    if [ $CURL_EXIT -ne 0 ] || [ "$HTTP_CODE" = "000" ]; then
+    if [ $curl_exit -ne 0 ] || [ "$http_code" = "000" ]; then
         fail "$host: unreachable"
         info "URL: $url"
         return 1
-    elif [ "$HTTP_CODE" = "200" ]; then
-        pass "$host: reachable (${LATENCY}ms)${auth_info}"
-        return 0
-    elif [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ]; then
+    elif [ "$http_code" = "401" ] || [ "$http_code" = "403" ]; then
         if [ -n "$username" ] || [ -n "$token" ]; then
-            fail "$host: authentication failed (HTTP $HTTP_CODE)"
+            fail "$host: authentication failed (HTTP $http_code)"
         else
-            warn "$host: requires authentication (HTTP $HTTP_CODE)"
+            warn "$host: requires authentication (HTTP $http_code)"
             info "Add credentials to dependency-repos.csv"
         fi
         return 1
-    elif [ "$HTTP_CODE" = "404" ]; then
-        # 404 on specific artifact still means repo is reachable
-        pass "$host: reachable (${LATENCY}ms)${auth_info}"
-        return 0
-    else
-        warn "$host: HTTP $HTTP_CODE (${LATENCY}ms)"
-        return 0
     fi
+
+    # Run full latency test
+    test_repo_latency "$host" "$url" "$test_path" "${curl_args[@]}"
+
+    case "$LATENCY_RESULT" in
+        failed)
+            fail "$host: latency test failed"
+            return 1
+            ;;
+        high)
+            warn "$host: HIGH latency avg=${LATENCY_AVG}ms (min=${LATENCY_MIN}ms max=${LATENCY_MAX}ms)${auth_info}"
+            info "Consider using a closer mirror"
+            ;;
+        elevated)
+            pass "$host: avg=${LATENCY_AVG}ms (min=${LATENCY_MIN}ms max=${LATENCY_MAX}ms)${auth_info}"
+            info "Latency slightly elevated"
+            ;;
+        *)
+            pass "$host: avg=${LATENCY_AVG}ms (min=${LATENCY_MIN}ms max=${LATENCY_MAX}ms)${auth_info}"
+            ;;
+    esac
+    return 0
 }
 
 # Parse CSV and test each repository

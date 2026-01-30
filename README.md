@@ -366,14 +366,13 @@ Generated: 2025-01-20 14:32 UTC
 
 === Maven repositories ===
        Using: /root/.m2/settings.xml
-[PASS] central: reachable (42ms)
-[PASS] internal-nexus: reachable (18ms) (via mirror: nexus-mirror)
-       Tip: High latency to dependency repos can significantly slow builds.
+[PASS] central: avg=42ms (min=38ms max=67ms)
+[PASS] internal-nexus: avg=18ms (min=15ms max=24ms) (via mirror: nexus-mirror) (with auth)
 
 === Dependency repositories ===
        Using: ./dependency-repos.csv
-[PASS] nexus.example.com: reachable (23ms) (basic auth)
-[PASS] repo.spring.io: reachable (67ms)
+[PASS] nexus.example.com: avg=23ms (min=19ms max=31ms) (basic auth)
+[PASS] repo.spring.io: avg=67ms (min=52ms max=98ms)
 
 ========================================
 RESULT: 1 failure(s), 0 warning(s), 24 passed

@@ -161,7 +161,7 @@ if [ -n "${MIRRORS["*"]:-}" ]; then
     info "Mirror configured for all repositories: ${MIRRORS["*"]}"
 fi
 
-# Test each repository
+# Test each repository with latency measurement
 test_repo() {
     local repo_id="$1"
     local repo_url="$2"
@@ -184,8 +184,8 @@ test_repo() {
     local user="${SERVER_USERS["$effective_id"]:-}"
     local pass="${SERVER_PASSWORDS["$effective_id"]:-}"
 
-    # Build curl args
-    local CURL_ARGS=(-s -o /dev/null -w '%{http_code}' --connect-timeout 5)
+    # Build curl args for auth
+    local curl_args=()
     local auth_info=""
 
     if [ -n "$user" ] && [ -n "$pass" ]; then
@@ -193,62 +193,88 @@ test_repo() {
         if [[ "$pass" == "{"*"}" ]]; then
             info "$repo_id: encrypted password detected (cannot test auth)"
             auth_info=" (auth configured but encrypted)"
-            # Try without auth
         else
-            CURL_ARGS+=(-u "${user}:${pass}")
+            curl_args+=(-u "${user}:${pass}")
             auth_info=" (with auth)"
         fi
     fi
 
-    # Test with a common artifact path (maven-metadata.xml at a popular group)
+    # Quick connectivity check first
     local test_path="org/apache/maven/plugins/maven-metadata.xml"
     local test_url="${effective_url%/}/$test_path"
+    local http_code
+    http_code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 "${curl_args[@]}" "$test_url" 2>/dev/null)
+    local curl_exit=$?
 
-    local START END HTTP_CODE LATENCY
-    START=$(get_time_ms)
-    HTTP_CODE=$(curl "${CURL_ARGS[@]}" "$test_url" 2>/dev/null)
-    local CURL_EXIT=$?
-    END=$(get_time_ms)
-    LATENCY=$((END - START))
-
-    if [ $CURL_EXIT -ne 0 ] || [ "$HTTP_CODE" = "000" ]; then
+    if [ $curl_exit -ne 0 ] || [ "$http_code" = "000" ]; then
         fail "$repo_id: unreachable${mirrored}"
         info "URL: $effective_url"
         return 1
-    elif [ "$HTTP_CODE" = "200" ]; then
-        pass "$repo_id: reachable (${LATENCY}ms)${mirrored}${auth_info}"
-        return 0
-    elif [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ]; then
+    elif [ "$http_code" = "401" ] || [ "$http_code" = "403" ]; then
         if [ -n "$user" ]; then
-            fail "$repo_id: authentication failed (HTTP $HTTP_CODE)${mirrored}"
+            fail "$repo_id: authentication failed (HTTP $http_code)${mirrored}"
         else
-            warn "$repo_id: requires authentication (HTTP $HTTP_CODE)${mirrored}"
+            warn "$repo_id: requires authentication (HTTP $http_code)${mirrored}"
             info "Configure server credentials in settings.xml"
         fi
         return 1
-    elif [ "$HTTP_CODE" = "404" ]; then
-        # 404 on specific artifact still means repo is reachable
-        pass "$repo_id: reachable (${LATENCY}ms)${mirrored}${auth_info}"
-        return 0
-    else
-        warn "$repo_id: HTTP $HTTP_CODE (${LATENCY}ms)${mirrored}"
-        return 0
     fi
+
+    # Run full latency test
+    test_repo_latency "$repo_id" "$effective_url" "$test_path" "${curl_args[@]}"
+
+    case "$LATENCY_RESULT" in
+        failed)
+            fail "$repo_id: latency test failed${mirrored}"
+            return 1
+            ;;
+        high)
+            warn "$repo_id: HIGH latency avg=${LATENCY_AVG}ms (min=${LATENCY_MIN}ms max=${LATENCY_MAX}ms)${mirrored}${auth_info}"
+            info "Consider using a closer mirror"
+            ;;
+        elevated)
+            pass "$repo_id: avg=${LATENCY_AVG}ms (min=${LATENCY_MIN}ms max=${LATENCY_MAX}ms)${mirrored}${auth_info}"
+            info "Latency slightly elevated"
+            ;;
+        *)
+            pass "$repo_id: avg=${LATENCY_AVG}ms (min=${LATENCY_MIN}ms max=${LATENCY_MAX}ms)${mirrored}${auth_info}"
+            ;;
+    esac
+    return 0
 }
 
 # Test all discovered repositories
 REPO_COUNT=0
+TESTED_URLS=()
+
 for repo_id in "${!REPOS[@]}"; do
-    test_repo "$repo_id" "${REPOS[$repo_id]}"
-    ((REPO_COUNT++))
+    repo_url="${REPOS[$repo_id]}"
+
+    # Determine effective URL (after mirror resolution)
+    effective_url="$repo_url"
+    if [ -n "${MIRRORS["$repo_id"]:-}" ]; then
+        effective_url="${MIRRORS["$repo_id"]}"
+    elif [ -n "${MIRRORS["*"]:-}" ]; then
+        effective_url="${MIRRORS["*"]}"
+    fi
+
+    # Skip if we've already tested this URL (mirrors can cause duplicates)
+    skip=false
+    for tested in "${TESTED_URLS[@]}"; do
+        if [ "$tested" = "$effective_url" ]; then
+            skip=true
+            break
+        fi
+    done
+
+    if [ "$skip" = false ]; then
+        test_repo "$repo_id" "$repo_url"
+        TESTED_URLS+=("$effective_url")
+        ((REPO_COUNT++))
+    fi
 done
 
 if [ "$REPO_COUNT" -eq 0 ]; then
     info "No repositories found in active profiles"
     info "Only Maven Central will be used"
 fi
-
-# Summary of latency concern
-info ""
-info "Tip: High latency to dependency repos can significantly slow builds."
-info "Consider using a local Nexus/Artifactory mirror if latency > 200ms."
