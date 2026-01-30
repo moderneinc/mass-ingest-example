@@ -222,6 +222,7 @@ run_check "auth-publish"
 run_check "auth-scm"
 run_check "publish-latency"
 run_check "maven-repos"
+run_check "dependency-repos"
 
 # Calculate duration
 DIAG_END=$(date +%s)

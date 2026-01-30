@@ -118,7 +118,8 @@ mass-ingest-example/
         ├── auth-publish.sh # Write/read/delete test
         ├── auth-scm.sh   # Test clone with timeout
         ├── publish-latency.sh # Throughput and rate limiting
-        └── maven-repos.sh # Dependency repository connectivity
+        ├── maven-repos.sh # Maven repos from settings.xml
+        └── dependency-repos.sh # User-specified repos (Gradle, etc.)
 ```
 
 ## Prerequisites (all stages)
@@ -188,6 +189,24 @@ The `repos.csv` file must include:
 
 See [repos.csv documentation](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv) for advanced options.
 
+### Dependency repositories (optional)
+
+Create `dependency-repos.csv` to test connectivity to Maven/Gradle dependency repositories during diagnostics:
+
+```csv
+url,username,password,token
+https://nexus.example.com/releases,${NEXUS_USER},${NEXUS_PASSWORD},
+https://artifactory.example.com/libs,,,${ARTIFACTORY_TOKEN}
+https://repo.spring.io/release,,,
+```
+
+- Use `username` + `password` for basic auth
+- Use `token` for bearer auth (leave username/password empty)
+- Leave all auth fields empty for anonymous access
+- Use `${ENV_VAR}` syntax to reference environment variables
+
+See `dependency-repos.csv.example` for a template.
+
 ### Build arguments
 
 All Dockerfiles support:
@@ -224,6 +243,7 @@ This validates the entire setup and produces a detailed report:
 - Authentication (publish write/read/delete test, SCM clone test)
 - Publish latency (throughput testing, rate limit detection)
 - Maven repositories (dependency repo connectivity from settings.xml)
+- Dependency repositories (user-specified repos from dependency-repos.csv)
 
 The container exits with code 0 if all checks pass, or 1 if any failures are detected.
 
@@ -349,6 +369,11 @@ Generated: 2025-01-20 14:32 UTC
 [PASS] central: reachable (42ms)
 [PASS] internal-nexus: reachable (18ms) (via mirror: nexus-mirror)
        Tip: High latency to dependency repos can significantly slow builds.
+
+=== Dependency repositories ===
+       Using: ./dependency-repos.csv
+[PASS] nexus.example.com: reachable (23ms) (basic auth)
+[PASS] repo.spring.io: reachable (67ms)
 
 ========================================
 RESULT: 1 failure(s), 0 warning(s), 24 passed
