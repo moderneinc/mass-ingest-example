@@ -117,7 +117,8 @@ mass-ingest-example/
         ├── ssl.sh        # SSL handshakes, cert expiry
         ├── auth-publish.sh # Write/read/delete test
         ├── auth-scm.sh   # Test clone with timeout
-        └── publish-latency.sh # Throughput and rate limiting
+        ├── publish-latency.sh # Throughput and rate limiting
+        └── maven-repos.sh # Dependency repository connectivity
 ```
 
 ## Prerequisites (all stages)
@@ -222,6 +223,7 @@ This validates the entire setup and produces a detailed report:
 - SSL/Certificates (handshakes, expiry warnings)
 - Authentication (publish write/read/delete test, SCM clone test)
 - Publish latency (throughput testing, rate limit detection)
+- Maven repositories (dependency repo connectivity from settings.xml)
 
 The container exits with code 0 if all checks pass, or 1 if any failures are detected.
 
@@ -341,6 +343,12 @@ Generated: 2025-01-20 14:32 UTC
        Running parallel throughput test (3 × 100 concurrent)...
        Parallel batches: 1250ms, 1180ms, 1320ms (avg 12ms/req)
 [PASS] Parallel throughput: 12ms/request
+
+=== Maven repositories ===
+       Using: /root/.m2/settings.xml
+[PASS] central: reachable (42ms)
+[PASS] internal-nexus: reachable (18ms) (via mirror: nexus-mirror)
+       Tip: High latency to dependency repos can significantly slow builds.
 
 ========================================
 RESULT: 1 failure(s), 0 warning(s), 24 passed
