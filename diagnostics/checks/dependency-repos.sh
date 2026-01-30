@@ -21,6 +21,9 @@ if [ -z "$SCRIPT_DIR" ]; then
     source "$(dirname "$0")/../diagnose.sh" --functions-only
 fi
 
+# Source latency testing library
+source "$(dirname "$0")/../lib/latency.sh"
+
 section "Dependency repositories"
 
 # Allow skipping
@@ -69,7 +72,7 @@ expand_env_vars() {
     echo "$value"
 }
 
-# Test a single repository with latency measurement
+# Test a single repository with comprehensive latency measurement
 test_repo() {
     local url="$1"
     local username="$2"
@@ -83,14 +86,11 @@ test_repo() {
 
     # Build curl args for auth
     local curl_args=()
-    local auth_info=""
 
     if [ -n "$token" ]; then
         curl_args+=(-H "Authorization: Bearer $token")
-        auth_info=" (bearer auth)"
     elif [ -n "$username" ] && [ -n "$password" ]; then
         curl_args+=(-u "${username}:${password}")
-        auth_info=" (basic auth)"
     fi
 
     # Extract host for display
@@ -98,8 +98,7 @@ test_repo() {
     host=$(echo "$url" | sed 's|.*://||' | cut -d/ -f1)
 
     # Quick connectivity check first
-    local test_path="org/apache/maven/plugins/maven-metadata.xml"
-    local test_url="${url%/}/$test_path"
+    local test_url="${url%/}/org/apache/maven/plugins/maven-metadata.xml"
     local http_code
     http_code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 "${curl_args[@]}" "$test_url" 2>/dev/null)
     local curl_exit=$?
@@ -118,27 +117,8 @@ test_repo() {
         return 1
     fi
 
-    # Run full latency test
-    test_repo_latency "$host" "$url" "$test_path" "${curl_args[@]}"
-
-    case "$LATENCY_RESULT" in
-        failed)
-            fail "$host: latency test failed"
-            return 1
-            ;;
-        high)
-            warn "$host: HIGH latency avg=${LATENCY_AVG}ms (min=${LATENCY_MIN}ms max=${LATENCY_MAX}ms)${auth_info}"
-            info "Consider using a closer mirror"
-            ;;
-        elevated)
-            pass "$host: avg=${LATENCY_AVG}ms (min=${LATENCY_MIN}ms max=${LATENCY_MAX}ms)${auth_info}"
-            info "Latency slightly elevated"
-            ;;
-        *)
-            pass "$host: avg=${LATENCY_AVG}ms (min=${LATENCY_MIN}ms max=${LATENCY_MAX}ms)${auth_info}"
-            ;;
-    esac
-    return 0
+    # Run comprehensive latency test
+    run_comprehensive_latency_test "$host" "$url" "${curl_args[@]}"
 }
 
 # Parse CSV and test each repository

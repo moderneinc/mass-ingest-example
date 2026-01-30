@@ -13,6 +13,9 @@ if [ -z "$SCRIPT_DIR" ]; then
     source "$(dirname "$0")/../diagnose.sh" --functions-only
 fi
 
+# Source latency testing library
+source "$(dirname "$0")/../lib/latency.sh"
+
 section "Maven repositories"
 
 # Allow skipping
@@ -161,23 +164,23 @@ if [ -n "${MIRRORS["*"]:-}" ]; then
     info "Mirror configured for all repositories: ${MIRRORS["*"]}"
 fi
 
-# Test each repository with latency measurement
+# Test each repository with comprehensive latency measurement
 test_repo() {
     local repo_id="$1"
     local repo_url="$2"
     local effective_url="$repo_url"
     local effective_id="$repo_id"
-    local mirrored=""
+    local display_name="$repo_id"
 
     # Check if this repo is mirrored
     if [ -n "${MIRRORS["$repo_id"]:-}" ]; then
         effective_url="${MIRRORS["$repo_id"]}"
         effective_id="${MIRROR_IDS["$repo_id"]}"
-        mirrored=" (via mirror: $effective_id)"
+        display_name="$repo_id (via mirror: $effective_id)"
     elif [ -n "${MIRRORS["*"]:-}" ]; then
         effective_url="${MIRRORS["*"]}"
         effective_id="${MIRROR_IDS["*"]}"
-        mirrored=" (via mirror: $effective_id)"
+        display_name="$repo_id (via mirror: $effective_id)"
     fi
 
     # Get credentials if available
@@ -186,61 +189,38 @@ test_repo() {
 
     # Build curl args for auth
     local curl_args=()
-    local auth_info=""
 
     if [ -n "$user" ] && [ -n "$pass" ]; then
         # Check for Maven encrypted password
         if [[ "$pass" == "{"*"}" ]]; then
             info "$repo_id: encrypted password detected (cannot test auth)"
-            auth_info=" (auth configured but encrypted)"
         else
             curl_args+=(-u "${user}:${pass}")
-            auth_info=" (with auth)"
         fi
     fi
 
     # Quick connectivity check first
-    local test_path="org/apache/maven/plugins/maven-metadata.xml"
-    local test_url="${effective_url%/}/$test_path"
+    local test_url="${effective_url%/}/org/apache/maven/plugins/maven-metadata.xml"
     local http_code
     http_code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 "${curl_args[@]}" "$test_url" 2>/dev/null)
     local curl_exit=$?
 
     if [ $curl_exit -ne 0 ] || [ "$http_code" = "000" ]; then
-        fail "$repo_id: unreachable${mirrored}"
+        fail "$display_name: unreachable"
         info "URL: $effective_url"
         return 1
     elif [ "$http_code" = "401" ] || [ "$http_code" = "403" ]; then
         if [ -n "$user" ]; then
-            fail "$repo_id: authentication failed (HTTP $http_code)${mirrored}"
+            fail "$display_name: authentication failed (HTTP $http_code)"
         else
-            warn "$repo_id: requires authentication (HTTP $http_code)${mirrored}"
+            warn "$display_name: requires authentication (HTTP $http_code)"
             info "Configure server credentials in settings.xml"
         fi
         return 1
     fi
 
-    # Run full latency test
-    test_repo_latency "$repo_id" "$effective_url" "$test_path" "${curl_args[@]}"
-
-    case "$LATENCY_RESULT" in
-        failed)
-            fail "$repo_id: latency test failed${mirrored}"
-            return 1
-            ;;
-        high)
-            warn "$repo_id: HIGH latency avg=${LATENCY_AVG}ms (min=${LATENCY_MIN}ms max=${LATENCY_MAX}ms)${mirrored}${auth_info}"
-            info "Consider using a closer mirror"
-            ;;
-        elevated)
-            pass "$repo_id: avg=${LATENCY_AVG}ms (min=${LATENCY_MIN}ms max=${LATENCY_MAX}ms)${mirrored}${auth_info}"
-            info "Latency slightly elevated"
-            ;;
-        *)
-            pass "$repo_id: avg=${LATENCY_AVG}ms (min=${LATENCY_MIN}ms max=${LATENCY_MAX}ms)${mirrored}${auth_info}"
-            ;;
-    esac
-    return 0
+    # Run comprehensive latency test
+    run_comprehensive_latency_test "$display_name" "$effective_url" "${curl_args[@]}"
 }
 
 # Test all discovered repositories

@@ -105,6 +105,8 @@ mass-ingest-example/
 │
 └── diagnostics/          # Comprehensive diagnostic system
     ├── diagnose.sh       # Main script with shared functions
+    ├── lib/              # Shared libraries
+    │   └── latency.sh    # Latency and throughput testing
     └── checks/           # Modular check scripts
         ├── system.sh     # CPUs, memory, disk space
         ├── tools.sh      # git, curl, jq, etc.
@@ -117,7 +119,7 @@ mass-ingest-example/
         ├── ssl.sh        # SSL handshakes, cert expiry
         ├── auth-publish.sh # Write/read/delete test
         ├── auth-scm.sh   # Test clone with timeout
-        ├── publish-latency.sh # Throughput and rate limiting
+        ├── publish-latency.sh # Publish URL latency and throttling
         ├── maven-repos.sh # Maven repos from settings.xml
         └── dependency-repos.sh # User-specified repos (Gradle, etc.)
 ```
@@ -357,22 +359,36 @@ Generated: 2025-01-20 14:32 UTC
        Cleaned up test clone
 
 === Publish latency ===
-       Running sequential latency test (10 requests)...
+       Testing PUBLISH_URL (10 sequential requests)...
        Sequential: min=23ms avg=45ms max=89ms
-[PASS] Average latency: 45ms
-       Running parallel throughput test (3 × 100 concurrent)...
-       Parallel batches: 1250ms, 1180ms, 1320ms (avg 12ms/req)
-[PASS] Parallel throughput: 12ms/request
+[PASS] PUBLISH_URL: average latency 45ms
+       Testing PUBLISH_URL (3 × 20 concurrent)...
+       Parallel batches: 850ms, 820ms, 890ms
+[PASS] PUBLISH_URL: parallel throughput 42ms/request
 
 === Maven repositories ===
        Using: /root/.m2/settings.xml
-[PASS] central: avg=42ms (min=38ms max=67ms)
-[PASS] internal-nexus: avg=18ms (min=15ms max=24ms) (via mirror: nexus-mirror) (with auth)
+       Testing central (10 sequential requests)...
+       Sequential: min=38ms avg=42ms max=67ms
+[PASS] central: average latency 42ms
+       Testing central (3 × 20 concurrent)...
+       Parallel batches: 920ms, 880ms, 950ms
+[PASS] central: parallel throughput 45ms/request
+       Testing internal-nexus (via mirror: nexus-mirror) (10 sequential requests)...
+       Sequential: min=15ms avg=18ms max=24ms
+[PASS] internal-nexus (via mirror: nexus-mirror): average latency 18ms
+       Testing internal-nexus (via mirror: nexus-mirror) (3 × 20 concurrent)...
+       Parallel batches: 380ms, 350ms, 390ms
+[PASS] internal-nexus (via mirror: nexus-mirror): parallel throughput 18ms/request
 
 === Dependency repositories ===
        Using: ./dependency-repos.csv
-[PASS] nexus.example.com: avg=23ms (min=19ms max=31ms) (basic auth)
-[PASS] repo.spring.io: avg=67ms (min=52ms max=98ms)
+       Testing nexus.example.com (10 sequential requests)...
+       Sequential: min=19ms avg=23ms max=31ms
+[PASS] nexus.example.com: average latency 23ms
+       Testing nexus.example.com (3 × 20 concurrent)...
+       Parallel batches: 480ms, 450ms, 510ms
+[PASS] nexus.example.com: parallel throughput 24ms/request
 
 ========================================
 RESULT: 1 failure(s), 0 warning(s), 24 passed
