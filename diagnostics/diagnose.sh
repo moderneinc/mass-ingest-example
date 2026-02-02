@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #
 # Mass-ingest comprehensive diagnostics
 #
@@ -16,9 +16,15 @@
 #   ./diagnostics/checks/cli.sh
 #   etc.
 
-# Note: pipefail would be nice but isn't POSIX
+set -o pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Check for bash (required for these scripts)
+if [[ -z "$BASH_VERSION" ]]; then
+    echo "Error: bash is required. Install with: apk add bash (Alpine) or apt install bash (Debian)"
+    exit 1
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECKS_DIR="$SCRIPT_DIR/checks"
 
 # Mode flags
@@ -55,13 +61,13 @@ WARN_COUNT=0
 FAIL_COUNT=0
 
 # Source the core library
-. "$SCRIPT_DIR/lib/core.sh"
+source "$SCRIPT_DIR/lib/core.sh"
 
 ################################################################################
 # Main execution (skip if --functions-only)
 ################################################################################
 
-if [ "$FUNCTIONS_ONLY" = true ]; then
+if [[ "$FUNCTIONS_ONLY" == true ]]; then
     return 0 2>/dev/null || exit 0
 fi
 
@@ -80,10 +86,10 @@ echo "Generated: $(date '+%Y-%m-%d %H:%M %Z')"
 
 # Run checks
 run_check() {
-    check="$1"
-    script="$CHECKS_DIR/$check.sh"
-    if [ -f "$script" ]; then
-        . "$script"
+    local check="$1"
+    local script="$CHECKS_DIR/$check.sh"
+    if [[ -f "$script" ]]; then
+        source "$script"
     else
         printf "%b[SKIP]%b Check not found: %s\n" "$YELLOW" "$NC" "$check"
     fi

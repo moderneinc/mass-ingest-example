@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # SCM repository connectivity checks: git ls-remote latency per origin
 #
 # Tests git connectivity to each unique SCM origin by running git ls-remote.
@@ -9,7 +9,7 @@
 
 # Source shared functions if run directly
 if [ -z "$SCRIPT_DIR" ]; then
-    . "$(dirname "$0")/../lib/core.sh"
+    source "$(dirname "$0")/../lib/core.sh"
 fi
 
 section "SCM repositories"

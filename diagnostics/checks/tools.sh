@@ -1,9 +1,9 @@
-#!/bin/sh
+#!/bin/bash
 # Required tools checks: git, curl, jq, unzip, tar
 
 # Source shared functions if run directly
 if [ -z "$SCRIPT_DIR" ]; then
-    . "$(dirname "$0")/../lib/core.sh"
+    source "$(dirname "$0")/../lib/core.sh"
 fi
 
 section "Required tools"

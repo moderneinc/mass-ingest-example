@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Core shared functions for diagnostics
 #
 # Provides fundamental utilities used across all diagnostic scripts:
@@ -8,7 +8,7 @@
 # - Byte formatting
 
 # Colors (disabled if not terminal or NO_COLOR set)
-if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
     GREEN='\033[0;32m'
     YELLOW='\033[1;33m'
     RED='\033[0;31m'
@@ -59,27 +59,26 @@ check_command() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Get current time in milliseconds (works on GNU and BusyBox date)
-# BusyBox/macOS date doesn't support %N, so we fall back to seconds precision
+# Get current time in milliseconds
+# GNU date supports %N for nanoseconds, macOS doesn't (falls back to seconds)
 get_time_ms() {
+    local time_ns
     time_ns=$(date +%s%N 2>/dev/null)
-    # Check if we got nanoseconds (length > 10) using expr
-    if [ "$(expr "$time_ns" : '.*')" -gt 10 ] 2>/dev/null; then
-        # Extract first 13 chars for milliseconds using cut
-        echo "$time_ns" | cut -c1-13
+    if [[ ${#time_ns} -gt 10 ]]; then
+        echo "${time_ns:0:13}"
     else
         echo "$(($(date +%s) * 1000))"
     fi
 }
 
-# Format bytes to human readable (uses awk for portability)
+# Format bytes to human readable
 format_bytes() {
     local bytes=$1
-    if [ "$bytes" -ge 1073741824 ]; then
+    if (( bytes >= 1073741824 )); then
         awk "BEGIN {printf \"%.1fGB\", $bytes / 1073741824}"
-    elif [ "$bytes" -ge 1048576 ]; then
+    elif (( bytes >= 1048576 )); then
         awk "BEGIN {printf \"%.1fMB\", $bytes / 1048576}"
-    elif [ "$bytes" -ge 1024 ]; then
+    elif (( bytes >= 1024 )); then
         awk "BEGIN {printf \"%.1fKB\", $bytes / 1024}"
     else
         echo "${bytes}B"

@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # repos.csv checks: file exists, parseable, columns, origins, counts
 #
 # Provides a structured summary of the repos.csv file for diagnostics.
@@ -6,7 +6,7 @@
 
 # Source shared functions if run directly
 if [ -z "$SCRIPT_DIR" ]; then
-    . "$(dirname "$0")/../lib/core.sh"
+    source "$(dirname "$0")/../lib/core.sh"
 fi
 
 section "repos.csv"

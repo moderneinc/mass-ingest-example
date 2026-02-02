@@ -1,9 +1,9 @@
-#!/bin/sh
+#!/bin/bash
 # Network checks: connectivity to configured endpoints
 
 # Source shared functions if run directly
 if [ -z "$SCRIPT_DIR" ]; then
-    . "$(dirname "$0")/../lib/core.sh"
+    source "$(dirname "$0")/../lib/core.sh"
 fi
 
 section "Network"

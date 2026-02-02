@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Dependency repository checks: connectivity to user-specified repositories
 #
 # Tests connectivity and latency to dependency repositories listed in a CSV file.
@@ -18,11 +18,11 @@
 
 # Source shared functions if run directly
 if [ -z "$SCRIPT_DIR" ]; then
-    . "$(dirname "$0")/../lib/core.sh"
+    source "$(dirname "$0")/../lib/core.sh"
 fi
 
 # Source latency testing library
-. "${SCRIPT_DIR:-$(dirname "$0")/..}/lib/latency.sh"
+source "${SCRIPT_DIR:-$(dirname "$0")/..}/lib/latency.sh"
 
 section "Dependency repositories"
 

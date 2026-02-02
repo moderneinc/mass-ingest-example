@@ -1,9 +1,9 @@
-#!/bin/sh
+#!/bin/bash
 # SSL/Certificate checks for configured endpoints
 
 # Source shared functions if run directly
 if [ -z "$SCRIPT_DIR" ]; then
-    . "$(dirname "$0")/../lib/core.sh"
+    source "$(dirname "$0")/../lib/core.sh"
 fi
 
 section "SSL/Certificates"

@@ -1,9 +1,9 @@
-#!/bin/sh
+#!/bin/bash
 # System checks: CPU, memory, disk space
 
 # Source shared functions if run directly
 if [ -z "$SCRIPT_DIR" ]; then
-    . "$(dirname "$0")/../lib/core.sh"
+    source "$(dirname "$0")/../lib/core.sh"
 fi
 
 section "System"
