@@ -103,7 +103,7 @@ mass-ingest-example/
 │   │   └── outputs.tf
 │   └── README.md
 │
-└── diagnostics/          # Comprehensive diagnostic system (requires bash)
+└── diagnostics/          # Comprehensive diagnostic system
     ├── diagnose.sh       # Main orchestration script
     ├── lib/              # Shared libraries
     │   ├── core.sh       # Colors, output formatting, utilities
@@ -148,7 +148,9 @@ Before starting with any stage, you'll need:
 
 4. **Docker**: Installed and running (for stages 1 and 2)
 
-5. **AWS account**: Required only for stage 3
+5. **Bash**: Required in the container image (Alpine users: `apk add bash`)
+
+6. **AWS account**: Required only for stage 3
 
 ## Quick comparison
 
@@ -225,8 +227,6 @@ We provide scripts to generate `repos.csv` from various sources:
 ## Diagnostics
 
 The `diagnostics/` directory contains a comprehensive diagnostic system to validate your mass-ingest setup before starting ingestion.
-
-> **Note:** Diagnostic scripts require **bash**. On Alpine-based images, install with `apk add bash`.
 
 ### Diagnostic mode (full validation)
 
