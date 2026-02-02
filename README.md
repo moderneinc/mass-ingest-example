@@ -103,9 +103,10 @@ mass-ingest-example/
 │   │   └── outputs.tf
 │   └── README.md
 │
-└── diagnostics/          # Comprehensive diagnostic system
-    ├── diagnose.sh       # Main script with shared functions
+└── diagnostics/          # Comprehensive diagnostic system (requires bash)
+    ├── diagnose.sh       # Main orchestration script
     ├── lib/              # Shared libraries
+    │   ├── core.sh       # Colors, output formatting, utilities
     │   └── latency.sh    # Latency and throughput testing
     └── checks/           # Modular check scripts
         ├── system.sh     # CPUs, memory, disk space
@@ -118,10 +119,11 @@ mass-ingest-example/
         ├── network.sh    # Connectivity to all hosts
         ├── ssl.sh        # SSL handshakes, cert expiry
         ├── auth-publish.sh # Write/read/delete test
-        ├── auth-scm.sh   # Test clone with timeout
+        ├── auth-scm.sh   # Test clone, .git-credentials checks
         ├── publish-latency.sh # Publish URL latency and throttling
         ├── maven-repos.sh # Maven repos from settings.xml
-        └── dependency-repos.sh # User-specified repos (Gradle, etc.)
+        ├── dependency-repos.sh # User-specified repos (Gradle, etc.)
+        └── scm-repos.sh  # SCM connectivity per origin
 ```
 
 ## Prerequisites (all stages)
@@ -224,6 +226,8 @@ We provide scripts to generate `repos.csv` from various sources:
 
 The `diagnostics/` directory contains a comprehensive diagnostic system to validate your mass-ingest setup before starting ingestion.
 
+> **Note:** Diagnostic scripts require **bash**. On Alpine-based images, install with `apk add bash`.
+
 ### Diagnostic mode (full validation)
 
 Run comprehensive diagnostics without starting ingestion:
@@ -246,6 +250,7 @@ This validates the entire setup and produces a detailed report:
 - Publish latency (throughput testing, rate limit detection)
 - Maven repositories (dependency repo connectivity from settings.xml)
 - Dependency repositories (user-specified repos from dependency-repos.csv)
+- SCM repositories (connectivity testing per origin from repos.csv)
 
 The container exits with code 0 if all checks pass, or 1 if any failures are detected.
 
