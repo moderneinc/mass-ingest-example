@@ -2,14 +2,14 @@
 # Authentication checks for publish URL: write, read, overwrite, delete test
 
 # Source shared functions if run directly
-if [ -z "$SCRIPT_DIR" ]; then
+if [[ -z "$SCRIPT_DIR" ]]; then
     source "$(dirname "$0")/../lib/core.sh"
 fi
 
 section "Authentication - Publish"
 
 # Skip if no publish URL
-if [ -z "${PUBLISH_URL:-}" ]; then
+if [[ -z "${PUBLISH_URL:-}" ]]; then
     info "Skipped: PUBLISH_URL not configured"
     return 0 2>/dev/null || exit 0
 fi
@@ -25,9 +25,9 @@ case "$PUBLISH_URL" in
 
             # Build S3 options
             S3_CMD_BASE="aws s3"
-            [ -n "${S3_PROFILE:-}" ] && S3_CMD_BASE="$S3_CMD_BASE --profile $S3_PROFILE"
-            [ -n "${S3_REGION:-}" ] && S3_CMD_BASE="$S3_CMD_BASE --region $S3_REGION"
-            [ -n "${S3_ENDPOINT:-}" ] && S3_CMD_BASE="$S3_CMD_BASE --endpoint-url $S3_ENDPOINT"
+            [[ -n "${S3_PROFILE:-}" ]] && S3_CMD_BASE="$S3_CMD_BASE --profile $S3_PROFILE"
+            [[ -n "${S3_REGION:-}" ]] && S3_CMD_BASE="$S3_CMD_BASE --region $S3_REGION"
+            [[ -n "${S3_ENDPOINT:-}" ]] && S3_CMD_BASE="$S3_CMD_BASE --endpoint-url $S3_ENDPOINT"
 
             # Write test
             if eval "$S3_CMD_BASE cp \"$TEST_FILE\" \"$PUBLISH_URL/$TEST_KEY\"" >/dev/null 2>&1; then
@@ -62,18 +62,18 @@ case "$PUBLISH_URL" in
 esac
 
 # HTTP(S) publish URL tests
-# Build auth options
-CURL_AUTH=""
+# Build auth options as array (safe for special characters in credentials)
+CURL_AUTH=()
 HAS_CREDS=false
-if [ -n "${PUBLISH_USER:-}" ] && [ -n "${PUBLISH_PASSWORD:-}" ]; then
-    CURL_AUTH="-u ${PUBLISH_USER}:${PUBLISH_PASSWORD}"
+if [[ -n "${PUBLISH_USER:-}" ]] && [[ -n "${PUBLISH_PASSWORD:-}" ]]; then
+    CURL_AUTH+=(-u "${PUBLISH_USER}:${PUBLISH_PASSWORD}")
     HAS_CREDS=true
-elif [ -n "${PUBLISH_TOKEN:-}" ]; then
-    CURL_AUTH="-H \"Authorization: Bearer ${PUBLISH_TOKEN}\""
+elif [[ -n "${PUBLISH_TOKEN:-}" ]]; then
+    CURL_AUTH+=(-H "Authorization: Bearer ${PUBLISH_TOKEN}")
     HAS_CREDS=true
 fi
 
-if [ "$HAS_CREDS" = false ]; then
+if [[ "$HAS_CREDS" == false ]]; then
     warn "No credentials configured (PUBLISH_USER/PASSWORD or PUBLISH_TOKEN)"
     info "Testing anonymous access..."
 fi
@@ -85,7 +85,7 @@ TEST_CONTENT="diagnostic test $(date)"
 TEST_CONTENT2="diagnostic test update $(date)"
 
 # Write test
-WRITE_RESULT=$(eval "curl -s -o /dev/null -w '%{http_code}' $CURL_AUTH -X PUT \"$TEST_URL\" -d \"$TEST_CONTENT\"" 2>/dev/null)
+WRITE_RESULT=$(curl -s -o /dev/null -w '%{http_code}' "${CURL_AUTH[@]}" -X PUT "$TEST_URL" -d "$TEST_CONTENT" 2>/dev/null)
 case "$WRITE_RESULT" in
     2*)
         pass "Test write: succeeded (HTTP $WRITE_RESULT)"
@@ -98,7 +98,7 @@ case "$WRITE_RESULT" in
 esac
 
 # Read test
-READ_RESULT=$(eval "curl -s -o /dev/null -w '%{http_code}' $CURL_AUTH \"$TEST_URL\"" 2>/dev/null)
+READ_RESULT=$(curl -s -o /dev/null -w '%{http_code}' "${CURL_AUTH[@]}" "$TEST_URL" 2>/dev/null)
 case "$READ_RESULT" in
     2*)
         pass "Test read: succeeded (HTTP $READ_RESULT)"
@@ -109,7 +109,7 @@ case "$READ_RESULT" in
 esac
 
 # Overwrite test
-OVERWRITE_RESULT=$(eval "curl -s -o /dev/null -w '%{http_code}' $CURL_AUTH -X PUT \"$TEST_URL\" -d \"$TEST_CONTENT2\"" 2>/dev/null)
+OVERWRITE_RESULT=$(curl -s -o /dev/null -w '%{http_code}' "${CURL_AUTH[@]}" -X PUT "$TEST_URL" -d "$TEST_CONTENT2" 2>/dev/null)
 case "$OVERWRITE_RESULT" in
     2*)
         pass "Test overwrite: succeeded (HTTP $OVERWRITE_RESULT)"
@@ -121,7 +121,7 @@ case "$OVERWRITE_RESULT" in
 esac
 
 # Delete test (cleanup)
-DELETE_RESULT=$(eval "curl -s -o /dev/null -w '%{http_code}' $CURL_AUTH -X DELETE \"$TEST_URL\"" 2>/dev/null)
+DELETE_RESULT=$(curl -s -o /dev/null -w '%{http_code}' "${CURL_AUTH[@]}" -X DELETE "$TEST_URL" 2>/dev/null)
 case "$DELETE_RESULT" in
     2*)
         pass "Test delete: succeeded (HTTP $DELETE_RESULT)"

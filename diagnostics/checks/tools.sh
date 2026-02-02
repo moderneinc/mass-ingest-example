@@ -2,7 +2,7 @@
 # Required tools checks: git, curl, jq, unzip, tar
 
 # Source shared functions if run directly
-if [ -z "$SCRIPT_DIR" ]; then
+if [[ -z "$SCRIPT_DIR" ]]; then
     source "$(dirname "$0")/../lib/core.sh"
 fi
 
@@ -41,7 +41,7 @@ for tool in $REQUIRED_TOOLS; do
 done
 
 # Summary for missing tools
-if [ -n "$MISSING_TOOLS" ]; then
+if [[ -n "$MISSING_TOOLS" ]]; then
     info ""
     info "Missing tools can be installed with:"
     # Detect package manager

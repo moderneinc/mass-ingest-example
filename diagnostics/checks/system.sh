@@ -2,7 +2,7 @@
 # System checks: CPU, memory, disk space
 
 # Source shared functions if run directly
-if [ -z "$SCRIPT_DIR" ]; then
+if [[ -z "$SCRIPT_DIR" ]]; then
     source "$(dirname "$0")/../lib/core.sh"
 fi
 
@@ -11,7 +11,7 @@ section "System"
 # OS info
 OS_NAME=""
 OS_VERSION=""
-if [ -f /etc/os-release ]; then
+if [[ -f /etc/os-release ]]; then
     OS_NAME=$(grep "^NAME=" /etc/os-release | cut -d= -f2 | tr -d '"')
     OS_VERSION=$(grep "^VERSION=" /etc/os-release | cut -d= -f2 | tr -d '"')
 elif check_command sw_vers; then
@@ -23,8 +23,8 @@ elif check_command uname; then
     OS_VERSION=$(uname -r)
 fi
 
-if [ -n "$OS_NAME" ]; then
-    if [ -n "$OS_VERSION" ]; then
+if [[ -n "$OS_NAME" ]]; then
+    if [[ -n "$OS_VERSION" ]]; then
         info "OS: $OS_NAME $OS_VERSION"
     else
         info "OS: $OS_NAME"
@@ -32,16 +32,16 @@ if [ -n "$OS_NAME" ]; then
 fi
 
 # Shell info - show the running shell (bash for these scripts)
-if [ -n "${BASH_VERSION:-}" ]; then
+if [[ -n "${BASH_VERSION:-}" ]]; then
     info "Shell: bash $BASH_VERSION"
-elif [ -n "${ZSH_VERSION:-}" ]; then
+elif [[ -n "${ZSH_VERSION:-}" ]]; then
     info "Shell: zsh $ZSH_VERSION"
 else
     info "Shell: $(basename "${SHELL:-sh}")"
 fi
 
 # CPU count
-if [ -f /proc/cpuinfo ]; then
+if [[ -f /proc/cpuinfo ]]; then
     CPU_COUNT=$(grep -c ^processor /proc/cpuinfo)
 elif check_command nproc; then
     CPU_COUNT=$(nproc)
@@ -51,8 +51,8 @@ else
     CPU_COUNT="0"
 fi
 
-if [ "$CPU_COUNT" -gt 0 ] 2>/dev/null; then
-    if [ "$CPU_COUNT" -lt 2 ]; then
+if [[ "$CPU_COUNT" -gt 0 ]] 2>/dev/null; then
+    if [[ "$CPU_COUNT" -lt 2 ]]; then
         fail "CPUs: $CPU_COUNT (minimum 2 required)"
     else
         pass "CPUs: $CPU_COUNT"
@@ -60,18 +60,18 @@ if [ "$CPU_COUNT" -gt 0 ] 2>/dev/null; then
 fi
 
 # Memory: total and available
-if [ -f /proc/meminfo ]; then
+if [[ -f /proc/meminfo ]]; then
     MEM_TOTAL_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
     MEM_AVAIL_KB=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
-    if [ -n "$MEM_TOTAL_KB" ] && [ -n "$MEM_AVAIL_KB" ]; then
+    if [[ -n "$MEM_TOTAL_KB" ]] && [[ -n "$MEM_AVAIL_KB" ]]; then
         MEM_TOTAL=$((MEM_TOTAL_KB * 1024))
         MEM_AVAIL=$((MEM_AVAIL_KB * 1024))
         MEM_TOTAL_HR=$(format_bytes "$MEM_TOTAL")
         MEM_AVAIL_HR=$(format_bytes "$MEM_AVAIL")
 
-        if [ "$MEM_TOTAL" -lt 17179869184 ]; then  # 16GB
+        if [[ "$MEM_TOTAL" -lt 17179869184 ]]; then  # 16GB
             warn "Memory: $MEM_AVAIL_HR / $MEM_TOTAL_HR available (recommend 16GB+)"
-        elif [ "$MEM_AVAIL" -lt 8589934592 ]; then  # 8GB available
+        elif [[ "$MEM_AVAIL" -lt 8589934592 ]]; then  # 8GB available
             warn "Memory: $MEM_AVAIL_HR / $MEM_TOTAL_HR available (low)"
         else
             pass "Memory: $MEM_AVAIL_HR / $MEM_TOTAL_HR available"
@@ -80,7 +80,7 @@ if [ -f /proc/meminfo ]; then
 elif check_command sysctl; then
     # macOS - get memory info via sysctl and vm_stat
     MEM_TOTAL=$(sysctl -n hw.memsize 2>/dev/null || echo "0")
-    if [ "$MEM_TOTAL" -gt 0 ] 2>/dev/null; then
+    if [[ "$MEM_TOTAL" -gt 0 ]] 2>/dev/null; then
         MEM_TOTAL_HR=$(format_bytes "$MEM_TOTAL")
 
         # Try to get available memory from vm_stat
@@ -96,18 +96,18 @@ elif check_command sysctl; then
             MEM_AVAIL=$((AVAIL_PAGES * PAGE_SIZE))
         fi
 
-        if [ -n "$MEM_AVAIL" ] && [ "$MEM_AVAIL" -gt 0 ] 2>/dev/null; then
+        if [[ -n "$MEM_AVAIL" ]] && [[ "$MEM_AVAIL" -gt 0 ]] 2>/dev/null; then
             MEM_AVAIL_HR=$(format_bytes "$MEM_AVAIL")
-            if [ "$MEM_TOTAL" -lt 17179869184 ]; then  # 16GB total
+            if [[ "$MEM_TOTAL" -lt 17179869184 ]]; then  # 16GB total
                 warn "Memory: $MEM_AVAIL_HR / $MEM_TOTAL_HR available (recommend 16GB+)"
-            elif [ "$MEM_AVAIL" -lt 8589934592 ]; then  # 8GB available
+            elif [[ "$MEM_AVAIL" -lt 8589934592 ]]; then  # 8GB available
                 warn "Memory: $MEM_AVAIL_HR / $MEM_TOTAL_HR available (low)"
             else
                 pass "Memory: $MEM_AVAIL_HR / $MEM_TOTAL_HR available"
             fi
         else
             # Fallback if vm_stat unavailable
-            if [ "$MEM_TOTAL" -lt 17179869184 ]; then  # 16GB
+            if [[ "$MEM_TOTAL" -lt 17179869184 ]]; then  # 16GB
                 warn "Memory: $MEM_TOTAL_HR (recommend 16GB+)"
             else
                 pass "Memory: $MEM_TOTAL_HR"
@@ -121,7 +121,7 @@ show_disk_space() {
     local dir="$1"
     local label="$2"
 
-    if [ ! -d "$dir" ]; then
+    if [[ ! -d "$dir" ]]; then
         return 1
     fi
 
@@ -141,11 +141,11 @@ show_disk_space() {
             DISK_FREE=$(($(echo "$df_output" | awk '{print $4}') * 512))
         fi
 
-        if [ -n "$DISK_FREE" ] && [ "$DISK_FREE" -gt 0 ]; then
+        if [[ -n "$DISK_FREE" ]] && [[ "$DISK_FREE" -gt 0 ]]; then
             DISK_TOTAL_HR=$(format_bytes "$DISK_TOTAL")
             DISK_FREE_HR=$(format_bytes "$DISK_FREE")
 
-            if [ "$DISK_FREE" -lt 10737418240 ]; then  # 10GB
+            if [[ "$DISK_FREE" -lt 10737418240 ]]; then  # 10GB
                 warn "$label: $DISK_FREE_HR / $DISK_TOTAL_HR available (low)"
             else
                 pass "$label: $DISK_FREE_HR / $DISK_TOTAL_HR available"
@@ -158,25 +158,25 @@ show_disk_space() {
 
 # Data directory disk space
 DATA_DIR="${DATA_DIR:-/var/moderne}"
-if [ -d "$DATA_DIR" ]; then
+if [[ -d "$DATA_DIR" ]]; then
     show_disk_space "$DATA_DIR" "Disk (data)"
 else
     # Show disk space for parent directory that exists
     PARENT_DIR=$(dirname "$DATA_DIR")
-    while [ ! -d "$PARENT_DIR" ] && [ "$PARENT_DIR" != "/" ]; do
+    while [[ ! -d "$PARENT_DIR" ]] && [[ "$PARENT_DIR" != "/" ]]; do
         PARENT_DIR=$(dirname "$PARENT_DIR")
     done
-    if [ -d "$PARENT_DIR" ]; then
+    if [[ -d "$PARENT_DIR" ]]; then
         show_disk_space "$PARENT_DIR" "Disk ($PARENT_DIR)"
     fi
 fi
 
 # Working directory disk space (if on different filesystem)
 WORK_DIR=$(pwd)
-if [ "$WORK_DIR" != "$DATA_DIR" ]; then
+if [[ "$WORK_DIR" != "$DATA_DIR" ]]; then
     DATA_FS=$(df "$DATA_DIR" 2>/dev/null | tail -1 | awk '{print $1}' || echo "")
     WORK_FS=$(df "$WORK_DIR" 2>/dev/null | tail -1 | awk '{print $1}' || echo "")
-    if [ "$DATA_FS" != "$WORK_FS" ] || [ -z "$DATA_FS" ]; then
+    if [[ "$DATA_FS" != "$WORK_FS" ]] || [[ -z "$DATA_FS" ]]; then
         show_disk_space "$WORK_DIR" "Disk (workdir)"
     fi
 fi

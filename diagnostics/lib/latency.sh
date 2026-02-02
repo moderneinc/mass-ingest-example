@@ -80,7 +80,7 @@ run_sequential_latency() {
     done
 
     LATENCY_MIN=${sorted[0]}
-    LATENCY_MAX=${sorted[-1]}
+    LATENCY_MAX=${sorted[$((${#sorted[@]} - 1))]}
     LATENCY_AVG=$((sum / ${#latencies[@]}))
 
     # Throttling detection: compare first 5 vs last 5
@@ -88,7 +88,7 @@ run_sequential_latency() {
         local first5_sum=0 last5_sum=0
         for i in {0..4}; do
             ((first5_sum += latencies[i]))
-            ((last5_sum += latencies[9-4+i]))
+            ((last5_sum += latencies[5 + i]))  # indices 5,6,7,8,9 = last 5
         done
         local first5_avg=$((first5_sum / 5))
         local last5_avg=$((last5_sum / 5))

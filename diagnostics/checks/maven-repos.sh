@@ -9,7 +9,7 @@
 #   SKIP_MAVEN_REPOS     Skip this check entirely
 
 # Source shared functions if run directly
-if [ -z "$SCRIPT_DIR" ]; then
+if [[ -z "$SCRIPT_DIR" ]]; then
     source "$(dirname "$0")/../lib/core.sh"
 fi
 
@@ -19,7 +19,7 @@ source "${SCRIPT_DIR:-$(dirname "$0")/..}/lib/latency.sh"
 section "Maven repositories"
 
 # Allow skipping
-if [ "${SKIP_MAVEN_REPOS:-}" = "true" ]; then
+if [[ "${SKIP_MAVEN_REPOS:-}" == "true" ]]; then
     info "Skipped: SKIP_MAVEN_REPOS=true"
     return 0 2>/dev/null || exit 0
 fi
@@ -44,7 +44,7 @@ find_settings_xml() {
         "/app/maven/settings.xml" \
         "./maven/settings.xml"
     do
-        if [ -n "$path" ] && [ -f "$path" ]; then
+        if [[ -n "$path" ]] && [[ -f "$path" ]]; then
             echo "$path"
             return 0
         fi
@@ -63,34 +63,35 @@ xml_value() {
 
 # Test a repository URL
 test_maven_repo() {
-    name="$1"
-    url="$2"
-    user="${3:-}"
-    pass="${4:-}"
+    local name="$1"
+    local url="$2"
+    local user="${3:-}"
+    local repo_pass="${4:-}"
 
-    curl_auth=""
-    if [ -n "$user" ] && [ -n "$pass" ]; then
-        case "$pass" in
+    local -a curl_auth=()
+    if [[ -n "$user" ]] && [[ -n "$repo_pass" ]]; then
+        case "$repo_pass" in
             '{'*'}')
                 info "$name: encrypted password detected (skipping auth test)"
                 ;;
             *)
-                curl_auth="-u ${user}:${pass}"
+                curl_auth+=(-u "${user}:${repo_pass}")
                 ;;
         esac
     fi
 
     # Quick connectivity check
-    test_url="${url%/}/org/apache/maven/plugins/maven-metadata.xml"
-    http_code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 $curl_auth "$test_url" 2>/dev/null)
+    local test_url="${url%/}/org/apache/maven/plugins/maven-metadata.xml"
+    local http_code curl_exit
+    http_code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 "${curl_auth[@]}" "$test_url" 2>/dev/null)
     curl_exit=$?
 
-    if [ $curl_exit -ne 0 ] || [ "$http_code" = "000" ]; then
+    if [[ $curl_exit -ne 0 ]] || [[ "$http_code" == "000" ]]; then
         fail "$name: unreachable"
         info "URL: $url"
         return 1
-    elif [ "$http_code" = "401" ] || [ "$http_code" = "403" ]; then
-        if [ -n "$user" ]; then
+    elif [[ "$http_code" == "401" ]] || [[ "$http_code" == "403" ]]; then
+        if [[ -n "$user" ]]; then
             fail "$name: authentication failed (HTTP $http_code)"
         else
             warn "$name: requires authentication (HTTP $http_code)"
@@ -108,7 +109,7 @@ info "Testing Maven Central..."
 test_maven_repo "central" "https://repo.maven.apache.org/maven2"
 
 # Parse settings.xml if found
-if [ -n "$SETTINGS_XML" ]; then
+if [[ -n "$SETTINGS_XML" ]]; then
     info ""
     info "Parsing: $SETTINGS_XML"
 
@@ -120,19 +121,19 @@ if [ -n "$SETTINGS_XML" ]; then
 
     # Extract mirrors - look for mirrorOf containing * or "central"
     echo "$SETTINGS_CONTENT" | sed 's/<mirror>/\n<mirror>/g' | grep '<mirror>' | while IFS= read -r mirror_block; do
-        [ -z "$mirror_block" ] && continue
+        [[ -z "$mirror_block" ]] && continue
         mirror_of=$(xml_value "mirrorOf" "$mirror_block")
-        if [ "$mirror_of" = "*" ] || [ "$mirror_of" = "central" ]; then
+        if [[ "$mirror_of" == "*" ]] || [[ "$mirror_of" == "central" ]]; then
             mirror_url=$(xml_value "url" "$mirror_block")
             mirror_id=$(xml_value "id" "$mirror_block")
-            if [ -n "$mirror_url" ]; then
+            if [[ -n "$mirror_url" ]]; then
                 echo "$mirror_id|$mirror_url"
             fi
             break
         fi
     done | head -1 | {
         IFS='|' read -r MIRROR_ALL_ID MIRROR_ALL_URL
-        if [ -n "$MIRROR_ALL_URL" ]; then
+        if [[ -n "$MIRROR_ALL_URL" ]]; then
             info ""
             info "Mirror configured: $MIRROR_ALL_ID"
             test_maven_repo "$MIRROR_ALL_ID (mirror)" "$MIRROR_ALL_URL"
@@ -142,14 +143,14 @@ if [ -n "$SETTINGS_XML" ]; then
     # Extract repository URLs from profiles (simplified - just grab URLs)
     REPO_URLS=$(echo "$SETTINGS_CONTENT" | sed 's/<repository>/\n<repository>/g' | grep '<repository>' | while read -r block; do
         url=$(xml_value "url" "$block")
-        [ -n "$url" ] && echo "$url"
+        [[ -n "$url" ]] && echo "$url"
     done | sort -u | grep -v "repo.maven.apache.org" | head -5)
 
-    if [ -n "$REPO_URLS" ]; then
+    if [[ -n "$REPO_URLS" ]]; then
         info ""
         info "Additional repositories from profiles:"
         echo "$REPO_URLS" | while read -r url; do
-            [ -z "$url" ] && continue
+            [[ -z "$url" ]] && continue
             # Extract host for display name
             name=$(echo "$url" | sed 's|.*://||' | cut -d/ -f1)
             test_maven_repo "$name" "$url"

@@ -31,7 +31,7 @@ CHECKS_DIR="$SCRIPT_DIR/checks"
 FUNCTIONS_ONLY=false
 
 # Parse arguments
-while [ $# -gt 0 ]; do
+while [[ $# -gt 0 ]]; do
     case $1 in
         --functions-only)
             FUNCTIONS_ONLY=true
@@ -84,6 +84,13 @@ echo ""
 printf "%bMass-ingest Diagnostics%b\n" "$BOLD" "$NC"
 echo "Generated: $(date '+%Y-%m-%d %H:%M %Z')"
 
+# Check for millisecond timing support (GNU date with %N)
+_test_time=$(date +%s%N 2>/dev/null)
+if [[ ${#_test_time} -le 10 ]]; then
+    warn "Millisecond timing unavailable (install coreutils for accurate latency measurements)"
+fi
+unset _test_time
+
 # Run checks
 run_check() {
     local check="$1"
@@ -131,9 +138,9 @@ DIAG_DURATION=$((DIAG_END - DIAG_START))
 # Print summary
 echo ""
 echo "========================================"
-if [ "$FAIL_COUNT" -gt 0 ]; then
+if [[ "$FAIL_COUNT" -gt 0 ]]; then
     printf "%bRESULT:%b %b%d failure(s)%b, %b%d warning(s)%b, %b%d passed%b\n" "$BOLD" "$NC" "$RED" "$FAIL_COUNT" "$NC" "$YELLOW" "$WARN_COUNT" "$NC" "$GREEN" "$PASS_COUNT" "$NC"
-elif [ "$WARN_COUNT" -gt 0 ]; then
+elif [[ "$WARN_COUNT" -gt 0 ]]; then
     printf "%bRESULT:%b %b%d warning(s)%b, %b%d passed%b\n" "$BOLD" "$NC" "$YELLOW" "$WARN_COUNT" "$NC" "$GREEN" "$PASS_COUNT" "$NC"
 else
     printf "%bRESULT:%b %bAll %d checks passed%b\n" "$BOLD" "$NC" "$GREEN" "$PASS_COUNT" "$NC"
@@ -143,7 +150,7 @@ echo "========================================"
 echo ""
 
 # Exit with appropriate code
-if [ "$FAIL_COUNT" -gt 0 ]; then
+if [[ "$FAIL_COUNT" -gt 0 ]]; then
     exit 1
 fi
 exit 0

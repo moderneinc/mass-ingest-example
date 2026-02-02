@@ -6,6 +6,7 @@
 # - Command checking
 # - Time measurement
 # - Byte formatting
+# - CSV column parsing
 
 # Colors (disabled if not terminal or NO_COLOR set)
 if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
@@ -117,6 +118,27 @@ check_dns() {
     fi
 
     return 1
+}
+
+# Get CSV column index by name (case-insensitive)
+# Requires $HEADER to be set to the CSV header line
+get_col_index() {
+    echo "$HEADER" | tr ',' '\n' | grep -ni "^$1$" | cut -d: -f1
+}
+
+# Find repos.csv file (checks REPOS_CSV env, /app/repos.csv, ./repos.csv)
+# Sets CSV_FILE variable and returns 0 if found, 1 if not
+find_repos_csv() {
+    CSV_FILE="${REPOS_CSV:-/app/repos.csv}"
+    if [[ ! -f "$CSV_FILE" ]]; then
+        CSV_FILE="repos.csv"
+    fi
+    [[ -f "$CSV_FILE" ]]
+}
+
+# Strip ANSI escape codes from input
+strip_ansi() {
+    sed 's/\x1b\[[0-9;]*m//g'
 }
 
 # Note: Functions are available to scripts that source this file directly.

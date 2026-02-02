@@ -54,12 +54,21 @@ if [[ -n "$GIT_CREDS_FILE" ]]; then
             continue
         fi
 
-        # Extract password: format is https://user:password@host
-        if [[ "$line" =~ ://[^:]+:([^@]+)@ ]]; then
-            password="${BASH_REMATCH[1]}"
-            # Check for chars that need escaping: / @ : and space
-            if [[ "$password" =~ [/:@\ ] ]]; then
-                NEEDS_ESCAPE=true
+        # Extract password using step-by-step parsing (handles @ in passwords, port numbers)
+        # Format: https://user:password@host[:port][/path]
+        # 1. Strip protocol prefix (https://, http://)
+        local without_proto="${line#*://}"
+        # 2. Get the userinfo part (everything before the last @)
+        #    Using parameter expansion: remove shortest match from end
+        if [[ "$without_proto" == *@* ]]; then
+            local userinfo="${without_proto%@*}"
+            # 3. Extract password (everything after first :)
+            if [[ "$userinfo" == *:* ]]; then
+                local password="${userinfo#*:}"
+                # Check for chars that need escaping: / @ : and space
+                if [[ "$password" =~ [/:@\ ] ]]; then
+                    NEEDS_ESCAPE=true
+                fi
             fi
         fi
     done < "$GIT_CREDS_FILE"
@@ -81,24 +90,14 @@ fi
 
 info ""
 
-# Find repos.csv
-CSV_FILE="${REPOS_CSV:-/app/repos.csv}"
-if [[ ! -f "$CSV_FILE" ]]; then
-    CSV_FILE="repos.csv"
-fi
-
-if [[ ! -f "$CSV_FILE" ]]; then
+# Find repos.csv (find_repos_csv from core.sh)
+if ! find_repos_csv; then
     info "Skipped: repos.csv not found"
     return 0 2>/dev/null || exit 0
 fi
 
-# Parse header to find column indices
+# Parse header to find column indices (get_col_index from core.sh)
 HEADER=$(head -1 "$CSV_FILE")
-
-# Get column index by name (case-insensitive)
-get_col_index() {
-    echo "$HEADER" | tr ',' '\n' | grep -ni "^$1$" | cut -d: -f1
-}
 
 CLONEURL_COL=$(get_col_index "cloneUrl")
 BRANCH_COL=$(get_col_index "branch")

@@ -2,22 +2,22 @@
 # Network checks: connectivity to configured endpoints
 
 # Source shared functions if run directly
-if [ -z "$SCRIPT_DIR" ]; then
+if [[ -z "$SCRIPT_DIR" ]]; then
     source "$(dirname "$0")/../lib/core.sh"
 fi
 
 section "Network"
 
 # Check PUBLISH_URL connectivity (auth tested separately in auth-publish)
-if [ -n "${PUBLISH_URL:-}" ]; then
+if [[ -n "${PUBLISH_URL:-}" ]]; then
     case "$PUBLISH_URL" in
         s3://*)
             if check_command aws; then
                 # Build S3 options
                 S3_CMD="aws s3 ls $PUBLISH_URL --max-items 1"
-                [ -n "${S3_PROFILE:-}" ] && S3_CMD="$S3_CMD --profile $S3_PROFILE"
-                [ -n "${S3_REGION:-}" ] && S3_CMD="$S3_CMD --region $S3_REGION"
-                [ -n "${S3_ENDPOINT:-}" ] && S3_CMD="$S3_CMD --endpoint-url $S3_ENDPOINT"
+                [[ -n "${S3_PROFILE:-}" ]] && S3_CMD="$S3_CMD --profile $S3_PROFILE"
+                [[ -n "${S3_REGION:-}" ]] && S3_CMD="$S3_CMD --region $S3_REGION"
+                [[ -n "${S3_ENDPOINT:-}" ]] && S3_CMD="$S3_CMD --endpoint-url $S3_ENDPOINT"
 
                 if eval "$S3_CMD" >/dev/null 2>&1; then
                     pass "PUBLISH_URL: $PUBLISH_URL (S3 accessible)"
@@ -36,7 +36,7 @@ if [ -n "${PUBLISH_URL:-}" ]; then
             END=$(get_time_ms)
             LATENCY=$((END - START))
 
-            if [ $CURL_EXIT -ne 0 ] || [ "$HTTP_CODE" = "000" ]; then
+            if [[ $CURL_EXIT -ne 0 ]] || [[ "$HTTP_CODE" == "000" ]]; then
                 fail "PUBLISH_URL: unreachable (connection failed or DNS error)"
                 info "Check network connectivity and DNS resolution"
             else
@@ -56,28 +56,22 @@ else
     warn "PUBLISH_URL: not set"
 fi
 
-# Check SCM hosts from repos.csv
-CSV_FILE="${REPOS_CSV:-/app/repos.csv}"
-if [ ! -f "$CSV_FILE" ]; then
-    CSV_FILE="repos.csv"
-fi
-
-if [ -f "$CSV_FILE" ]; then
-    # Find cloneUrl column dynamically
+# Check SCM hosts from repos.csv (find_repos_csv, get_col_index from core.sh)
+if find_repos_csv; then
     HEADER=$(head -1 "$CSV_FILE")
-    CLONEURL_COL=$(echo "$HEADER" | tr ',' '\n' | grep -ni "^cloneUrl$" | cut -d: -f1)
+    CLONEURL_COL=$(get_col_index "cloneUrl")
 
-    if [ -n "$CLONEURL_COL" ]; then
+    if [[ -n "$CLONEURL_COL" ]]; then
         HOSTS=$(tail -n +2 "$CSV_FILE" | cut -d',' -f"$CLONEURL_COL" | sed 's|.*://||' | cut -d/ -f1 | cut -d@ -f2 | sort -u | head -10)
     else
         HOSTS=""
     fi
 
-    if [ -n "$HOSTS" ]; then
+    if [[ -n "$HOSTS" ]]; then
         info ""
         info "SCM hosts (from repos.csv):"
         for host in $HOSTS; do
-            if [ -n "$host" ]; then
+            if [[ -n "$host" ]]; then
                 # Check DNS first for clearer error messages
                 if ! check_dns "$host"; then
                     fail "$host: DNS resolution failed"
@@ -91,7 +85,7 @@ if [ -f "$CSV_FILE" ]; then
                 END=$(get_time_ms)
                 LATENCY=$((END - START))
 
-                if [ $CURL_EXIT -ne 0 ] || [ "$HTTP_CODE" = "000" ]; then
+                if [[ $CURL_EXIT -ne 0 ]] || [[ "$HTTP_CODE" == "000" ]]; then
                     fail "$host: connection failed"
                     info "Host resolves but connection failed - check firewall or service availability"
                 else
@@ -110,11 +104,11 @@ if [ -f "$CSV_FILE" ]; then
 fi
 
 # Proxy info (env vars)
-if [ -n "${http_proxy:-}" ] || [ -n "${HTTP_PROXY:-}" ] || [ -n "${https_proxy:-}" ] || [ -n "${HTTPS_PROXY:-}" ]; then
+if [[ -n "${http_proxy:-}" ]] || [[ -n "${HTTP_PROXY:-}" ]] || [[ -n "${https_proxy:-}" ]] || [[ -n "${HTTPS_PROXY:-}" ]]; then
     info ""
     info "Proxy configured:"
-    [ -n "${http_proxy:-}" ] && info "  http_proxy=$http_proxy"
-    [ -n "${HTTP_PROXY:-}" ] && info "  HTTP_PROXY=$HTTP_PROXY"
-    [ -n "${https_proxy:-}" ] && info "  https_proxy=$https_proxy"
-    [ -n "${HTTPS_PROXY:-}" ] && info "  HTTPS_PROXY=$HTTPS_PROXY"
+    [[ -n "${http_proxy:-}" ]] && info "  http_proxy=$http_proxy"
+    [[ -n "${HTTP_PROXY:-}" ]] && info "  HTTP_PROXY=$HTTP_PROXY"
+    [[ -n "${https_proxy:-}" ]] && info "  https_proxy=$https_proxy"
+    [[ -n "${HTTPS_PROXY:-}" ]] && info "  HTTPS_PROXY=$HTTPS_PROXY"
 fi

@@ -12,7 +12,7 @@
 #   LATENCY_TIMEOUT           Timeout per batch in seconds (default: 30)
 
 # Source shared functions if run directly
-if [ -z "$SCRIPT_DIR" ]; then
+if [[ -z "$SCRIPT_DIR" ]]; then
     source "$(dirname "$0")/../lib/core.sh"
 fi
 
@@ -22,12 +22,12 @@ source "${SCRIPT_DIR:-$(dirname "$0")/..}/lib/latency.sh"
 section "Publish latency"
 
 # Allow skipping this test
-if [ "${SKIP_LATENCY_TEST:-}" = "true" ]; then
+if [[ "${SKIP_LATENCY_TEST:-}" == "true" ]]; then
     info "Skipped: SKIP_LATENCY_TEST=true"
     return 0 2>/dev/null || exit 0
 fi
 
-if [ -z "${PUBLISH_URL:-}" ]; then
+if [[ -z "${PUBLISH_URL:-}" ]]; then
     info "Skipped: PUBLISH_URL not set"
     return 0 2>/dev/null || exit 0
 fi

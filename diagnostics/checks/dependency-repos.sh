@@ -17,7 +17,7 @@
 #   SKIP_DEPENDENCY_REPOS  Skip this check entirely
 
 # Source shared functions if run directly
-if [ -z "$SCRIPT_DIR" ]; then
+if [[ -z "$SCRIPT_DIR" ]]; then
     source "$(dirname "$0")/../lib/core.sh"
 fi
 
@@ -27,19 +27,19 @@ source "${SCRIPT_DIR:-$(dirname "$0")/..}/lib/latency.sh"
 section "Dependency repositories"
 
 # Allow skipping
-if [ "${SKIP_DEPENDENCY_REPOS:-}" = "true" ]; then
+if [[ "${SKIP_DEPENDENCY_REPOS:-}" == "true" ]]; then
     info "Skipped: SKIP_DEPENDENCY_REPOS=true"
     return 0 2>/dev/null || exit 0
 fi
 
-# Find the CSV file
-find_repos_csv() {
+# Find the dependency repos CSV file
+find_dependency_repos_csv() {
     for path in \
         "${DEPENDENCY_REPOS_CSV:-}" \
         "./dependency-repos.csv" \
         "/app/dependency-repos.csv"
     do
-        if [ -n "$path" ] && [ -f "$path" ]; then
+        if [[ -n "$path" ]] && [[ -f "$path" ]]; then
             echo "$path"
             return 0
         fi
@@ -47,22 +47,27 @@ find_repos_csv() {
     return 1
 }
 
-REPOS_CSV=$(find_repos_csv)
+DEP_REPOS_CSV=$(find_dependency_repos_csv)
 
-if [ -z "$REPOS_CSV" ]; then
+if [[ -z "$DEP_REPOS_CSV" ]]; then
     info "Skipped: No dependency-repos.csv found"
     info "Create dependency-repos.csv to test Gradle/Maven dependency repositories"
     return 0 2>/dev/null || exit 0
 fi
 
-info "Using: $REPOS_CSV"
+info "Using: $DEP_REPOS_CSV"
 
 # Expand environment variable references in a string
-# Supports ${VAR} syntax (limited POSIX-compatible implementation)
+# Supports ${VAR} syntax using safe bash indirect expansion
 expand_env_vars() {
-    value="$1"
-    # Use eval for simple env var expansion (handles ${VAR} syntax)
-    eval "echo \"$value\"" 2>/dev/null || echo "$value"
+    local value="$1"
+    # Match ${VAR} pattern and replace with env var value
+    while [[ "$value" =~ \$\{([^}]+)\} ]]; do
+        local var_name="${BASH_REMATCH[1]}"
+        local var_value="${!var_name:-}"
+        value="${value/\$\{$var_name\}/$var_value}"
+    done
+    echo "$value"
 }
 
 # Test a single repository with comprehensive latency measurement
@@ -77,13 +82,13 @@ test_repo() {
     password=$(expand_env_vars "$password")
     token=$(expand_env_vars "$token")
 
-    # Build curl auth args
-    curl_auth=""
+    # Build curl auth args as array (safe for special characters)
+    local -a curl_auth=()
 
-    if [ -n "$token" ]; then
-        curl_auth="-H \"Authorization: Bearer $token\""
-    elif [ -n "$username" ] && [ -n "$password" ]; then
-        curl_auth="-u ${username}:${password}"
+    if [[ -n "$token" ]]; then
+        curl_auth+=(-H "Authorization: Bearer $token")
+    elif [[ -n "$username" ]] && [[ -n "$password" ]]; then
+        curl_auth+=(-u "${username}:${password}")
     fi
 
     # Extract host for display
@@ -91,15 +96,15 @@ test_repo() {
 
     # Quick connectivity check first
     test_url="${url%/}/org/apache/maven/plugins/maven-metadata.xml"
-    http_code=$(eval "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 $curl_auth \"$test_url\"" 2>/dev/null)
+    http_code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 "${curl_auth[@]}" "$test_url" 2>/dev/null)
     curl_exit=$?
 
-    if [ $curl_exit -ne 0 ] || [ "$http_code" = "000" ]; then
+    if [[ $curl_exit -ne 0 ]] || [[ "$http_code" == "000" ]]; then
         fail "$host: unreachable"
         info "URL: $url"
         return 1
-    elif [ "$http_code" = "401" ] || [ "$http_code" = "403" ]; then
-        if [ -n "$username" ] || [ -n "$token" ]; then
+    elif [[ "$http_code" == "401" ]] || [[ "$http_code" == "403" ]]; then
+        if [[ -n "$username" ]] || [[ -n "$token" ]]; then
             fail "$host: authentication failed (HTTP $http_code)"
         else
             warn "$host: requires authentication (HTTP $http_code)"
@@ -116,14 +121,14 @@ test_repo() {
 REPO_COUNT=0
 HEADER_SKIPPED=false
 
-while IFS= read -r line || [ -n "$line" ]; do
+while IFS= read -r line || [[ -n "$line" ]]; do
     # Skip empty lines and comments
     case "$line" in
         ''|'#'*|' '*'#'*) continue ;;
     esac
 
     # Skip header row
-    if [ "$HEADER_SKIPPED" = false ]; then
+    if [[ "$HEADER_SKIPPED" == false ]]; then
         case "$line" in
             url,*) HEADER_SKIPPED=true; continue ;;
         esac
@@ -137,12 +142,12 @@ while IFS= read -r line || [ -n "$line" ]; do
     password=$(echo "$line" | cut -d',' -f3 | xargs)
     token=$(echo "$line" | cut -d',' -f4 | xargs)
 
-    if [ -n "$url" ]; then
+    if [[ -n "$url" ]]; then
         test_repo "$url" "$username" "$password" "$token"
         REPO_COUNT=$((REPO_COUNT + 1))
     fi
-done < "$REPOS_CSV"
+done < "$DEP_REPOS_CSV"
 
-if [ "$REPO_COUNT" -eq 0 ]; then
-    info "No repositories found in $REPOS_CSV"
+if [[ "$REPO_COUNT" -eq 0 ]]; then
+    info "No repositories found in $DEP_REPOS_CSV"
 fi
