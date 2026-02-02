@@ -57,7 +57,9 @@ run_sequential_latency() {
         local end=$(get_time_ms)
         local latency=$((end - start))
 
-        [[ "$http_code" == "429" ]] && ((HTTP_429_COUNT++))
+        if [[ "$http_code" == "429" ]]; then
+            ((HTTP_429_COUNT++))
+        fi
 
         # Accept any response that indicates the server responded
         if [[ "$http_code" =~ ^[2-5] ]]; then

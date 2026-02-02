@@ -94,8 +94,6 @@ while IFS='|' read -r origin clone_url; do
     if check_command timeout; then
         OUTPUT=$(GIT_TERMINAL_PROMPT=0 timeout 15 git ls-remote --heads "$clone_url" 2>&1)
         EXIT_CODE=$?
-        # timeout returns 124 on timeout
-        [ $EXIT_CODE -eq 124 ] && EXIT_CODE=124
     else
         OUTPUT=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads "$clone_url" 2>&1)
         EXIT_CODE=$?
