@@ -2,8 +2,8 @@
 # Moderne CLI checks
 
 # Source shared functions if run directly
-if [ -z "$SCRIPT_DIR" ]; then
-    source "$(dirname "$0")/../diagnose.sh" --functions-only
+if [[ -z "$SCRIPT_DIR" ]]; then
+    source "$(dirname "$0")/../lib/core.sh"
 fi
 
 section "Moderne CLI"
@@ -17,12 +17,7 @@ fi
 MOD_VERSION=$(mod --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown")
 pass "CLI installed: v$MOD_VERSION"
 
-# Helper to strip ANSI codes from output
-strip_ansi() {
-    sed 's/\x1b\[[0-9;]*m//g'
-}
-
-# Helper to parse mod config output and extract the configured value
+# Helper to parse mod config output and extract the configured value (strip_ansi from core.sh)
 parse_mod_config() {
     local output="$1"
     local clean
@@ -37,7 +32,7 @@ parse_mod_config() {
     # Look for the value line after "Set globally" or "Set for"
     local value
     value=$(echo "$clean" | grep -A1 "Set globally\|Set for" | tail -1 | sed 's/^[[:space:]]*//' | grep -v "^$" || echo "")
-    if [ -n "$value" ]; then
+    if [[ -n "$value" ]]; then
         echo "$value"
         return
     fi
@@ -56,7 +51,7 @@ if echo "$TRUST_CLEAN" | grep -q "no currently configured truststore"; then
     info "  Trust store: default JVM"
 else
     TRUST_FILE=$(echo "$TRUST_CLEAN" | grep -A1 "Set globally\|Set for" | tail -1 | sed 's/^[[:space:]]*//' || echo "")
-    if [ -n "$TRUST_FILE" ]; then
+    if [[ -n "$TRUST_FILE" ]]; then
         info "  Trust store: $TRUST_FILE"
     else
         info "  Trust store: custom"
@@ -78,7 +73,7 @@ LST_OUTPUT=$(mod config lsts artifacts show 2>&1)
 LST_CLEAN=$(echo "$LST_OUTPUT" | strip_ansi)
 if echo "$LST_CLEAN" | grep -qi "maven"; then
     LST_URL=$(echo "$LST_CLEAN" | grep -oE 'https?://[^ ]+' | head -1 || echo "")
-    if [ -n "$LST_URL" ]; then
+    if [[ -n "$LST_URL" ]]; then
         info "  LST artifacts: Maven ($LST_URL)"
     else
         info "  LST artifacts: Maven repository"
@@ -93,11 +88,11 @@ fi
 GRADLE_TIMEOUT=$(parse_mod_config "$(mod config build gradle timeout show 2>&1)")
 MAVEN_TIMEOUT=$(parse_mod_config "$(mod config build maven timeout show 2>&1)")
 
-if [ -n "$GRADLE_TIMEOUT" ] && [ -n "$MAVEN_TIMEOUT" ]; then
+if [[ -n "$GRADLE_TIMEOUT" ]] && [[ -n "$MAVEN_TIMEOUT" ]]; then
     info "  Build timeouts: Gradle $GRADLE_TIMEOUT, Maven $MAVEN_TIMEOUT"
-elif [ -n "$GRADLE_TIMEOUT" ]; then
+elif [[ -n "$GRADLE_TIMEOUT" ]]; then
     info "  Gradle timeout: $GRADLE_TIMEOUT"
-elif [ -n "$MAVEN_TIMEOUT" ]; then
+elif [[ -n "$MAVEN_TIMEOUT" ]]; then
     info "  Maven timeout: $MAVEN_TIMEOUT"
 else
     info "  Build timeouts: default"
@@ -105,9 +100,9 @@ fi
 
 # Java options
 JAVA_OPTS=$(parse_mod_config "$(mod config java options show 2>&1)")
-if [ -n "$JAVA_OPTS" ]; then
+if [[ -n "$JAVA_OPTS" ]]; then
     HEAP=$(echo "$JAVA_OPTS" | grep -oE '\-Xmx[0-9]+[gGmM]' | head -1 || echo "")
-    if [ -n "$HEAP" ]; then
+    if [[ -n "$HEAP" ]]; then
         info "  Java heap: $HEAP"
     else
         info "  Java options: custom"
@@ -116,13 +111,13 @@ fi
 
 # Gradle build arguments (only show if configured)
 GRADLE_ARGS=$(parse_mod_config "$(mod config build gradle arguments show 2>&1)")
-if [ -n "$GRADLE_ARGS" ]; then
+if [[ -n "$GRADLE_ARGS" ]]; then
     info "  Gradle arguments: $GRADLE_ARGS"
 fi
 
 # Maven build arguments (only show if configured)
 MAVEN_ARGS=$(parse_mod_config "$(mod config build maven arguments show 2>&1)")
-if [ -n "$MAVEN_ARGS" ]; then
+if [[ -n "$MAVEN_ARGS" ]]; then
     info "  Maven arguments: $MAVEN_ARGS"
 fi
 
@@ -131,7 +126,7 @@ MAVEN_SETTINGS_OUTPUT=$(mod config build maven settings show 2>&1)
 MAVEN_SETTINGS_CLEAN=$(echo "$MAVEN_SETTINGS_OUTPUT" | strip_ansi)
 if ! echo "$MAVEN_SETTINGS_CLEAN" | grep -q "No Maven settings"; then
     MAVEN_SETTINGS=$(parse_mod_config "$MAVEN_SETTINGS_OUTPUT")
-    if [ -n "$MAVEN_SETTINGS" ]; then
+    if [[ -n "$MAVEN_SETTINGS" ]]; then
         info "  Maven settings: $MAVEN_SETTINGS"
     fi
 fi

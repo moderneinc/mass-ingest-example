@@ -104,7 +104,10 @@ mass-ingest-example/
 │   └── README.md
 │
 └── diagnostics/          # Comprehensive diagnostic system
-    ├── diagnose.sh       # Main script with shared functions
+    ├── diagnose.sh       # Main orchestration script
+    ├── lib/              # Shared libraries
+    │   ├── core.sh       # Colors, output formatting, utilities
+    │   └── latency.sh    # Latency and throughput testing
     └── checks/           # Modular check scripts
         ├── system.sh     # CPUs, memory, disk space
         ├── tools.sh      # git, curl, jq, etc.
@@ -116,8 +119,11 @@ mass-ingest-example/
         ├── network.sh    # Connectivity to all hosts
         ├── ssl.sh        # SSL handshakes, cert expiry
         ├── auth-publish.sh # Write/read/delete test
-        ├── auth-scm.sh   # Test clone with timeout
-        └── publish-latency.sh # Throughput and rate limiting
+        ├── auth-scm.sh   # Test clone, .git-credentials checks
+        ├── publish-latency.sh # Publish URL latency and throttling
+        ├── maven-repos.sh # Maven repos from settings.xml
+        ├── dependency-repos.sh # User-specified repos (Gradle, etc.)
+        └── scm-repos.sh  # SCM connectivity per origin
 ```
 
 ## Prerequisites (all stages)
@@ -142,7 +148,9 @@ Before starting with any stage, you'll need:
 
 4. **Docker**: Installed and running (for stages 1 and 2)
 
-5. **AWS account**: Required only for stage 3
+5. **Bash**: Required in the container image (Alpine users: `apk add bash`)
+
+6. **AWS account**: Required only for stage 3
 
 ## Quick comparison
 
@@ -187,6 +195,24 @@ The `repos.csv` file must include:
 
 See [repos.csv documentation](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv) for advanced options.
 
+### Dependency repositories (optional)
+
+Create `dependency-repos.csv` to test connectivity to Maven/Gradle dependency repositories during diagnostics:
+
+```csv
+url,username,password,token
+https://nexus.example.com/releases,${NEXUS_USER},${NEXUS_PASSWORD},
+https://artifactory.example.com/libs,,,${ARTIFACTORY_TOKEN}
+https://repo.spring.io/release,,,
+```
+
+- Use `username` + `password` for basic auth
+- Use `token` for bearer auth (leave username/password empty)
+- Leave all auth fields empty for anonymous access
+- Use `${ENV_VAR}` syntax to reference environment variables
+
+See `dependency-repos.csv.example` for a template.
+
 ### Build arguments
 
 All Dockerfiles support:
@@ -222,6 +248,9 @@ This validates the entire setup and produces a detailed report:
 - SSL/Certificates (handshakes, expiry warnings)
 - Authentication (publish write/read/delete test, SCM clone test)
 - Publish latency (throughput testing, rate limit detection)
+- Maven repositories (dependency repo connectivity from settings.xml)
+- Dependency repositories (user-specified repos from dependency-repos.csv)
+- SCM repositories (connectivity testing per origin from repos.csv)
 
 The container exits with code 0 if all checks pass, or 1 if any failures are detected.
 
@@ -335,12 +364,36 @@ Generated: 2025-01-20 14:32 UTC
        Cleaned up test clone
 
 === Publish latency ===
-       Running sequential latency test (10 requests)...
+       Testing PUBLISH_URL (10 sequential requests)...
        Sequential: min=23ms avg=45ms max=89ms
-[PASS] Average latency: 45ms
-       Running parallel throughput test (3 × 100 concurrent)...
-       Parallel batches: 1250ms, 1180ms, 1320ms (avg 12ms/req)
-[PASS] Parallel throughput: 12ms/request
+[PASS] PUBLISH_URL: average latency 45ms
+       Testing PUBLISH_URL (3 × 20 concurrent)...
+       Parallel batches: 850ms, 820ms, 890ms
+[PASS] PUBLISH_URL: parallel throughput 42ms/request
+
+=== Maven repositories ===
+       Using: /root/.m2/settings.xml
+       Testing central (10 sequential requests)...
+       Sequential: min=38ms avg=42ms max=67ms
+[PASS] central: average latency 42ms
+       Testing central (3 × 20 concurrent)...
+       Parallel batches: 920ms, 880ms, 950ms
+[PASS] central: parallel throughput 45ms/request
+       Testing internal-nexus (via mirror: nexus-mirror) (10 sequential requests)...
+       Sequential: min=15ms avg=18ms max=24ms
+[PASS] internal-nexus (via mirror: nexus-mirror): average latency 18ms
+       Testing internal-nexus (via mirror: nexus-mirror) (3 × 20 concurrent)...
+       Parallel batches: 380ms, 350ms, 390ms
+[PASS] internal-nexus (via mirror: nexus-mirror): parallel throughput 18ms/request
+
+=== Dependency repositories ===
+       Using: ./dependency-repos.csv
+       Testing nexus.example.com (10 sequential requests)...
+       Sequential: min=19ms avg=23ms max=31ms
+[PASS] nexus.example.com: average latency 23ms
+       Testing nexus.example.com (3 × 20 concurrent)...
+       Parallel batches: 480ms, 450ms, 510ms
+[PASS] nexus.example.com: parallel throughput 24ms/request
 
 ========================================
 RESULT: 1 failure(s), 0 warning(s), 24 passed

@@ -2,127 +2,101 @@
 # Network checks: connectivity to configured endpoints
 
 # Source shared functions if run directly
-if [ -z "$SCRIPT_DIR" ]; then
-    source "$(dirname "$0")/../diagnose.sh" --functions-only
+if [[ -z "$SCRIPT_DIR" ]]; then
+    source "$(dirname "$0")/../lib/core.sh"
 fi
 
 section "Network"
 
-# Helper to check URL and report latency
-# Args: name, url, [auth_type: "basic"|"bearer"|""]
-check_url() {
-    local name="$1"
-    local url="$2"
-    local auth_type="${3:-}"
-
-    local START END HTTP_CODE LATENCY
-    local CURL_ARGS=(-s -o /dev/null -w '%{http_code}' --connect-timeout 5)
-
-    # Add auth based on type
-    if [ "$auth_type" = "basic" ] && [ -n "${PUBLISH_USER:-}" ] && [ -n "${PUBLISH_PASSWORD:-}" ]; then
-        CURL_ARGS+=(-u "${PUBLISH_USER}:${PUBLISH_PASSWORD}")
-    elif [ "$auth_type" = "bearer" ] && [ -n "${PUBLISH_TOKEN:-}" ]; then
-        CURL_ARGS+=(-H "Authorization: Bearer ${PUBLISH_TOKEN}")
-    fi
-
-    START=$(get_time_ms)
-    HTTP_CODE=$(curl "${CURL_ARGS[@]}" "$url" 2>/dev/null)
-    local CURL_EXIT=$?
-    END=$(get_time_ms)
-    LATENCY=$((END - START))
-
-    if [[ "$HTTP_CODE" =~ ^[23] ]]; then
-        pass "$name: reachable (${LATENCY}ms)"
-        return 0
-    elif [ $CURL_EXIT -ne 0 ] || [ "$HTTP_CODE" = "000" ]; then
-        fail "$name: unreachable (connection failed or DNS error)"
-        return 1
-    elif [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ]; then
-        fail "$name: authentication failed (HTTP $HTTP_CODE)"
-        return 1
-    else
-        warn "$name: HTTP $HTTP_CODE (${LATENCY}ms)"
-        return 0
-    fi
-}
-
 # Check PUBLISH_URL connectivity (auth tested separately in auth-publish)
-if [ -n "${PUBLISH_URL:-}" ]; then
-    if [[ "$PUBLISH_URL" == "s3://"* ]]; then
-        if check_command aws; then
-            # Build S3 options (same as auth-publish.sh)
-            S3_ARGS=()
-            [ -n "${S3_PROFILE:-}" ] && S3_ARGS+=(--profile "$S3_PROFILE")
-            [ -n "${S3_REGION:-}" ] && S3_ARGS+=(--region "$S3_REGION")
-            [ -n "${S3_ENDPOINT:-}" ] && S3_ARGS+=(--endpoint-url "$S3_ENDPOINT")
+if [[ -n "${PUBLISH_URL:-}" ]]; then
+    case "$PUBLISH_URL" in
+        s3://*)
+            if check_command aws; then
+                # Build S3 options
+                S3_CMD="aws s3 ls $PUBLISH_URL --max-items 1"
+                [[ -n "${S3_PROFILE:-}" ]] && S3_CMD="$S3_CMD --profile $S3_PROFILE"
+                [[ -n "${S3_REGION:-}" ]] && S3_CMD="$S3_CMD --region $S3_REGION"
+                [[ -n "${S3_ENDPOINT:-}" ]] && S3_CMD="$S3_CMD --endpoint-url $S3_ENDPOINT"
 
-            if aws s3 ls "$PUBLISH_URL" "${S3_ARGS[@]}" --max-items 1 >/dev/null 2>&1; then
-                pass "PUBLISH_URL: $PUBLISH_URL (S3 accessible)"
+                if eval "$S3_CMD" >/dev/null 2>&1; then
+                    pass "PUBLISH_URL: $PUBLISH_URL (S3 accessible)"
+                else
+                    warn "PUBLISH_URL: $PUBLISH_URL (S3 - cannot list, check credentials)"
+                fi
             else
-                warn "PUBLISH_URL: $PUBLISH_URL (S3 - cannot list, check credentials)"
+                info "PUBLISH_URL: $PUBLISH_URL (S3 - aws cli not available to test)"
             fi
-        else
-            info "PUBLISH_URL: $PUBLISH_URL (S3 - aws cli not available to test)"
-        fi
-    else
-        # Just check connectivity - 401/403 means server is reachable (auth tested in auth-publish)
-        START=$(get_time_ms)
-        HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 "$PUBLISH_URL" 2>/dev/null)
-        CURL_EXIT=$?
-        END=$(get_time_ms)
-        LATENCY=$((END - START))
+            ;;
+        *)
+            # Just check connectivity - 401/403 means server is reachable (auth tested in auth-publish)
+            START=$(get_time_ms)
+            HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 "$PUBLISH_URL" 2>/dev/null)
+            CURL_EXIT=$?
+            END=$(get_time_ms)
+            LATENCY=$((END - START))
 
-        if [ $CURL_EXIT -ne 0 ] || [ "$HTTP_CODE" = "000" ]; then
-            fail "PUBLISH_URL: unreachable (connection failed or DNS error)"
-            info "Check network connectivity and DNS resolution"
-        elif [[ "$HTTP_CODE" =~ ^[2345] ]]; then
-            # 2xx, 3xx, 4xx, 5xx all mean the server responded
-            pass "PUBLISH_URL: reachable (${LATENCY}ms)"
-        else
-            warn "PUBLISH_URL: unexpected response (HTTP $HTTP_CODE)"
-        fi
-    fi
+            if [[ $CURL_EXIT -ne 0 ]] || [[ "$HTTP_CODE" == "000" ]]; then
+                fail "PUBLISH_URL: unreachable (connection failed or DNS error)"
+                info "Check network connectivity and DNS resolution"
+            else
+                # Any HTTP response means server is reachable
+                case "$HTTP_CODE" in
+                    2*|3*|4*|5*)
+                        pass "PUBLISH_URL: reachable (${LATENCY}ms)"
+                        ;;
+                    *)
+                        warn "PUBLISH_URL: unexpected response (HTTP $HTTP_CODE)"
+                        ;;
+                esac
+            fi
+            ;;
+    esac
 else
     warn "PUBLISH_URL: not set"
 fi
 
-# Check SCM hosts from repos.csv
-CSV_FILE="${REPOS_CSV:-/app/repos.csv}"
-if [ ! -f "$CSV_FILE" ]; then
-    CSV_FILE="repos.csv"
-fi
-
-if [ -f "$CSV_FILE" ]; then
-    # Find cloneUrl column dynamically
+# Check SCM hosts from repos.csv (find_repos_csv, get_col_index from core.sh)
+if find_repos_csv; then
     HEADER=$(head -1 "$CSV_FILE")
-    CLONEURL_COL=$(echo "$HEADER" | tr ',' '\n' | grep -ni "^cloneUrl$" | cut -d: -f1)
+    CLONEURL_COL=$(get_col_index "cloneUrl")
 
-    if [ -n "$CLONEURL_COL" ]; then
+    if [[ -n "$CLONEURL_COL" ]]; then
         HOSTS=$(tail -n +2 "$CSV_FILE" | cut -d',' -f"$CLONEURL_COL" | sed 's|.*://||' | cut -d/ -f1 | cut -d@ -f2 | sort -u | head -10)
     else
         HOSTS=""
     fi
 
-    if [ -n "$HOSTS" ]; then
+    if [[ -n "$HOSTS" ]]; then
         info ""
         info "SCM hosts (from repos.csv):"
         for host in $HOSTS; do
-            if [ -n "$host" ]; then
+            if [[ -n "$host" ]]; then
+                # Check DNS first for clearer error messages
+                if ! check_dns "$host"; then
+                    fail "$host: DNS resolution failed"
+                    info "Hostname does not resolve - check DNS or hostname spelling"
+                    continue
+                fi
+
                 START=$(get_time_ms)
                 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 "https://$host" 2>/dev/null)
                 CURL_EXIT=$?
                 END=$(get_time_ms)
                 LATENCY=$((END - START))
 
-                if [[ "$HTTP_CODE" =~ ^[23] ]]; then
-                    pass "$host: reachable (${LATENCY}ms)"
-                elif [ $CURL_EXIT -ne 0 ] || [ "$HTTP_CODE" = "000" ]; then
-                    fail "$host: unreachable (connection failed or DNS error)"
-                elif [[ "$HTTP_CODE" =~ ^[45] ]]; then
-                    # 4xx/5xx still means the server is reachable
-                    pass "$host: reachable (${LATENCY}ms)"
+                if [[ $CURL_EXIT -ne 0 ]] || [[ "$HTTP_CODE" == "000" ]]; then
+                    fail "$host: connection failed"
+                    info "Host resolves but connection failed - check firewall or service availability"
                 else
-                    warn "$host: unexpected response (HTTP $HTTP_CODE)"
+                    case "$HTTP_CODE" in
+                        2*|3*|4*|5*)
+                            pass "$host: reachable (${LATENCY}ms)"
+                            ;;
+                        *)
+                            warn "$host: unexpected response (HTTP $HTTP_CODE)"
+                            ;;
+                    esac
                 fi
             fi
         done
@@ -130,11 +104,11 @@ if [ -f "$CSV_FILE" ]; then
 fi
 
 # Proxy info (env vars)
-if [ -n "${http_proxy:-}" ] || [ -n "${HTTP_PROXY:-}" ] || [ -n "${https_proxy:-}" ] || [ -n "${HTTPS_PROXY:-}" ]; then
+if [[ -n "${http_proxy:-}" ]] || [[ -n "${HTTP_PROXY:-}" ]] || [[ -n "${https_proxy:-}" ]] || [[ -n "${HTTPS_PROXY:-}" ]]; then
     info ""
     info "Proxy configured:"
-    [ -n "${http_proxy:-}" ] && info "  http_proxy=$http_proxy"
-    [ -n "${HTTP_PROXY:-}" ] && info "  HTTP_PROXY=$HTTP_PROXY"
-    [ -n "${https_proxy:-}" ] && info "  https_proxy=$https_proxy"
-    [ -n "${HTTPS_PROXY:-}" ] && info "  HTTPS_PROXY=$HTTPS_PROXY"
+    [[ -n "${http_proxy:-}" ]] && info "  http_proxy=$http_proxy"
+    [[ -n "${HTTP_PROXY:-}" ]] && info "  HTTP_PROXY=$HTTP_PROXY"
+    [[ -n "${https_proxy:-}" ]] && info "  https_proxy=$https_proxy"
+    [[ -n "${HTTPS_PROXY:-}" ]] && info "  HTTPS_PROXY=$HTTPS_PROXY"
 fi

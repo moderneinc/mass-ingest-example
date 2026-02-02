@@ -2,35 +2,107 @@
 # Authentication checks for SCM: test clone with timeout
 
 # Source shared functions if run directly
-if [ -z "$SCRIPT_DIR" ]; then
-    source "$(dirname "$0")/../diagnose.sh" --functions-only
+if [[ -z "$SCRIPT_DIR" ]]; then
+    source "$(dirname "${BASH_SOURCE[0]}")/../lib/core.sh"
 fi
 
 section "Authentication - SCM"
 
-# Find repos.csv
-CSV_FILE="${REPOS_CSV:-/app/repos.csv}"
-if [ ! -f "$CSV_FILE" ]; then
-    CSV_FILE="repos.csv"
+# Check .git-credentials file if it exists
+# Check multiple locations (home dir, current dir, /root for Docker)
+GIT_CREDS_FILE=""
+for path in "$HOME/.git-credentials" "./.git-credentials" "/root/.git-credentials"; do
+    if [[ -f "$path" ]]; then
+        GIT_CREDS_FILE="$path"
+        break
+    fi
+done
+
+if [[ -n "$GIT_CREDS_FILE" ]]; then
+    # Check 1: Is file non-empty (excluding comments and blank lines)?
+    CRED_LINES=$(grep -v '^\s*#' "$GIT_CREDS_FILE" | grep -v '^\s*$' | wc -l | tr -d ' ')
+    if (( CRED_LINES == 0 )); then
+        fail ".git-credentials: file exists but contains no credentials"
+        info "Add credentials in format: https://user:token@hostname"
+    else
+        pass ".git-credentials: found $CRED_LINES credential(s)"
+    fi
+
+    # Check 2: Is file read-only? Git can wipe it on auth failure
+    # Note: -w always returns true for root, so check actual permissions
+    FILE_PERMS=$(stat -c '%a' "$GIT_CREDS_FILE" 2>/dev/null || stat -f '%Lp' "$GIT_CREDS_FILE" 2>/dev/null)
+    if [[ "$FILE_PERMS" =~ ^(400|440|444|000)$ ]]; then
+        pass ".git-credentials: file is read-only (mode $FILE_PERMS)"
+    else
+        warn ".git-credentials: file is writable (mode $FILE_PERMS)"
+        info "Git may clear credentials on authentication failure"
+        # Detect Docker and suggest appropriate fix
+        if [[ -f "/.dockerenv" ]] || grep -q 'docker\|containerd' /proc/1/cgroup 2>/dev/null; then
+            info "In Docker, mount the file as read-only:"
+            info "  -v /path/.git-credentials:/root/.git-credentials:ro"
+        else
+            info "Consider: chmod 400 ~/.git-credentials"
+        fi
+    fi
+
+    # Check 3: Do credentials contain characters that need URL escaping?
+    # Common issue: Bitbucket PATs contain '/' which must be encoded as %2F
+    NEEDS_ESCAPE=false
+    while IFS= read -r line; do
+        # Skip comments and empty lines
+        if [[ "$line" =~ ^# ]] || [[ -z "$line" ]]; then
+            continue
+        fi
+
+        # Extract password using step-by-step parsing (handles @ in passwords, port numbers)
+        # Format: https://user:password@host[:port][/path]
+        # 1. Strip protocol prefix (https://, http://)
+        local without_proto="${line#*://}"
+        # 2. Get the userinfo part (everything before the last @)
+        #    Using parameter expansion: remove shortest match from end
+        if [[ "$without_proto" == *@* ]]; then
+            local userinfo="${without_proto%@*}"
+            # 3. Extract password (everything after first :)
+            if [[ "$userinfo" == *:* ]]; then
+                local password="${userinfo#*:}"
+                # Check for chars that need escaping: / @ : and space
+                if [[ "$password" =~ [/:@\ ] ]]; then
+                    NEEDS_ESCAPE=true
+                fi
+            fi
+        fi
+    done < "$GIT_CREDS_FILE"
+
+    if [[ "$NEEDS_ESCAPE" == true ]]; then
+        fail ".git-credentials: credentials contain characters that require URL escaping"
+        info "Special characters (/ : @ space) in passwords must be URL-encoded"
+        info "Common: '/' in Bitbucket PATs must be encoded as '%2F'"
+        info ""
+        info "To URL-encode a password, run:"
+        info "  python3 -c \"import urllib.parse; print(urllib.parse.quote('YOUR_PASSWORD', safe=''))\""
+        info ""
+        info "Or use this awk command:"
+        info "  echo 'YOUR_PASSWORD' | awk '{gsub(/\\//, \"%2F\"); gsub(/:/, \"%3A\"); gsub(/@/, \"%40\"); print}'"
+    fi
+else
+    info ".git-credentials: file not found (may use other auth method)"
 fi
 
-if [ ! -f "$CSV_FILE" ]; then
+info ""
+
+# Find repos.csv (find_repos_csv from core.sh)
+if ! find_repos_csv; then
     info "Skipped: repos.csv not found"
     return 0 2>/dev/null || exit 0
 fi
 
-# Parse header to find column indices
+# Parse header to find column indices (get_col_index from core.sh)
 HEADER=$(head -1 "$CSV_FILE")
-
-# Get column index by name (case-insensitive)
-get_col_index() {
-    echo "$HEADER" | tr ',' '\n' | grep -ni "^$1$" | cut -d: -f1
-}
 
 CLONEURL_COL=$(get_col_index "cloneUrl")
 BRANCH_COL=$(get_col_index "branch")
 
-if [ -z "$CLONEURL_COL" ]; then
+if [[ -z "$CLONEURL_COL" ]]; then
     fail "Clone test: cloneUrl column not found in CSV header"
     return 0 2>/dev/null || exit 0
 fi
@@ -38,17 +110,17 @@ fi
 # Get first repository URL and branch from CSV using dynamic column indices
 FIRST_LINE=$(tail -n +2 "$CSV_FILE" | head -1)
 FIRST_REPO=$(echo "$FIRST_LINE" | cut -d',' -f"$CLONEURL_COL")
-if [ -n "$BRANCH_COL" ]; then
+if [[ -n "$BRANCH_COL" ]]; then
     FIRST_BRANCH=$(echo "$FIRST_LINE" | cut -d',' -f"$BRANCH_COL")
 fi
 
-if [ -z "$FIRST_REPO" ]; then
+if [[ -z "$FIRST_REPO" ]]; then
     info "Skipped: no repositories in repos.csv"
     return 0 2>/dev/null || exit 0
 fi
 
 # Default branch if not specified
-if [ -z "$FIRST_BRANCH" ]; then
+if [[ -z "$FIRST_BRANCH" ]]; then
     FIRST_BRANCH="main"
 fi
 
@@ -63,12 +135,11 @@ trap "rm -rf '$TEST_DIR'" EXIT
 START=$(date +%s)
 
 # Use GIT_TERMINAL_PROMPT=0 to fail fast on auth issues instead of hanging
-# Handle missing timeout command (macOS)
 if check_command timeout; then
     CLONE_OUTPUT=$(GIT_TERMINAL_PROMPT=0 timeout 60 git clone --depth=1 --branch "$FIRST_BRANCH" "$FIRST_REPO" "$TEST_DIR/test-clone" 2>&1)
     CLONE_EXIT=$?
 else
-    # No timeout available, just run directly
+    # No timeout available (macOS), just run directly
     CLONE_OUTPUT=$(GIT_TERMINAL_PROMPT=0 git clone --depth=1 --branch "$FIRST_BRANCH" "$FIRST_REPO" "$TEST_DIR/test-clone" 2>&1)
     CLONE_EXIT=$?
 fi
@@ -76,20 +147,18 @@ fi
 END=$(date +%s)
 DURATION=$((END - START))
 
-if [ $CLONE_EXIT -eq 0 ] && [ -d "$TEST_DIR/test-clone/.git" ]; then
+if (( CLONE_EXIT == 0 )) && [[ -d "$TEST_DIR/test-clone/.git" ]]; then
     pass "Clone test: $REPO_NAME (${DURATION}s)"
-elif [ $CLONE_EXIT -eq 124 ]; then
+elif (( CLONE_EXIT == 124 )); then
     fail "Clone test: timed out after 60s"
 else
     # Check if it's an auth failure
-    if echo "$CLONE_OUTPUT" | grep -qi "authentication\|credential\|permission\|401\|403"; then
+    if [[ "$CLONE_OUTPUT" =~ authentication|credential|permission|401|403 ]]; then
         warn "Clone test: authentication required"
         info "Configure git credentials for: $FIRST_REPO"
     else
         fail "Clone test: failed"
         # Show first meaningful line of error
-        echo "$CLONE_OUTPUT" | grep -v "^$" | head -1 | while read -r line; do
-            info "$line"
-        done
+        info "$(echo "$CLONE_OUTPUT" | grep -v "^$" | head -1)"
     fi
 fi

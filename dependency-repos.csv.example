@@ -1,0 +1,14 @@
+# Dependency repositories for diagnostics
+# List Maven/Gradle repositories to test connectivity and authentication
+#
+# Format: url,username,password,token
+# - Use username+password for basic auth
+# - Use token for bearer auth (leave username/password empty)
+# - Leave all auth fields empty for anonymous access
+# - Use ${ENV_VAR} syntax to reference environment variables
+#
+# Copy this file to dependency-repos.csv and customize for your environment
+url,username,password,token
+https://nexus.example.com/repository/maven-releases,${NEXUS_USER},${NEXUS_PASSWORD},
+https://artifactory.example.com/artifactory/libs-release,,,${ARTIFACTORY_TOKEN}
+https://repo.spring.io/release,,,
