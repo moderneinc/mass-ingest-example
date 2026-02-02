@@ -1,12 +1,44 @@
-#!/bin/bash
+#!/bin/sh
 # System checks: CPU, memory, disk space
 
 # Source shared functions if run directly
 if [ -z "$SCRIPT_DIR" ]; then
-    source "$(dirname "$0")/../diagnose.sh" --functions-only
+    . "$(dirname "$0")/../lib/core.sh"
 fi
 
 section "System"
+
+# OS info
+OS_NAME=""
+OS_VERSION=""
+if [ -f /etc/os-release ]; then
+    OS_NAME=$(grep "^NAME=" /etc/os-release | cut -d= -f2 | tr -d '"')
+    OS_VERSION=$(grep "^VERSION=" /etc/os-release | cut -d= -f2 | tr -d '"')
+elif check_command sw_vers; then
+    # macOS
+    OS_NAME="macOS"
+    OS_VERSION=$(sw_vers -productVersion 2>/dev/null || echo "unknown")
+elif check_command uname; then
+    OS_NAME=$(uname -s)
+    OS_VERSION=$(uname -r)
+fi
+
+if [ -n "$OS_NAME" ]; then
+    if [ -n "$OS_VERSION" ]; then
+        info "OS: $OS_NAME $OS_VERSION"
+    else
+        info "OS: $OS_NAME"
+    fi
+fi
+
+# Shell info - show the running shell (bash for these scripts)
+if [ -n "${BASH_VERSION:-}" ]; then
+    info "Shell: bash $BASH_VERSION"
+elif [ -n "${ZSH_VERSION:-}" ]; then
+    info "Shell: zsh $ZSH_VERSION"
+else
+    info "Shell: $(basename "${SHELL:-sh}")"
+fi
 
 # CPU count
 if [ -f /proc/cpuinfo ]; then

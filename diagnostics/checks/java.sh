@@ -1,9 +1,9 @@
-#!/bin/bash
+#!/bin/sh
 # Java/JDK checks
 
 # Source shared functions if run directly
 if [ -z "$SCRIPT_DIR" ]; then
-    source "$(dirname "$0")/../diagnose.sh" --functions-only
+    . "$(dirname "$0")/../lib/core.sh"
 fi
 
 section "Java/JDKs"

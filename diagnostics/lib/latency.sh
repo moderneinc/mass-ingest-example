@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # Shared latency testing library for repository diagnostics
 #
 # Provides comprehensive latency and throughput testing:
@@ -12,96 +12,106 @@
 #   LATENCY_PARALLEL_COUNT    Number of concurrent requests (default: 20)
 #   LATENCY_TIMEOUT           Timeout per batch in seconds (default: 30)
 
-# Source shared functions if not already loaded
-if ! declare -f get_time_ms >/dev/null 2>&1; then
-    source "$(dirname "${BASH_SOURCE[0]}")/../diagnose.sh" --functions-only
-fi
+# Note: Core library (core.sh) must be sourced before this file.
+# This is typically done by the calling script (e.g., publish-latency.sh).
 
 # Test artifacts - common POMs that likely exist in any Maven repo
-LATENCY_TEST_ARTIFACTS=(
-    "org/slf4j/slf4j-api/2.0.9/slf4j-api-2.0.9.pom"
-    "com/google/guava/guava/31.1-jre/guava-31.1-jre.pom"
-    "junit/junit/4.13.2/junit-4.13.2.pom"
-    "org/apache/commons/commons-lang3/3.12.0/commons-lang3-3.12.0.pom"
-    "com/fasterxml/jackson/core/jackson-core/2.15.2/jackson-core-2.15.2.pom"
-)
+LATENCY_TEST_ARTIFACT_1="org/slf4j/slf4j-api/2.0.9/slf4j-api-2.0.9.pom"
+LATENCY_TEST_ARTIFACT_2="com/google/guava/guava/31.1-jre/guava-31.1-jre.pom"
+LATENCY_TEST_ARTIFACT_3="junit/junit/4.13.2/junit-4.13.2.pom"
+LATENCY_TEST_ARTIFACT_4="org/apache/commons/commons-lang3/3.12.0/commons-lang3-3.12.0.pom"
+LATENCY_TEST_ARTIFACT_5="com/fasterxml/jackson/core/jackson-core/2.15.2/jackson-core-2.15.2.pom"
+
+# Get artifact by index (1-5, wraps around)
+get_test_artifact() {
+    case $(( ($1 - 1) % 5 + 1 )) in
+        1) echo "$LATENCY_TEST_ARTIFACT_1" ;;
+        2) echo "$LATENCY_TEST_ARTIFACT_2" ;;
+        3) echo "$LATENCY_TEST_ARTIFACT_3" ;;
+        4) echo "$LATENCY_TEST_ARTIFACT_4" ;;
+        5) echo "$LATENCY_TEST_ARTIFACT_5" ;;
+    esac
+}
 
 # Check for rate limit headers
-# Usage: check_rate_limit_headers "url" [curl_args...]
+# Usage: check_rate_limit_headers "url"
 # Output: Sets RATE_LIMIT_HEADERS (empty if none found)
 check_rate_limit_headers() {
-    local url="$1"
-    shift
-    local curl_args=("$@")
-
-    RATE_LIMIT_HEADERS=$(curl -s -I --connect-timeout 5 "${curl_args[@]}" "$url" 2>/dev/null | grep -iE "x-ratelimit|retry-after|x-throttle" || true)
+    url="$1"
+    RATE_LIMIT_HEADERS=$(curl -s -I --connect-timeout 5 "$url" 2>/dev/null | grep -iE "x-ratelimit|retry-after|x-throttle" || true)
 }
 
 # Run sequential latency test
-# Usage: run_sequential_latency "base_url" [curl_args...]
-# Output: Sets LATENCY_MIN, LATENCY_AVG, LATENCY_MAX, LATENCY_RESULT, HTTP_429_COUNT, LATENCIES array
+# Usage: run_sequential_latency "base_url"
+# Output: Sets LATENCY_MIN, LATENCY_AVG, LATENCY_MAX, LATENCY_RESULT, HTTP_429_COUNT
 # Also sets THROTTLE_DETECTED if latency increases significantly
 run_sequential_latency() {
-    local base_url="$1"
-    shift
-    local curl_args=("$@")
+    base_url="$1"
 
-    local artifact_count=${#LATENCY_TEST_ARTIFACTS[@]}
-    LATENCIES=()
+    LATENCIES=""
     HTTP_429_COUNT=0
     THROTTLE_DETECTED=false
+    latency_count=0
 
-    for i in $(seq 1 10); do
-        local artifact="${LATENCY_TEST_ARTIFACTS[$((i % artifact_count))]}"
-        local test_url="${base_url%/}/$artifact"
+    i=1
+    while [ $i -le 10 ]; do
+        artifact=$(get_test_artifact $i)
+        test_url="${base_url%/}/$artifact"
 
-        local start end latency http_code
         start=$(get_time_ms)
-        http_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "${curl_args[@]}" "$test_url" 2>/dev/null)
+        http_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "$test_url" 2>/dev/null)
         end=$(get_time_ms)
         latency=$((end - start))
 
         if [ "$http_code" = "429" ]; then
-            ((HTTP_429_COUNT++))
+            HTTP_429_COUNT=$((HTTP_429_COUNT + 1))
         fi
 
         # Accept any response that indicates the server responded
-        if [[ "$http_code" =~ ^[2-5] ]]; then
-            LATENCIES+=("$latency")
-        fi
+        case "$http_code" in
+            2*|3*|4*|5*)
+                LATENCIES="$LATENCIES $latency"
+                latency_count=$((latency_count + 1))
+                ;;
+        esac
+
+        i=$((i + 1))
     done
 
-    if [ ${#LATENCIES[@]} -eq 0 ]; then
+    if [ $latency_count -eq 0 ]; then
         LATENCY_RESULT="failed"
         return 1
     fi
 
-    # Calculate stats
-    local sorted=($(printf '%s\n' "${LATENCIES[@]}" | sort -n))
-    local count=${#sorted[@]}
-    LATENCY_MIN=${sorted[0]}
-    LATENCY_MAX=${sorted[$((count-1))]}
-    local sum=0
-    for lat in "${LATENCIES[@]}"; do
-        sum=$((sum + lat))
-    done
-    LATENCY_AVG=$((sum / count))
+    # Calculate stats using awk
+    eval $(echo "$LATENCIES" | tr ' ' '\n' | grep -v '^$' | sort -n | awk '
+        BEGIN { sum=0; count=0 }
+        {
+            vals[count++] = $1
+            sum += $1
+        }
+        END {
+            if (count > 0) {
+                printf "LATENCY_MIN=%d LATENCY_MAX=%d LATENCY_AVG=%d latency_count=%d", vals[0], vals[count-1], sum/count, count
+            }
+        }
+    ')
 
     # Throttling detection: compare first 5 vs last 5
-    if [ "$count" -ge 10 ]; then
-        local first_5_sum=0 last_5_sum=0
-        for i in 0 1 2 3 4; do
-            first_5_sum=$((first_5_sum + ${LATENCIES[$i]}))
-            last_5_sum=$((last_5_sum + ${LATENCIES[$((count - 5 + i))]}))
-        done
-        local first_5_avg=$((first_5_sum / 5))
-        local last_5_avg=$((last_5_sum / 5))
-
-        if [ "$last_5_avg" -gt $((first_5_avg * 2)) ] && [ "$first_5_avg" -gt 0 ]; then
-            THROTTLE_DETECTED=true
-            THROTTLE_FROM=$first_5_avg
-            THROTTLE_TO=$last_5_avg
-        fi
+    if [ "$latency_count" -ge 10 ]; then
+        eval $(echo "$LATENCIES" | tr ' ' '\n' | grep -v '^$' | awk '
+            { vals[NR] = $1 }
+            END {
+                first5 = 0; last5 = 0
+                for (i=1; i<=5; i++) first5 += vals[i]
+                for (i=NR-4; i<=NR; i++) last5 += vals[i]
+                first5_avg = first5/5
+                last5_avg = last5/5
+                if (last5_avg > first5_avg * 2 && first5_avg > 0) {
+                    printf "THROTTLE_DETECTED=true THROTTLE_FROM=%d THROTTLE_TO=%d", first5_avg, last5_avg
+                }
+            }
+        ')
     fi
 
     # Determine result
@@ -118,73 +128,55 @@ run_sequential_latency() {
 }
 
 # Run parallel throughput test
-# Usage: run_parallel_throughput "base_url" [curl_args...]
-# Output: Sets THROUGHPUT_AVG_MS, THROUGHPUT_RESULT, BATCH_TIMES array
+# Usage: run_parallel_throughput "base_url"
+# Output: Sets THROUGHPUT_AVG_MS, THROUGHPUT_RESULT, BATCH_TIME_1, BATCH_TIME_2, BATCH_TIME_3
 run_parallel_throughput() {
-    local base_url="$1"
-    shift
-    local curl_args=("$@")
+    base_url="$1"
 
-    local parallel_count="${LATENCY_PARALLEL_COUNT:-20}"
-    local batch_timeout="${LATENCY_TIMEOUT:-30}"
-    local artifact_count=${#LATENCY_TEST_ARTIFACTS[@]}
-    BATCH_TIMES=()
+    parallel_count="${LATENCY_PARALLEL_COUNT:-20}"
     THROUGHPUT_RESULT=""
-
-    # Run parallel batch with timeout
-    run_batch() {
-        local batch_pids=()
-        for i in $(seq 1 $parallel_count); do
-            local artifact="${LATENCY_TEST_ARTIFACTS[$((i % artifact_count))]}"
-            local url="${base_url%/}/$artifact"
-            curl -s -o /dev/null --connect-timeout 10 --max-time 20 "${curl_args[@]}" "$url" &
-            batch_pids+=($!)
-        done
-
-        local waited=0
-        while [ $waited -lt $batch_timeout ]; do
-            local still_running=false
-            for pid in "${batch_pids[@]}"; do
-                if kill -0 "$pid" 2>/dev/null; then
-                    still_running=true
-                    break
-                fi
-            done
-            if [ "$still_running" = false ]; then
-                return 0
-            fi
-            sleep 1
-            ((waited++))
-        done
-
-        # Timeout - kill remaining
-        for pid in "${batch_pids[@]}"; do
-            kill "$pid" 2>/dev/null
-        done
-        return 1
-    }
+    BATCH_TIME_1=""
+    BATCH_TIME_2=""
+    BATCH_TIME_3=""
 
     # Run 3 batches
-    for batch in 1 2 3; do
-        local batch_start batch_end batch_time
+    batch=1
+    while [ $batch -le 3 ]; do
         batch_start=$(get_time_ms)
-        if ! run_batch; then
-            THROUGHPUT_RESULT="timeout"
-            return 1
-        fi
+
+        # Launch parallel requests and collect PIDs
+        pids=""
+        i=1
+        while [ $i -le $parallel_count ]; do
+            artifact=$(get_test_artifact $i)
+            url="${base_url%/}/$artifact"
+            curl -s -o /dev/null --connect-timeout 10 --max-time 20 "$url" &
+            pids="$pids $!"
+            i=$((i + 1))
+        done
+
+        # Wait for all background jobs
+        for pid in $pids; do
+            wait "$pid" 2>/dev/null
+        done
+
         batch_end=$(get_time_ms)
         batch_time=$((batch_end - batch_start))
-        BATCH_TIMES+=("$batch_time")
+
+        case $batch in
+            1) BATCH_TIME_1=$batch_time ;;
+            2) BATCH_TIME_2=$batch_time ;;
+            3) BATCH_TIME_3=$batch_time ;;
+        esac
+
+        batch=$((batch + 1))
     done
 
     # Calculate average per request
-    local batch1=${BATCH_TIMES[0]}
-    local batch2=${BATCH_TIMES[1]}
-    local batch3=${BATCH_TIMES[2]}
-    THROUGHPUT_AVG_MS=$(( (batch1 + batch2 + batch3) / 3 / parallel_count ))
+    THROUGHPUT_AVG_MS=$(( (BATCH_TIME_1 + BATCH_TIME_2 + BATCH_TIME_3) / 3 / parallel_count ))
 
     # Check for degradation
-    if [ "$batch3" -gt $((batch1 * 2)) ] && [ "$batch1" -gt 0 ]; then
+    if [ "$BATCH_TIME_3" -gt $((BATCH_TIME_1 * 2)) ] && [ "$BATCH_TIME_1" -gt 0 ]; then
         THROUGHPUT_RESULT="degraded"
         return 1
     else
@@ -194,19 +186,17 @@ run_parallel_throughput() {
 }
 
 # Run comprehensive latency test with all checks
-# Usage: run_comprehensive_latency_test "name" "base_url" [curl_args...]
+# Usage: run_comprehensive_latency_test "name" "base_url"
 # This runs all tests and outputs results using pass/warn/fail/info
 run_comprehensive_latency_test() {
-    local name="$1"
-    local base_url="$2"
-    shift 2
-    local curl_args=("$@")
+    name="$1"
+    base_url="$2"
 
-    local parallel_count="${LATENCY_PARALLEL_COUNT:-20}"
+    parallel_count="${LATENCY_PARALLEL_COUNT:-20}"
 
     # Check rate limit headers
-    local first_artifact="${LATENCY_TEST_ARTIFACTS[0]}"
-    check_rate_limit_headers "${base_url%/}/$first_artifact" "${curl_args[@]}"
+    first_artifact="$LATENCY_TEST_ARTIFACT_1"
+    check_rate_limit_headers "${base_url%/}/$first_artifact"
     if [ -n "$RATE_LIMIT_HEADERS" ]; then
         warn "$name: rate limit headers detected"
         info "$(echo "$RATE_LIMIT_HEADERS" | head -1)"
@@ -214,7 +204,7 @@ run_comprehensive_latency_test() {
 
     # Sequential latency test
     info "Testing $name (10 sequential requests)..."
-    run_sequential_latency "$base_url" "${curl_args[@]}"
+    run_sequential_latency "$base_url"
 
     if [ "$LATENCY_RESULT" = "failed" ]; then
         fail "$name: latency test failed"
@@ -243,7 +233,7 @@ run_comprehensive_latency_test() {
 
     # Parallel throughput test
     info "Testing $name (3 × $parallel_count concurrent)..."
-    run_parallel_throughput "$base_url" "${curl_args[@]}"
+    run_parallel_throughput "$base_url"
 
     case "$THROUGHPUT_RESULT" in
         timeout)
@@ -251,10 +241,10 @@ run_comprehensive_latency_test() {
             info "Try: LATENCY_PARALLEL_COUNT=10 or SKIP_LATENCY_TEST=true"
             ;;
         degraded)
-            warn "$name: batch degradation ${BATCH_TIMES[0]}ms -> ${BATCH_TIMES[2]}ms (possible throttling)"
+            warn "$name: batch degradation ${BATCH_TIME_1}ms -> ${BATCH_TIME_3}ms (possible throttling)"
             ;;
         good)
-            info "Parallel batches: ${BATCH_TIMES[0]}ms, ${BATCH_TIMES[1]}ms, ${BATCH_TIMES[2]}ms"
+            info "Parallel batches: ${BATCH_TIME_1}ms, ${BATCH_TIME_2}ms, ${BATCH_TIME_3}ms"
             pass "$name: parallel throughput ${THROUGHPUT_AVG_MS}ms/request"
             ;;
     esac
@@ -267,7 +257,3 @@ run_comprehensive_latency_test() {
 
     return 0
 }
-
-# Export functions
-export -f check_rate_limit_headers run_sequential_latency run_parallel_throughput run_comprehensive_latency_test
-export LATENCY_TEST_ARTIFACTS

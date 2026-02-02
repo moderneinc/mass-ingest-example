@@ -1,12 +1,93 @@
-#!/bin/bash
+#!/bin/sh
 # Authentication checks for SCM: test clone with timeout
 
 # Source shared functions if run directly
 if [ -z "$SCRIPT_DIR" ]; then
-    source "$(dirname "$0")/../diagnose.sh" --functions-only
+    . "$(dirname "$0")/../lib/core.sh"
 fi
 
 section "Authentication - SCM"
+
+# Check .git-credentials file if it exists
+# Check multiple locations (home dir, current dir, /root for Docker)
+GIT_CREDS_FILE=""
+for path in "$HOME/.git-credentials" "./.git-credentials" "/root/.git-credentials"; do
+    if [ -f "$path" ]; then
+        GIT_CREDS_FILE="$path"
+        break
+    fi
+done
+
+if [ -n "$GIT_CREDS_FILE" ]; then
+    # Check 1: Is file non-empty (excluding comments and blank lines)?
+    CRED_LINES=$(grep -v '^\s*#' "$GIT_CREDS_FILE" | grep -v '^\s*$' | wc -l | tr -d ' ')
+    if [ "$CRED_LINES" -eq 0 ]; then
+        fail ".git-credentials: file exists but contains no credentials"
+        info "Add credentials in format: https://user:token@hostname"
+    else
+        pass ".git-credentials: found $CRED_LINES credential(s)"
+    fi
+
+    # Check 2: Is file read-only? Git can wipe it on auth failure
+    # Note: -w always returns true for root, so check actual permissions
+    FILE_PERMS=$(stat -c '%a' "$GIT_CREDS_FILE" 2>/dev/null || stat -f '%Lp' "$GIT_CREDS_FILE" 2>/dev/null)
+    case "$FILE_PERMS" in
+        400|440|444|000)
+            pass ".git-credentials: file is read-only (mode $FILE_PERMS)"
+            ;;
+        *)
+            warn ".git-credentials: file is writable (mode $FILE_PERMS)"
+            info "Git may clear credentials on authentication failure"
+            # Detect Docker and suggest appropriate fix
+            if [ -f "/.dockerenv" ] || grep -q 'docker\|containerd' /proc/1/cgroup 2>/dev/null; then
+                info "In Docker, mount the file as read-only:"
+                info "  -v /path/.git-credentials:/root/.git-credentials:ro"
+            else
+                info "Consider: chmod 400 ~/.git-credentials"
+            fi
+            ;;
+    esac
+
+    # Check 3: Do credentials contain characters that need URL escaping?
+    # Common issue: Bitbucket PATs contain '/' which must be encoded as %2F
+    # Check for unescaped special chars in the password portion (between last : and @host)
+    NEEDS_ESCAPE=false
+    while IFS= read -r line; do
+        # Skip comments and empty lines
+        case "$line" in
+            '#'*|'') continue ;;
+        esac
+
+        # Extract password using sed: format is https://user:password@host
+        # Match lines with user:password format (not just token@host)
+        if echo "$line" | grep -q '://[^:]*:[^@]*@'; then
+            password=$(echo "$line" | sed 's|.*://[^:]*:\([^@]*\)@.*|\1|')
+            # Check for chars that need escaping: / @ : and space
+            # Use case pattern matching (POSIX compatible)
+            case "$password" in
+                */*|*:*|*@*|*' '*)
+                    NEEDS_ESCAPE=true
+                    ;;
+            esac
+        fi
+    done < "$GIT_CREDS_FILE"
+
+    if [ "$NEEDS_ESCAPE" = true ]; then
+        fail ".git-credentials: credentials contain characters that require URL escaping"
+        info "Special characters (/ : @ space) in passwords must be URL-encoded"
+        info "Common: '/' in Bitbucket PATs must be encoded as '%2F'"
+        info ""
+        info "To URL-encode a password, run:"
+        info "  python3 -c \"import urllib.parse; print(urllib.parse.quote('YOUR_PASSWORD', safe=''))\""
+        info ""
+        info "Or use this awk command:"
+        info "  echo 'YOUR_PASSWORD' | awk '{gsub(/\\//, \"%2F\"); gsub(/:/, \"%3A\"); gsub(/@/, \"%40\"); print}'"
+    fi
+else
+    info ".git-credentials: file not found (may use other auth method)"
+fi
+
+info ""
 
 # Find repos.csv
 CSV_FILE="${REPOS_CSV:-/app/repos.csv}"

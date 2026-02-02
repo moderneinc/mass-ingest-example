@@ -1,9 +1,9 @@
-#!/bin/bash
+#!/bin/sh
 # Docker image checks: CPU architecture, emulation detection
 
 # Source shared functions if run directly
 if [ -z "$SCRIPT_DIR" ]; then
-    source "$(dirname "$0")/../diagnose.sh" --functions-only
+    . "$(dirname "$0")/../lib/core.sh"
 fi
 
 section "Docker image"
@@ -59,8 +59,28 @@ else
     info "Consider building for linux/arm64 if running on Apple Silicon"
 fi
 
-# Base image detection (only in Docker)
-if [ -f /etc/os-release ] && [ -f /.dockerenv ]; then
-    . /etc/os-release
-    pass "Base image: $PRETTY_NAME"
+# Container detection and info
+if [ -f /.dockerenv ]; then
+    info "Running inside Docker container"
+
+    # Base image detection
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        info "Base image: $PRETTY_NAME"
+    fi
+elif [ -f /run/.containerenv ]; then
+    info "Running inside Podman container"
+fi
+
+# Docker/Podman version (if available on host or in container)
+if check_command docker; then
+    DOCKER_VERSION=$(docker --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    if [ -n "$DOCKER_VERSION" ]; then
+        info "Docker: $DOCKER_VERSION"
+    fi
+elif check_command podman; then
+    PODMAN_VERSION=$(podman --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    if [ -n "$PODMAN_VERSION" ]; then
+        info "Podman: $PODMAN_VERSION"
+    fi
 fi

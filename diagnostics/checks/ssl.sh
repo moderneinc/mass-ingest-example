@@ -1,9 +1,9 @@
-#!/bin/bash
+#!/bin/sh
 # SSL/Certificate checks for configured endpoints
 
 # Source shared functions if run directly
 if [ -z "$SCRIPT_DIR" ]; then
-    source "$(dirname "$0")/../diagnose.sh" --functions-only
+    . "$(dirname "$0")/../lib/core.sh"
 fi
 
 section "SSL/Certificates"
@@ -13,18 +13,55 @@ check_ssl() {
     local host="$1"
     local port="${2:-443}"
 
+    # Check DNS first - no point checking SSL if host doesn't resolve
+    if ! check_dns "$host"; then
+        fail "$host: DNS resolution failed"
+        info "Hostname does not resolve - check DNS configuration or hostname spelling"
+        return
+    fi
+
     if ! check_command openssl; then
         info "$host: cannot check (openssl not available)"
         return
     fi
 
-    # Get certificate info
-    CERT_INFO=$(echo | openssl s_client -servername "$host" -connect "$host:$port" 2>/dev/null | openssl x509 -noout -dates -subject 2>/dev/null)
+    # Get certificate info and capture any errors
+    local ssl_output ssl_error
+    ssl_output=$(echo | openssl s_client -servername "$host" -connect "$host:$port" 2>&1)
+    CERT_INFO=$(echo "$ssl_output" | openssl x509 -noout -dates -subject 2>/dev/null)
 
     if [ -z "$CERT_INFO" ]; then
+        # Check if it's a connection issue vs SSL issue
+        if echo "$ssl_output" | grep -qiE "connection refused|connection timed out|no route"; then
+            fail "$host: connection failed"
+            info "Host resolves but connection failed - check if service is running on port $port"
+            return
+        fi
+
         fail "$host: SSL handshake failed"
-        info "Certificate may be self-signed or untrusted"
-        info "Consider adding certificate to trust store"
+
+        # Extract the actual error from openssl output
+        ssl_error=$(echo "$ssl_output" | grep -iE "error|unable|failed|refused|timeout" | head -1)
+        if [ -n "$ssl_error" ]; then
+            info "Error: $ssl_error"
+        fi
+
+        # Extract verify error if present
+        verify_error=$(echo "$ssl_output" | grep "verify error" | head -1)
+        if [ -n "$verify_error" ]; then
+            info "$verify_error"
+        fi
+
+        info ""
+        info "Possible causes:"
+        info "  - Self-signed or internal CA certificate"
+        info "  - Certificate not trusted by system"
+        info "  - Proxy intercepting HTTPS traffic"
+        info ""
+        info "To fix, add the CA certificate to:"
+        info "  - JVM trust store: keytool -import -trustcacerts -keystore \$JAVA_HOME/lib/security/cacerts"
+        info "  - System trust store (Linux): /etc/ssl/certs/ or /etc/pki/ca-trust/"
+        info "  - Docker: mount CA cert and update-ca-certificates"
         return
     fi
 
@@ -56,7 +93,16 @@ check_ssl() {
 CHECKED_HOSTS=""
 
 # Check Publish URL (if HTTPS)
-if [ -n "${PUBLISH_URL:-}" ] && [[ "$PUBLISH_URL" == "https://"* ]]; then
+case "${PUBLISH_URL:-}" in
+    https://*)
+        PUBLISH_URL_IS_HTTPS=true
+        ;;
+    *)
+        PUBLISH_URL_IS_HTTPS=false
+        ;;
+esac
+
+if [ -n "${PUBLISH_URL:-}" ] && [ "$PUBLISH_URL_IS_HTTPS" = true ]; then
     PUBLISH_HOST=$(echo "$PUBLISH_URL" | sed 's|https://||' | cut -d/ -f1 | cut -d: -f1)
     if [ -n "$PUBLISH_HOST" ]; then
         check_ssl "$PUBLISH_HOST"

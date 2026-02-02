@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # Dependency repository checks: connectivity to user-specified repositories
 #
 # Tests connectivity and latency to dependency repositories listed in a CSV file.
@@ -18,11 +18,11 @@
 
 # Source shared functions if run directly
 if [ -z "$SCRIPT_DIR" ]; then
-    source "$(dirname "$0")/../diagnose.sh" --functions-only
+    . "$(dirname "$0")/../lib/core.sh"
 fi
 
 # Source latency testing library
-source "$(dirname "$0")/../lib/latency.sh"
+. "${SCRIPT_DIR:-$(dirname "$0")/..}/lib/latency.sh"
 
 section "Dependency repositories"
 
@@ -34,13 +34,11 @@ fi
 
 # Find the CSV file
 find_repos_csv() {
-    local paths=(
-        "${DEPENDENCY_REPOS_CSV:-}"
-        "./dependency-repos.csv"
+    for path in \
+        "${DEPENDENCY_REPOS_CSV:-}" \
+        "./dependency-repos.csv" \
         "/app/dependency-repos.csv"
-    )
-
-    for path in "${paths[@]}"; do
+    do
         if [ -n "$path" ] && [ -f "$path" ]; then
             echo "$path"
             return 0
@@ -60,48 +58,41 @@ fi
 info "Using: $REPOS_CSV"
 
 # Expand environment variable references in a string
-# Supports ${VAR} syntax
+# Supports ${VAR} syntax (limited POSIX-compatible implementation)
 expand_env_vars() {
-    local value="$1"
-    # Replace ${VAR} with actual env var values
-    while [[ "$value" =~ \$\{([^}]+)\} ]]; do
-        local var_name="${BASH_REMATCH[1]}"
-        local var_value="${!var_name:-}"
-        value="${value/\$\{$var_name\}/$var_value}"
-    done
-    echo "$value"
+    value="$1"
+    # Use eval for simple env var expansion (handles ${VAR} syntax)
+    eval "echo \"$value\"" 2>/dev/null || echo "$value"
 }
 
 # Test a single repository with comprehensive latency measurement
 test_repo() {
-    local url="$1"
-    local username="$2"
-    local password="$3"
-    local token="$4"
+    url="$1"
+    username="$2"
+    password="$3"
+    token="$4"
 
     # Expand env vars in credentials
     username=$(expand_env_vars "$username")
     password=$(expand_env_vars "$password")
     token=$(expand_env_vars "$token")
 
-    # Build curl args for auth
-    local curl_args=()
+    # Build curl auth args
+    curl_auth=""
 
     if [ -n "$token" ]; then
-        curl_args+=(-H "Authorization: Bearer $token")
+        curl_auth="-H \"Authorization: Bearer $token\""
     elif [ -n "$username" ] && [ -n "$password" ]; then
-        curl_args+=(-u "${username}:${password}")
+        curl_auth="-u ${username}:${password}"
     fi
 
     # Extract host for display
-    local host
     host=$(echo "$url" | sed 's|.*://||' | cut -d/ -f1)
 
     # Quick connectivity check first
-    local test_url="${url%/}/org/apache/maven/plugins/maven-metadata.xml"
-    local http_code
-    http_code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 "${curl_args[@]}" "$test_url" 2>/dev/null)
-    local curl_exit=$?
+    test_url="${url%/}/org/apache/maven/plugins/maven-metadata.xml"
+    http_code=$(eval "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 $curl_auth \"$test_url\"" 2>/dev/null)
+    curl_exit=$?
 
     if [ $curl_exit -ne 0 ] || [ "$http_code" = "000" ]; then
         fail "$host: unreachable"
@@ -118,7 +109,7 @@ test_repo() {
     fi
 
     # Run comprehensive latency test
-    run_comprehensive_latency_test "$host" "$url" "${curl_args[@]}"
+    run_comprehensive_latency_test "$host" "$url"
 }
 
 # Parse CSV and test each repository
@@ -127,30 +118,28 @@ HEADER_SKIPPED=false
 
 while IFS= read -r line || [ -n "$line" ]; do
     # Skip empty lines and comments
-    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    case "$line" in
+        ''|'#'*|' '*'#'*) continue ;;
+    esac
 
     # Skip header row
     if [ "$HEADER_SKIPPED" = false ]; then
-        if [[ "$line" =~ ^url, ]]; then
-            HEADER_SKIPPED=true
-            continue
-        fi
+        case "$line" in
+            url,*) HEADER_SKIPPED=true; continue ;;
+        esac
         HEADER_SKIPPED=true
     fi
 
     # Parse CSV fields (handle quoted fields with commas)
     # Simple parsing - assumes no commas within fields
-    IFS=',' read -r url username password token <<< "$line"
-
-    # Trim whitespace
-    url=$(echo "$url" | xargs)
-    username=$(echo "$username" | xargs)
-    password=$(echo "$password" | xargs)
-    token=$(echo "$token" | xargs)
+    url=$(echo "$line" | cut -d',' -f1 | xargs)
+    username=$(echo "$line" | cut -d',' -f2 | xargs)
+    password=$(echo "$line" | cut -d',' -f3 | xargs)
+    token=$(echo "$line" | cut -d',' -f4 | xargs)
 
     if [ -n "$url" ]; then
         test_repo "$url" "$username" "$password" "$token"
-        ((REPO_COUNT++))
+        REPO_COUNT=$((REPO_COUNT + 1))
     fi
 done < "$REPOS_CSV"
 
