@@ -50,7 +50,9 @@ if [[ -n "$GIT_CREDS_FILE" ]]; then
     NEEDS_ESCAPE=false
     while IFS= read -r line; do
         # Skip comments and empty lines
-        [[ "$line" =~ ^# ]] || [[ -z "$line" ]] && continue
+        if [[ "$line" =~ ^# ]] || [[ -z "$line" ]]; then
+            continue
+        fi
 
         # Extract password: format is https://user:password@host
         if [[ "$line" =~ ://[^:]+:([^@]+)@ ]]; then
@@ -81,7 +83,9 @@ info ""
 
 # Find repos.csv
 CSV_FILE="${REPOS_CSV:-/app/repos.csv}"
-[[ ! -f "$CSV_FILE" ]] && CSV_FILE="repos.csv"
+if [[ ! -f "$CSV_FILE" ]]; then
+    CSV_FILE="repos.csv"
+fi
 
 if [[ ! -f "$CSV_FILE" ]]; then
     info "Skipped: repos.csv not found"
@@ -107,7 +111,9 @@ fi
 # Get first repository URL and branch from CSV using dynamic column indices
 FIRST_LINE=$(tail -n +2 "$CSV_FILE" | head -1)
 FIRST_REPO=$(echo "$FIRST_LINE" | cut -d',' -f"$CLONEURL_COL")
-[[ -n "$BRANCH_COL" ]] && FIRST_BRANCH=$(echo "$FIRST_LINE" | cut -d',' -f"$BRANCH_COL")
+if [[ -n "$BRANCH_COL" ]]; then
+    FIRST_BRANCH=$(echo "$FIRST_LINE" | cut -d',' -f"$BRANCH_COL")
+fi
 
 if [[ -z "$FIRST_REPO" ]]; then
     info "Skipped: no repositories in repos.csv"
@@ -115,11 +121,12 @@ if [[ -z "$FIRST_REPO" ]]; then
 fi
 
 # Default branch if not specified
-: "${FIRST_BRANCH:=main}"
+if [[ -z "$FIRST_BRANCH" ]]; then
+    FIRST_BRANCH="main"
+fi
 
 # Extract repo name for display
-REPO_NAME="${FIRST_REPO##*/}"
-REPO_NAME="${REPO_NAME%.git}"
+REPO_NAME=$(echo "$FIRST_REPO" | sed 's|.*/||' | sed 's|\.git$||')
 
 # Create temp directory for test clone
 TEST_DIR=$(mktemp -d)
