@@ -60,6 +60,9 @@ main() {
       --start)
         START_INDEX="$2"
         ;;
+      --timeout)
+        BUILD_TIMEOUT="$2"
+        ;;
       *)
         die "Invalid option: $arg"
         ;;
@@ -232,7 +235,7 @@ build_and_upload_repos() {
   mod git sync csv "$clone_dir" "$partition_file" --with-sources
 
   # kill a build if it takes too long assuming it's hung indefinitely
-  # BUILD_TIMEOUT can be set via environment variable, defaults to 2700 seconds (45 minutes)
+  # defaults to 2700 seconds (45 minutes)
   local build_timeout="${BUILD_TIMEOUT:-2700}"
   timeout "$build_timeout" mod build "$clone_dir" --no-download
   ret=$?
