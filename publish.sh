@@ -114,8 +114,8 @@ ingest_repos() {
 
 # Initialize instance if running on AWS EC2 (batch mode)
 initialize_instance_metadata() {
-  TOKEN=$(curl --connect-timeout 2 -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
-  export INSTANCE_ID=$(curl --connect-timeout 2 -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id || echo "localhost")
+  TOKEN=$(curl --connect-timeout 2 -sf -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null)
+  export INSTANCE_ID=$(curl --connect-timeout 2 -sf -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "localhost")
 }
 
 # Configure credentials at runtime (passed via environment variables)
