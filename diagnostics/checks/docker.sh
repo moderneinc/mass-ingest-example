@@ -8,20 +8,8 @@ fi
 
 section "Runtime environment"
 
-# Container detection
-IN_CONTAINER=false
-CONTAINER_TYPE=""
-
-if [[ -f /.dockerenv ]]; then
-    IN_CONTAINER=true
-    CONTAINER_TYPE="Docker"
-elif [[ -f /run/.containerenv ]]; then
-    IN_CONTAINER=true
-    CONTAINER_TYPE="Podman"
-elif grep -q 'docker\|containerd\|lxc' /proc/1/cgroup 2>/dev/null; then
-    IN_CONTAINER=true
-    CONTAINER_TYPE="container"
-fi
+# Container detection (detect_container from core.sh)
+detect_container
 
 if [[ "$IN_CONTAINER" == true ]]; then
     pass "Running inside $CONTAINER_TYPE"

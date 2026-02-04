@@ -42,10 +42,13 @@ check_rate_limit_headers() {
 # Usage: run_sequential_latency "base_url"
 # Output: Sets LATENCY_MIN, LATENCY_AVG, LATENCY_MAX, LATENCY_RESULT, HTTP_429_COUNT
 # Also sets THROTTLE_DETECTED if latency increases significantly
+# Also sets HTTP_ERROR_COUNT for 4xx/5xx tracking
 run_sequential_latency() {
     local base_url="$1"
     local -a latencies=()
     HTTP_429_COUNT=0
+    HTTP_ERROR_COUNT=0
+    HTTP_SUCCESS_COUNT=0
     THROTTLE_DETECTED=false
 
     for i in {1..10}; do
@@ -61,8 +64,13 @@ run_sequential_latency() {
             ((HTTP_429_COUNT++))
         fi
 
-        # Accept any response that indicates the server responded
-        if [[ "$http_code" =~ ^[2-5] ]]; then
+        # Track success vs error responses separately
+        if [[ "$http_code" =~ ^[2-3] ]]; then
+            ((HTTP_SUCCESS_COUNT++))
+            latencies+=($latency)
+        elif [[ "$http_code" =~ ^[4-5] ]]; then
+            ((HTTP_ERROR_COUNT++))
+            # Still count for latency - server did respond
             latencies+=($latency)
         fi
     done
@@ -207,6 +215,18 @@ run_comprehensive_latency_test() {
     # Report throttling
     if [[ "$THROTTLE_DETECTED" == true ]]; then
         warn "$name: possible throttling detected (${THROTTLE_FROM}ms -> ${THROTTLE_TO}ms)"
+    fi
+
+    # Report high error rate (4xx/5xx responses)
+    if (( HTTP_ERROR_COUNT > 0 )); then
+        local total_responses=$((HTTP_SUCCESS_COUNT + HTTP_ERROR_COUNT))
+        local error_pct=$((HTTP_ERROR_COUNT * 100 / total_responses))
+        if (( error_pct >= 50 )); then
+            warn "$name: high error rate (${HTTP_ERROR_COUNT}/${total_responses} responses were 4xx/5xx)"
+            info "Test artifacts may not exist in this repository"
+        elif (( error_pct >= 20 )); then
+            info "$name: ${HTTP_ERROR_COUNT}/${total_responses} responses were 4xx/5xx (test artifacts may not exist)"
+        fi
     fi
 
     # Parallel throughput test

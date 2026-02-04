@@ -43,9 +43,10 @@ if [[ -n "$GIT_CREDS_FILE" ]]; then
     else
         warn ".git-credentials: file is writable (mode $FILE_PERMS)"
         info "Git may clear credentials on authentication failure"
-        # Detect Docker and suggest appropriate fix
-        if [[ -f "/.dockerenv" ]] || grep -q 'docker\|containerd' /proc/1/cgroup 2>/dev/null; then
-            info "In Docker, mount the file as read-only:"
+        # Detect container and suggest appropriate fix (detect_container from core.sh)
+        detect_container
+        if [[ "$IN_CONTAINER" == true ]]; then
+            info "In container, mount the file as read-only:"
             info "  -v /path/.git-credentials:/root/.git-credentials:ro"
         else
             info "Consider: chmod 400 ~/.git-credentials"

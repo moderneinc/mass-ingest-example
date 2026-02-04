@@ -153,5 +153,50 @@ strip_ansi() {
     sed 's/\x1b\[[0-9;]*m//g'
 }
 
+# Detect if running inside a container
+# Sets: IN_CONTAINER (true/false), CONTAINER_TYPE (Docker/Podman/container/empty)
+detect_container() {
+    IN_CONTAINER=false
+    CONTAINER_TYPE=""
+
+    # Check for Docker (most common)
+    if [[ -f /.dockerenv ]]; then
+        IN_CONTAINER=true
+        CONTAINER_TYPE="Docker"
+        return 0
+    fi
+
+    # Check for Podman
+    if [[ -f /run/.containerenv ]]; then
+        IN_CONTAINER=true
+        CONTAINER_TYPE="Podman"
+        return 0
+    fi
+
+    # Check cgroups v1 (older systems)
+    if grep -qE 'docker|containerd|lxc' /proc/1/cgroup 2>/dev/null; then
+        IN_CONTAINER=true
+        CONTAINER_TYPE="container"
+        return 0
+    fi
+
+    # Check cgroups v2 (modern systems) - look for container indicators in mountinfo
+    if [[ -f /proc/1/mountinfo ]]; then
+        if grep -qE 'workdir=.*(docker|containers|buildkit)' /proc/1/mountinfo 2>/dev/null; then
+            IN_CONTAINER=true
+            CONTAINER_TYPE="container"
+            return 0
+        fi
+        # Also check for overlay filesystem with typical container paths
+        if grep -qE '^[0-9]+ [0-9]+ [0-9]+:[0-9]+ / / .*overlay' /proc/1/mountinfo 2>/dev/null; then
+            IN_CONTAINER=true
+            CONTAINER_TYPE="container"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
 # Note: Functions are available to scripts that source this file directly.
 # No export -f needed (and it's not POSIX compatible anyway).
