@@ -39,6 +39,37 @@ die() {
   exit 1
 }
 
+# Check if mod CLI version is >= required version (semver comparison)
+# Returns 0 (true) if current version >= required version, 1 (false) otherwise
+mod_version_at_least() {
+  local required_version=$1
+  local current_version
+  current_version=$(mod --version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+
+  if [ -z "$current_version" ]; then
+    return 1
+  fi
+
+  # Split versions into components
+  local req_major req_minor req_patch
+  local cur_major cur_minor cur_patch
+
+  IFS='.' read -r req_major req_minor req_patch <<< "$required_version"
+  IFS='.' read -r cur_major cur_minor cur_patch <<< "$current_version"
+
+  # Compare major
+  if [ "$cur_major" -gt "$req_major" ]; then return 0; fi
+  if [ "$cur_major" -lt "$req_major" ]; then return 1; fi
+
+  # Compare minor
+  if [ "$cur_minor" -gt "$req_minor" ]; then return 0; fi
+  if [ "$cur_minor" -lt "$req_minor" ]; then return 1; fi
+
+  # Compare patch
+  if [ "$cur_patch" -ge "$req_patch" ]; then return 0; fi
+  return 1
+}
+
 main() {
   initialize_instance_metadata
   run_startup_diagnostics
@@ -97,6 +128,9 @@ ingest_repos() {
     printf "Organization: %s\n" "$ORGANIZATION"
     mkdir -p "$clone_dir"
     mod git sync csv "$clone_dir" "$csv_file" --organization "$ORGANIZATION" --with-sources
+    if mod_version_at_least "3.56.7"; then
+      mod log syncs add "$clone_dir" "$DATA_DIR/syncs.zip" --last-sync
+    fi
     mod git pull "$clone_dir"
     mod build "$clone_dir" --no-download
     mod publish "$clone_dir"
@@ -256,6 +290,9 @@ build_and_upload_repos() {
   export TERM=dumb
 
   mod git sync csv "$clone_dir" "$partition_file" --with-sources
+  if mod_version_at_least "3.56.7"; then
+    mod log syncs add "$clone_dir" "$DATA_DIR/syncs.zip" --last-sync
+  fi
 
   # kill a build if it takes too long assuming it's hung indefinitely
   # defaults to 2700 seconds (45 minutes)
@@ -277,7 +314,7 @@ send_logs() {
 
   # Upload logs to S3
   if [[ "${PUBLISH_URL:-}" == "s3://"* ]]; then
-    # Construct S3 path for logs
+    # Construct S3 path for build logs
     logs_path="${PUBLISH_URL}/.logs/$index/$timestamp/ingest-log-cli-$timestamp-$index.zip"
     info "Uploading logs to $logs_path"
 
@@ -303,6 +340,28 @@ send_logs() {
     if ! "${S3_CMD[@]}"; then
       info "Failed to upload logs to S3"
     fi
+
+    # Upload sync logs to S3 (if they exist)
+    if [ -f "$DATA_DIR/syncs.zip" ]; then
+      sync_logs_path="${PUBLISH_URL}/.logs/$index/$timestamp/ingest-sync-log-cli-$timestamp-$index.zip"
+      info "Uploading sync logs to $sync_logs_path"
+
+      S3_CMD=(aws s3 cp "$DATA_DIR/syncs.zip" "$sync_logs_path")
+
+      if [ -n "${S3_PROFILE:-}" ]; then
+        S3_CMD+=(--profile "${S3_PROFILE}")
+      fi
+      if [ -n "${S3_REGION:-}" ]; then
+        S3_CMD+=(--region "${S3_REGION}")
+      fi
+      if [ -n "${S3_ENDPOINT:-}" ]; then
+        S3_CMD+=(--endpoint-url "${S3_ENDPOINT}")
+      fi
+
+      if ! "${S3_CMD[@]}"; then
+        info "Failed to upload sync logs to S3"
+      fi
+    fi
   # if PUBLISH_USER and PUBLISH_PASSWORD are set, or PUBLISH_TOKEN is set, publish logs
   elif [[ -n "${PUBLISH_USER:-}" && -n "${PUBLISH_PASSWORD:-}" ]]; then
     logs_url=$PUBLISH_URL/io/moderne/ingest-log/$index/$timestamp/ingest-log-cli-$timestamp-$index.zip
@@ -310,11 +369,29 @@ send_logs() {
     if ! curl -s -S --insecure -u "$PUBLISH_USER":"$PUBLISH_PASSWORD" -X PUT "$logs_url" -T "$DATA_DIR/log.zip"; then
         info "Failed to publish logs"
     fi
+
+    # Upload sync logs (if they exist)
+    if [ -f "$DATA_DIR/syncs.zip" ]; then
+      sync_logs_url=$PUBLISH_URL/io/moderne/ingest-sync-log/$index/$timestamp/ingest-sync-log-cli-$timestamp-$index.zip
+      info "Uploading sync logs to $sync_logs_url"
+      if ! curl -s -S --insecure -u "$PUBLISH_USER":"$PUBLISH_PASSWORD" -X PUT "$sync_logs_url" -T "$DATA_DIR/syncs.zip"; then
+          info "Failed to publish sync logs"
+      fi
+    fi
   elif [[ -n "${PUBLISH_TOKEN:-}" ]]; then
     logs_url=$PUBLISH_URL/io/moderne/ingest-log/$index/$timestamp/ingest-log-cli-$timestamp-$index.zip
     info "Uploading logs to $logs_url"
     if ! curl -s -S --insecure -H "Authorization: Bearer $PUBLISH_TOKEN" -X PUT "$logs_url" -T "$DATA_DIR/log.zip"; then
         info "Failed to publish logs"
+    fi
+
+    # Upload sync logs (if they exist)
+    if [ -f "$DATA_DIR/syncs.zip" ]; then
+      sync_logs_url=$PUBLISH_URL/io/moderne/ingest-sync-log/$index/$timestamp/ingest-sync-log-cli-$timestamp-$index.zip
+      info "Uploading sync logs to $sync_logs_url"
+      if ! curl -s -S --insecure -H "Authorization: Bearer $PUBLISH_TOKEN" -X PUT "$sync_logs_url" -T "$DATA_DIR/syncs.zip"; then
+          info "Failed to publish sync logs"
+      fi
     fi
   else
     info "No log publishing credentials provided"

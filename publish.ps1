@@ -42,6 +42,43 @@ function Write-Fatal() {
   exit 1
 }
 
+# Check if mod CLI version is >= required version (semver comparison)
+# Returns $true if current version >= required version, $false otherwise
+function Test-ModVersionAtLeast() {
+  param(
+    [string]$RequiredVersion
+  )
+
+  try {
+    $versionOutput = mod --version 2>$null | Select-Object -First 1
+    if ($versionOutput -match '(\d+)\.(\d+)\.(\d+)') {
+      $curMajor = [int]$Matches[1]
+      $curMinor = [int]$Matches[2]
+      $curPatch = [int]$Matches[3]
+    } else {
+      return $false
+    }
+  } catch {
+    return $false
+  }
+
+  $reqParts = $RequiredVersion -split '\.'
+  $reqMajor = [int]$reqParts[0]
+  $reqMinor = [int]$reqParts[1]
+  $reqPatch = [int]$reqParts[2]
+
+  # Compare major
+  if ($curMajor -gt $reqMajor) { return $true }
+  if ($curMajor -lt $reqMajor) { return $false }
+
+  # Compare minor
+  if ($curMinor -gt $reqMinor) { return $true }
+  if ($curMinor -lt $reqMinor) { return $false }
+
+  # Compare patch
+  return $curPatch -ge $reqPatch
+}
+
 function Ingest-Repos() {
   Initialize-InstanceMetadata
   Configure-Credentials
@@ -53,6 +90,9 @@ function Ingest-Repos() {
     Write-Host "Organization: $Organization"
     New-Item -Type Directory "$CloneDir" -Force
     mod git sync csv "$CloneDir" "$SourceCsv" --organization "$Organization" --with-sources
+    if (Test-ModVersionAtLeast "3.56.7") {
+      mod log syncs add "$CloneDir" "$env:DATA_DIR\syncs.zip" --last-sync
+    }
     mod git pull "$CloneDir"
     mod build "$CloneDir" --no-download
     mod publish "$CloneDir"
@@ -200,6 +240,9 @@ function Invoke-BuildAndUploadRepos {
 
   #mod git sync csv "$CloneDir" "$PartitionFile" --with-sources
   mod git sync csv "$CloneDir" "file:///$env:DATA_DIR/selected-repos.csv" --with-sources | Write-Host
+  if (Test-ModVersionAtLeast "3.56.7") {
+    mod log syncs add "$CloneDir" "$env:DATA_DIR\syncs.zip" --last-sync | Write-Host
+  }
 
   $Process = Start-Process -FilePath "mod" -ArgumentList "build $CloneDir --no-download" -PassThru -NoNewWindow
   $Process | Wait-Process -Timeout 2700 -ErrorAction SilentlyContinue -ErrorVariable Timeout
@@ -225,7 +268,7 @@ function Send-Logs() {
 
   # Upload logs to S3
   if ($env:PUBLISH_URL -and $env:PUBLISH_URL.StartsWith("s3://")) {
-    # Construct S3 path for logs
+    # Construct S3 path for build logs
     $LogsPath = "$env:PUBLISH_URL/.logs/$Index/$Timestamp/ingest-log-cli-$Timestamp-$Index.zip"
     Write-Info "Uploading logs to $LogsPath"
 
@@ -255,6 +298,32 @@ function Send-Logs() {
     if (-not $?) {
       Write-Info "Failed to upload logs to S3"
     }
+
+    # Upload sync logs to S3 (if they exist)
+    if (Test-Path "$env:DATA_DIR\syncs.zip") {
+      $SyncLogsPath = "$env:PUBLISH_URL/.logs/$Index/$Timestamp/ingest-sync-log-cli-$Timestamp-$Index.zip"
+      Write-Info "Uploading sync logs to $SyncLogsPath"
+
+      $S3Cmd = @("aws", "s3", "cp", "$env:DATA_DIR\syncs.zip", $SyncLogsPath)
+
+      if ($env:S3_PROFILE) {
+        $S3Cmd += "--profile"
+        $S3Cmd += $env:S3_PROFILE
+      }
+      if ($env:S3_REGION) {
+        $S3Cmd += "--region"
+        $S3Cmd += $env:S3_REGION
+      }
+      if ($env:S3_ENDPOINT) {
+        $S3Cmd += "--endpoint-url"
+        $S3Cmd += $env:S3_ENDPOINT
+      }
+
+      & $S3Cmd[0] $S3Cmd[1..($S3Cmd.Length-1)]
+      if (-not $?) {
+        Write-Info "Failed to upload sync logs to S3"
+      }
+    }
   }
   # if PUBLISH_USER and PUBLISH_PASSWORD are set, publish logs
   elseif ($env:PUBLISH_USER -and $env:PUBLISH_PASSWORD) {
@@ -268,6 +337,18 @@ function Send-Logs() {
     if (-not $?) {
       Write-Info "Failed to publish logs"
     }
+
+    # Upload sync logs (if they exist)
+    if (Test-Path "$env:DATA_DIR\syncs.zip") {
+      $SyncLogsUrl = "$env:PUBLISH_URL/io/moderne/ingest-sync-log/$Index/$Timestamp/ingest-sync-log-cli-$Timestamp-$Index.zip"
+      Write-Info "Uploading sync logs to $SyncLogsUrl"
+      Invoke-WebRequest -Credential $Credential -Method PUT -UseBasicParsing `
+          -Uri "$SyncLogsUrl" `
+          -InFile "$env:DATA_DIR\syncs.zip"
+      if (-not $?) {
+        Write-Info "Failed to publish sync logs"
+      }
+    }
   } elseif ($env:PUBLISH_TOKEN) {
     $LogsUrl = "$env:PUBLISH_URL/io/moderne/ingest-log/$Index/$Timestamp/ingest-log-cli-$Timestamp-$Index.zip"
     Write-Info "Uploading logs to $LogsUrl"
@@ -276,6 +357,18 @@ function Send-Logs() {
         -InFile "$env:DATA_DIR\log.zip"
     if (-not $?) {
       Write-Info "Failed to publish logs"
+    }
+
+    # Upload sync logs (if they exist)
+    if (Test-Path "$env:DATA_DIR\syncs.zip") {
+      $SyncLogsUrl = "$env:PUBLISH_URL/io/moderne/ingest-sync-log/$Index/$Timestamp/ingest-sync-log-cli-$Timestamp-$Index.zip"
+      Write-Info "Uploading sync logs to $SyncLogsUrl"
+      Invoke-WebRequest -Headers @{"Authorization"="Bearer $env:PUBLISH_TOKEN"} -Method PUT -UseBasicParsing `
+          -Uri "$SyncLogsUrl" `
+          -InFile "$env:DATA_DIR\syncs.zip"
+      if (-not $?) {
+        Write-Info "Failed to publish sync logs"
+      }
     }
   } else {
     Write-Info "No log publishing credentials provided"
