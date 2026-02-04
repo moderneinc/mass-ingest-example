@@ -120,10 +120,22 @@ check_dns() {
     return 1
 }
 
-# Get CSV column index by name (case-insensitive)
+# Get CSV column index by name (case-insensitive, fixed string match)
 # Requires $HEADER to be set to the CSV header line
 get_col_index() {
-    echo "$HEADER" | tr ',' '\n' | grep -ni "^$1$" | cut -d: -f1
+    local target="$1"
+    local target_lower=$(echo "$target" | tr '[:upper:]' '[:lower:]')
+    local idx=0
+    # Use comma as delimiter and iterate to find exact match
+    while IFS= read -r col; do
+        idx=$((idx + 1))
+        # Case-insensitive exact match (portable - works with Bash 3.x)
+        local col_lower=$(echo "$col" | tr '[:upper:]' '[:lower:]')
+        if [[ "$col_lower" == "$target_lower" ]]; then
+            echo "$idx"
+            return 0
+        fi
+    done < <(echo "$HEADER" | tr ',' '\n')
 }
 
 # Find repos.csv file (checks REPOS_CSV env, /app/repos.csv, ./repos.csv)

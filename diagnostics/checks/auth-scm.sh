@@ -1,12 +1,19 @@
 #!/bin/bash
-# Authentication checks for SCM: test clone with timeout
+# SCM credential file checks: .git-credentials validation
+#
+# Validates the .git-credentials file for common issues:
+# - File exists and contains credentials
+# - File permissions (read-only recommended)
+# - URL encoding issues in passwords
+#
+# Note: Actual SCM connectivity is tested by scm-repos.sh
 
 # Source shared functions if run directly
 if [[ -z "$SCRIPT_DIR" ]]; then
     source "$(dirname "${BASH_SOURCE[0]}")/../lib/core.sh"
 fi
 
-section "Authentication - SCM"
+section "SCM credentials"
 
 # Check .git-credentials file if it exists
 # Check multiple locations (home dir, current dir, /root for Docker)
@@ -57,16 +64,16 @@ if [[ -n "$GIT_CREDS_FILE" ]]; then
         # Extract password using step-by-step parsing (handles @ in passwords, port numbers)
         # Format: https://user:password@host[:port][/path]
         # 1. Strip protocol prefix (https://, http://)
-        local without_proto="${line#*://}"
+        without_proto="${line#*://}"
         # 2. Get the userinfo part (everything before the last @)
         #    Using parameter expansion: remove shortest match from end
         if [[ "$without_proto" == *@* ]]; then
-            local userinfo="${without_proto%@*}"
+            userinfo="${without_proto%@*}"
             # 3. Extract password (everything after first :)
             if [[ "$userinfo" == *:* ]]; then
-                local password="${userinfo#*:}"
-                # Check for chars that need escaping: / @ : and space
-                if [[ "$password" =~ [/:@\ ] ]]; then
+                password="${userinfo#*:}"
+                # Check for chars that need escaping: / @ : space % # ? +
+                if [[ "$password" =~ [/:@\ %#?+] ]]; then
                     NEEDS_ESCAPE=true
                 fi
             fi
@@ -75,7 +82,7 @@ if [[ -n "$GIT_CREDS_FILE" ]]; then
 
     if [[ "$NEEDS_ESCAPE" == true ]]; then
         fail ".git-credentials: credentials contain characters that require URL escaping"
-        info "Special characters (/ : @ space) in passwords must be URL-encoded"
+        info "Special characters (/ : @ space % # ? +) in passwords must be URL-encoded"
         info "Common: '/' in Bitbucket PATs must be encoded as '%2F'"
         info ""
         info "To URL-encode a password, run:"
@@ -86,79 +93,4 @@ if [[ -n "$GIT_CREDS_FILE" ]]; then
     fi
 else
     info ".git-credentials: file not found (may use other auth method)"
-fi
-
-info ""
-
-# Find repos.csv (find_repos_csv from core.sh)
-if ! find_repos_csv; then
-    info "Skipped: repos.csv not found"
-    return 0 2>/dev/null || exit 0
-fi
-
-# Parse header to find column indices (get_col_index from core.sh)
-HEADER=$(head -1 "$CSV_FILE")
-
-CLONEURL_COL=$(get_col_index "cloneUrl")
-BRANCH_COL=$(get_col_index "branch")
-
-if [[ -z "$CLONEURL_COL" ]]; then
-    fail "Clone test: cloneUrl column not found in CSV header"
-    return 0 2>/dev/null || exit 0
-fi
-
-# Get first repository URL and branch from CSV using dynamic column indices
-FIRST_LINE=$(tail -n +2 "$CSV_FILE" | head -1)
-FIRST_REPO=$(echo "$FIRST_LINE" | cut -d',' -f"$CLONEURL_COL")
-if [[ -n "$BRANCH_COL" ]]; then
-    FIRST_BRANCH=$(echo "$FIRST_LINE" | cut -d',' -f"$BRANCH_COL")
-fi
-
-if [[ -z "$FIRST_REPO" ]]; then
-    info "Skipped: no repositories in repos.csv"
-    return 0 2>/dev/null || exit 0
-fi
-
-# Default branch if not specified
-if [[ -z "$FIRST_BRANCH" ]]; then
-    FIRST_BRANCH="main"
-fi
-
-# Extract repo name for display
-REPO_NAME=$(echo "$FIRST_REPO" | sed 's|.*/||' | sed 's|\.git$||')
-
-# Create temp directory for test clone
-TEST_DIR=$(mktemp -d)
-trap "rm -rf '$TEST_DIR'" EXIT
-
-# Clone with timeout (1 minute)
-START=$(date +%s)
-
-# Use GIT_TERMINAL_PROMPT=0 to fail fast on auth issues instead of hanging
-if check_command timeout; then
-    CLONE_OUTPUT=$(GIT_TERMINAL_PROMPT=0 timeout 60 git clone --depth=1 --branch "$FIRST_BRANCH" "$FIRST_REPO" "$TEST_DIR/test-clone" 2>&1)
-    CLONE_EXIT=$?
-else
-    # No timeout available (macOS), just run directly
-    CLONE_OUTPUT=$(GIT_TERMINAL_PROMPT=0 git clone --depth=1 --branch "$FIRST_BRANCH" "$FIRST_REPO" "$TEST_DIR/test-clone" 2>&1)
-    CLONE_EXIT=$?
-fi
-
-END=$(date +%s)
-DURATION=$((END - START))
-
-if (( CLONE_EXIT == 0 )) && [[ -d "$TEST_DIR/test-clone/.git" ]]; then
-    pass "Clone test: $REPO_NAME (${DURATION}s)"
-elif (( CLONE_EXIT == 124 )); then
-    fail "Clone test: timed out after 60s"
-else
-    # Check if it's an auth failure
-    if [[ "$CLONE_OUTPUT" =~ authentication|credential|permission|401|403 ]]; then
-        warn "Clone test: authentication required"
-        info "Configure git credentials for: $FIRST_REPO"
-    else
-        fail "Clone test: failed"
-        # Show first meaningful line of error
-        info "$(echo "$CLONE_OUTPUT" | grep -v "^$" | head -1)"
-    fi
 fi

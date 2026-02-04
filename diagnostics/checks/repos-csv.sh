@@ -44,37 +44,29 @@ BRANCH_COL=$(get_col_index "branch")
 ORIGIN_COL=$(get_col_index "origin")
 PATH_COL=$(get_col_index "path")
 
-# Check required columns
+# Check required columns (cloneUrl, origin, path)
 MISSING_REQUIRED=""
-for col in cloneUrl branch; do
+PRESENT_REQUIRED=""
+for col in cloneUrl origin path; do
     if [[ -z "$(get_col_index "$col")" ]]; then
         MISSING_REQUIRED="$MISSING_REQUIRED $col"
+    else
+        PRESENT_REQUIRED="$PRESENT_REQUIRED $col"
     fi
 done
 
-if [[ -n "$MISSING_REQUIRED" ]]; then
-    fail "Missing required columns:$MISSING_REQUIRED"
+if [[ -z "$MISSING_REQUIRED" ]]; then
+    pass "Required columns: cloneUrl, origin, path (present)"
 else
-    pass "Required columns: cloneUrl, branch"
+    warn "Missing required columns:$MISSING_REQUIRED"
+    info "These columns are needed for proper organization in Moderne"
 fi
 
-# Check optional columns
-PRESENT_OPTIONAL=""
-MISSING_OPTIONAL=""
-for col in origin path; do
-    if [[ -n "$(get_col_index "$col")" ]]; then
-        PRESENT_OPTIONAL="$PRESENT_OPTIONAL $col"
-    else
-        MISSING_OPTIONAL="$MISSING_OPTIONAL $col"
-    fi
-done
-
-if [[ -z "$MISSING_OPTIONAL" ]]; then
-    pass "Optional columns: origin, path"
-elif [[ -n "$PRESENT_OPTIONAL" ]]; then
-    warn "Optional columns:$PRESENT_OPTIONAL present,$MISSING_OPTIONAL missing"
+# Check additional column (branch) - encouraged but not required
+if [[ -n "$BRANCH_COL" ]]; then
+    pass "Additional column: branch (present)"
 else
-    warn "Optional columns: origin, path (missing)"
+    info "Additional column: branch (not present, will use remote default)"
 fi
 
 # Check for potential issues
@@ -124,7 +116,7 @@ else
     if [[ -n "$CLONEURL_COL" ]]; then
         info ""
         info "  SCM hosts (from cloneUrl):"
-        tail -n +2 "$CSV_FILE" | cut -d',' -f"$CLONEURL_COL" | sed 's|.*://||' | cut -d/ -f1 | cut -d@ -f2 | sort | uniq -c | sort -rn | head -10 | while read count host; do
+        tail -n +2 "$CSV_FILE" | cut -d',' -f"$CLONEURL_COL" | sed 's|.*://||' | sed 's|.*@||' | cut -d/ -f1 | sort | uniq -c | sort -rn | head -10 | while read count host; do
             if [[ -n "$host" ]]; then
                 printf "       %6d  %s\n" "$count" "$host"
             fi

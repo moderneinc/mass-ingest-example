@@ -111,7 +111,7 @@ mass-ingest-example/
     └── checks/           # Modular check scripts
         ├── system.sh     # CPUs, memory, disk space
         ├── tools.sh      # git, curl, jq, etc.
-        ├── docker.sh     # CPU arch, emulation detection
+        ├── docker.sh     # Container detection, CPU arch, emulation
         ├── java.sh       # JDKs, JAVA_HOME
         ├── cli.sh        # mod CLI version, config
         ├── config.sh     # Env vars, credentials
@@ -119,7 +119,7 @@ mass-ingest-example/
         ├── network.sh    # Connectivity to all hosts
         ├── ssl.sh        # SSL handshakes, cert expiry
         ├── auth-publish.sh # Write/read/delete test
-        ├── auth-scm.sh   # Test clone, .git-credentials checks
+        ├── auth-scm.sh   # .git-credentials validation
         ├── publish-latency.sh # Publish URL latency and throttling
         ├── maven-repos.sh # Maven repos from settings.xml
         ├── dependency-repos.sh # User-specified repos (Gradle, etc.)
@@ -187,11 +187,11 @@ For private repositories, credentials are mounted at runtime (never baked into i
 See each stage's README for specific mounting instructions.
 
 ### Repository list format
-The `repos.csv` file must include:
-- `cloneUrl` - Full git clone URL
-- `branch` - Branch to build
-- `origin` - Source identifier (e.g., `github.com`)
-- `path` - Repository path/identifier
+The `repos.csv` file columns:
+- `cloneUrl` (required) - Full git clone URL
+- `origin` (required) - Source identifier (e.g., `github.com`)
+- `path` (required) - Repository path/identifier
+- `branch` (optional) - Branch to build (uses remote default if not specified)
 
 See [repos.csv documentation](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv) for advanced options.
 
@@ -239,14 +239,14 @@ DIAGNOSE=true docker compose up
 This validates the entire setup and produces a detailed report:
 - System (CPUs, memory, disk space)
 - Required tools (git, curl, jq, unzip, tar)
-- Docker image (CPU architecture, emulation detection)
+- Runtime environment (container detection, CPU architecture, emulation)
 - Java/JDKs (available JDKs, JAVA_HOME)
 - Moderne CLI (version, build config, proxy, trust store, tenant)
 - Configuration (env vars, credentials, git credentials)
 - repos.csv (file validation, columns, origins, sample entries)
 - Network (Maven Central, Gradle plugins, publish URL, SCM hosts)
 - SSL/Certificates (handshakes, expiry warnings)
-- Authentication (publish write/read/delete test, SCM clone test)
+- Authentication (publish write/read/delete test, SCM credentials validation)
 - Publish latency (throughput testing, rate limit detection)
 - Maven repositories (dependency repo connectivity from settings.xml)
 - Dependency repositories (user-specified repos from dependency-repos.csv)
@@ -302,9 +302,10 @@ Generated: 2025-01-20 14:32 UTC
 [PASS] unzip: 6.00
 [PASS] tar: 1.35
 
-=== Docker image ===
+=== Runtime environment ===
+[PASS] Running inside Docker
+       Base image: Ubuntu 24.04.1 LTS
 [PASS] Architecture: x86_64 (no emulation detected)
-[PASS] Base image: Ubuntu 24.04.1 LTS
 
 === Java/JDKs ===
 [PASS] JAVA_HOME: /opt/java/openjdk
@@ -331,8 +332,8 @@ Generated: 2025-01-20 14:32 UTC
 === repos.csv ===
 [PASS] File: /app/repos.csv (exists)
 [PASS] Repositories: 427
-[PASS] Required columns: cloneUrl, branch (present)
-[PASS] Additional columns: origin, path (present)
+[PASS] Required columns: cloneUrl, origin, path (present)
+[PASS] Additional column: branch (present)
        Repositories by origin:
          github.com: 412 repos
          gitlab.internal.com: 15 repos
@@ -358,10 +359,9 @@ Generated: 2025-01-20 14:32 UTC
 [PASS] Overwrite test: succeeded (HTTP 201)
 [PASS] Delete test: succeeded (HTTP 204)
 
-=== Authentication - SCM ===
-       Testing clone: repo-one (main)
-[PASS] Clone test: succeeded (12s)
-       Cleaned up test clone
+=== SCM credentials ===
+[PASS] .git-credentials: found 2 credential(s)
+[PASS] .git-credentials: file is read-only (mode 400)
 
 === Publish latency ===
        Testing PUBLISH_URL (10 sequential requests)...

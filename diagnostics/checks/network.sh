@@ -13,13 +13,13 @@ if [[ -n "${PUBLISH_URL:-}" ]]; then
     case "$PUBLISH_URL" in
         s3://*)
             if check_command aws; then
-                # Build S3 options
-                S3_CMD="aws s3 ls $PUBLISH_URL --max-items 1"
-                [[ -n "${S3_PROFILE:-}" ]] && S3_CMD="$S3_CMD --profile $S3_PROFILE"
-                [[ -n "${S3_REGION:-}" ]] && S3_CMD="$S3_CMD --region $S3_REGION"
-                [[ -n "${S3_ENDPOINT:-}" ]] && S3_CMD="$S3_CMD --endpoint-url $S3_ENDPOINT"
+                # Build S3 command as array (safer than eval)
+                S3_CMD=(aws s3 ls "$PUBLISH_URL" --max-items 1)
+                [[ -n "${S3_PROFILE:-}" ]] && S3_CMD+=(--profile "$S3_PROFILE")
+                [[ -n "${S3_REGION:-}" ]] && S3_CMD+=(--region "$S3_REGION")
+                [[ -n "${S3_ENDPOINT:-}" ]] && S3_CMD+=(--endpoint-url "$S3_ENDPOINT")
 
-                if eval "$S3_CMD" >/dev/null 2>&1; then
+                if "${S3_CMD[@]}" >/dev/null 2>&1; then
                     pass "PUBLISH_URL: $PUBLISH_URL (S3 accessible)"
                 else
                     warn "PUBLISH_URL: $PUBLISH_URL (S3 - cannot list, check credentials)"

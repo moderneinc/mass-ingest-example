@@ -1,17 +1,43 @@
 #!/bin/bash
-# Docker image checks: CPU architecture, emulation detection
+# Runtime environment checks: container detection, CPU architecture, emulation
 
 # Source shared functions if run directly
 if [[ -z "$SCRIPT_DIR" ]]; then
     source "$(dirname "$0")/../lib/core.sh"
 fi
 
-section "Docker image"
+section "Runtime environment"
+
+# Container detection
+IN_CONTAINER=false
+CONTAINER_TYPE=""
+
+if [[ -f /.dockerenv ]]; then
+    IN_CONTAINER=true
+    CONTAINER_TYPE="Docker"
+elif [[ -f /run/.containerenv ]]; then
+    IN_CONTAINER=true
+    CONTAINER_TYPE="Podman"
+elif grep -q 'docker\|containerd\|lxc' /proc/1/cgroup 2>/dev/null; then
+    IN_CONTAINER=true
+    CONTAINER_TYPE="container"
+fi
+
+if [[ "$IN_CONTAINER" == true ]]; then
+    pass "Running inside $CONTAINER_TYPE"
+    # Base image detection
+    if [[ -f /etc/os-release ]]; then
+        source /etc/os-release
+        info "Base image: $PRETTY_NAME"
+    fi
+else
+    info "Running on host (not in container)"
+fi
 
 # Architecture
 ARCH=$(uname -m)
 
-# Detect emulation
+# Detect emulation (only relevant inside containers)
 EMULATED="No"
 EMULATION_REASON=""
 
@@ -47,7 +73,7 @@ if [[ -f /proc/sys/fs/binfmt_misc/status ]]; then
     fi
 fi
 
-# Report results
+# Report architecture results
 if [[ "$EMULATED" == "No" ]]; then
     pass "Architecture: $ARCH (no emulation detected)"
 elif [[ "$EMULATED" == "Possible" ]] || [[ "$EMULATED" == "Likely" ]]; then
@@ -59,28 +85,15 @@ else
     info "Consider building for linux/arm64 if running on Apple Silicon"
 fi
 
-# Container detection and info
-if [[ -f /.dockerenv ]]; then
-    info "Running inside Docker container"
-
-    # Base image detection
-    if [[ -f /etc/os-release ]]; then
-        source /etc/os-release
-        info "Base image: $PRETTY_NAME"
-    fi
-elif [[ -f /run/.containerenv ]]; then
-    info "Running inside Podman container"
-fi
-
-# Docker/Podman version (if available on host or in container)
+# Docker/Podman version (if available)
 if check_command docker; then
     DOCKER_VERSION=$(docker --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
     if [[ -n "$DOCKER_VERSION" ]]; then
-        info "Docker: $DOCKER_VERSION"
+        info "Docker CLI: $DOCKER_VERSION"
     fi
 elif check_command podman; then
     PODMAN_VERSION=$(podman --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
     if [[ -n "$PODMAN_VERSION" ]]; then
-        info "Podman: $PODMAN_VERSION"
+        info "Podman CLI: $PODMAN_VERSION"
     fi
 fi

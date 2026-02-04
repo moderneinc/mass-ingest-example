@@ -137,10 +137,11 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 
     # Parse CSV fields (handle quoted fields with commas)
     # Simple parsing - assumes no commas within fields
-    url=$(echo "$line" | cut -d',' -f1 | xargs)
-    username=$(echo "$line" | cut -d',' -f2 | xargs)
-    password=$(echo "$line" | cut -d',' -f3 | xargs)
-    token=$(echo "$line" | cut -d',' -f4 | xargs)
+    # Use sed to trim leading/trailing whitespace (safer than xargs with special chars)
+    url=$(echo "$line" | cut -d',' -f1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    username=$(echo "$line" | cut -d',' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    password=$(echo "$line" | cut -d',' -f3 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    token=$(echo "$line" | cut -d',' -f4 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
 
     if [[ -n "$url" ]]; then
         test_repo "$url" "$username" "$password" "$token"

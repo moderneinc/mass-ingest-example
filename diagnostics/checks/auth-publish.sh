@@ -23,19 +23,19 @@ case "$PUBLISH_URL" in
             TEST_FILE=$(mktemp)
             echo "diagnostic test $(date)" > "$TEST_FILE"
 
-            # Build S3 options
-            S3_CMD_BASE="aws s3"
-            [[ -n "${S3_PROFILE:-}" ]] && S3_CMD_BASE="$S3_CMD_BASE --profile $S3_PROFILE"
-            [[ -n "${S3_REGION:-}" ]] && S3_CMD_BASE="$S3_CMD_BASE --region $S3_REGION"
-            [[ -n "${S3_ENDPOINT:-}" ]] && S3_CMD_BASE="$S3_CMD_BASE --endpoint-url $S3_ENDPOINT"
+            # Build S3 command as array (safer than string + eval)
+            S3_CMD=(aws s3)
+            [[ -n "${S3_PROFILE:-}" ]] && S3_CMD+=(--profile "$S3_PROFILE")
+            [[ -n "${S3_REGION:-}" ]] && S3_CMD+=(--region "$S3_REGION")
+            [[ -n "${S3_ENDPOINT:-}" ]] && S3_CMD+=(--endpoint-url "$S3_ENDPOINT")
 
             # Write test
-            if eval "$S3_CMD_BASE cp \"$TEST_FILE\" \"$PUBLISH_URL/$TEST_KEY\"" >/dev/null 2>&1; then
+            if "${S3_CMD[@]}" cp "$TEST_FILE" "$PUBLISH_URL/$TEST_KEY" >/dev/null 2>&1; then
                 pass "S3 write: succeeded"
 
                 # Read test
                 READ_FILE=$(mktemp)
-                if eval "$S3_CMD_BASE cp \"$PUBLISH_URL/$TEST_KEY\" \"$READ_FILE\"" >/dev/null 2>&1; then
+                if "${S3_CMD[@]}" cp "$PUBLISH_URL/$TEST_KEY" "$READ_FILE" >/dev/null 2>&1; then
                     pass "S3 read: succeeded"
                     rm -f "$READ_FILE"
                 else
@@ -43,10 +43,10 @@ case "$PUBLISH_URL" in
                 fi
 
                 # Delete test
-                if eval "$S3_CMD_BASE rm \"$PUBLISH_URL/$TEST_KEY\"" >/dev/null 2>&1; then
+                if "${S3_CMD[@]}" rm "$PUBLISH_URL/$TEST_KEY" >/dev/null 2>&1; then
                     pass "S3 delete: succeeded"
                 else
-                    warn "S3 delete: failed (may need manual cleanup)"
+                    fail "S3 delete: failed (may need manual cleanup)"
                 fi
             else
                 fail "S3 write: failed"

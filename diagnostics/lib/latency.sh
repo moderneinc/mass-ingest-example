@@ -147,8 +147,12 @@ run_parallel_throughput() {
     BATCH_TIME_2=${batch_times[1]}
     BATCH_TIME_3=${batch_times[2]}
 
-    # Calculate average per request
-    THROUGHPUT_AVG_MS=$(( (BATCH_TIME_1 + BATCH_TIME_2 + BATCH_TIME_3) / 3 / parallel_count ))
+    # Calculate average per request (ensure minimum of 1ms if any time recorded)
+    local total_ms=$((BATCH_TIME_1 + BATCH_TIME_2 + BATCH_TIME_3))
+    THROUGHPUT_AVG_MS=$(( total_ms / 3 / parallel_count ))
+    if [[ "$THROUGHPUT_AVG_MS" -eq 0 ]] && [[ "$total_ms" -gt 0 ]]; then
+        THROUGHPUT_AVG_MS=1
+    fi
 
     # Check for degradation
     if (( BATCH_TIME_3 > BATCH_TIME_1 * 2 && BATCH_TIME_1 > 0 )); then

@@ -54,13 +54,6 @@ find_settings_xml() {
 
 SETTINGS_XML=$(find_settings_xml)
 
-# Simple XML value extraction
-xml_value() {
-    tag="$1"
-    content="$2"
-    echo "$content" | sed -n "s/.*<${tag}>\([^<]*\)<\/${tag}>.*/\1/p" | head -1
-}
-
 # Test a repository URL
 test_maven_repo() {
     local name="$1"
@@ -113,48 +106,40 @@ if [[ -n "$SETTINGS_XML" ]]; then
     info ""
     info "Parsing: $SETTINGS_XML"
 
-    SETTINGS_CONTENT=$(cat "$SETTINGS_XML" | tr -d '\n' | tr -s ' ')
-
-    # Check for mirror that overrides all repos
-    MIRROR_ALL_URL=""
-    MIRROR_ALL_ID=""
-
-    # Extract mirrors - look for mirrorOf containing * or "central"
-    echo "$SETTINGS_CONTENT" | sed 's/<mirror>/\n<mirror>/g' | grep '<mirror>' | while IFS= read -r mirror_block; do
-        [[ -z "$mirror_block" ]] && continue
-        mirror_of=$(xml_value "mirrorOf" "$mirror_block")
-        if [[ "$mirror_of" == "*" ]] || [[ "$mirror_of" == "central" ]]; then
-            mirror_url=$(xml_value "url" "$mirror_block")
-            mirror_id=$(xml_value "id" "$mirror_block")
-            if [[ -n "$mirror_url" ]]; then
-                echo "$mirror_id|$mirror_url"
+    # Require xmllint for XML parsing
+    if ! check_command xmllint; then
+        warn "xmllint not found - cannot parse settings.xml"
+        info "Install libxml2-utils or libxml2 for your platform"
+    else
+        # Extract mirrors that override central or all repos
+        MIRROR_COUNT=$(xmllint --xpath "count(//mirror)" "$SETTINGS_XML" 2>/dev/null || echo "0")
+        for ((i=1; i<=MIRROR_COUNT; i++)); do
+            mirror_of=$(xmllint --xpath "string(//mirror[$i]/mirrorOf)" "$SETTINGS_XML" 2>/dev/null || true)
+            if [[ "$mirror_of" == "*" ]] || [[ "$mirror_of" == "central" ]]; then
+                mirror_url=$(xmllint --xpath "string(//mirror[$i]/url)" "$SETTINGS_XML" 2>/dev/null || true)
+                mirror_id=$(xmllint --xpath "string(//mirror[$i]/id)" "$SETTINGS_XML" 2>/dev/null || true)
+                if [[ -n "$mirror_url" ]]; then
+                    info ""
+                    info "Mirror configured: $mirror_id"
+                    test_maven_repo "$mirror_id (mirror)" "$mirror_url"
+                fi
+                break
             fi
-            break
-        fi
-    done | head -1 | {
-        IFS='|' read -r MIRROR_ALL_ID MIRROR_ALL_URL
-        if [[ -n "$MIRROR_ALL_URL" ]]; then
-            info ""
-            info "Mirror configured: $MIRROR_ALL_ID"
-            test_maven_repo "$MIRROR_ALL_ID (mirror)" "$MIRROR_ALL_URL"
-        fi
-    }
-
-    # Extract repository URLs from profiles (simplified - just grab URLs)
-    REPO_URLS=$(echo "$SETTINGS_CONTENT" | sed 's/<repository>/\n<repository>/g' | grep '<repository>' | while read -r block; do
-        url=$(xml_value "url" "$block")
-        [[ -n "$url" ]] && echo "$url"
-    done | sort -u | grep -v "repo.maven.apache.org" | head -5)
-
-    if [[ -n "$REPO_URLS" ]]; then
-        info ""
-        info "Additional repositories from profiles:"
-        echo "$REPO_URLS" | while read -r url; do
-            [[ -z "$url" ]] && continue
-            # Extract host for display name
-            name=$(echo "$url" | sed 's|.*://||' | cut -d/ -f1)
-            test_maven_repo "$name" "$url"
         done
+
+        # Extract repository URLs from profiles
+        REPO_URLS=$(xmllint --xpath "//repository/url/text()" "$SETTINGS_XML" 2>/dev/null | tr ' ' '\n' | sort -u | grep -v "repo.maven.apache.org" | head -5 || true)
+
+        if [[ -n "$REPO_URLS" ]]; then
+            info ""
+            info "Additional repositories from profiles:"
+            echo "$REPO_URLS" | while read -r url; do
+                [[ -z "$url" ]] && continue
+                # Extract host for display name
+                name=$(echo "$url" | sed 's|.*://||' | cut -d/ -f1)
+                test_maven_repo "$name" "$url"
+            done
+        fi
     fi
 else
     info ""
