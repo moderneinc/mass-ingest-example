@@ -72,6 +72,9 @@ main() {
       --start)
         START_INDEX="$2"
         ;;
+      --timeout)
+        BUILD_TIMEOUT="$2"
+        ;;
       *)
         die "Invalid option: $arg"
         ;;
@@ -123,8 +126,8 @@ ingest_repos() {
 
 # Initialize instance if running on AWS EC2 (batch mode)
 initialize_instance_metadata() {
-  TOKEN=$(curl --connect-timeout 2 -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
-  export INSTANCE_ID=$(curl --connect-timeout 2 -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id || echo "localhost")
+  TOKEN=$(curl --connect-timeout 2 -sf -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null)
+  export INSTANCE_ID=$(curl --connect-timeout 2 -sf -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "localhost")
 }
 
 # Run startup diagnostics if enabled
@@ -254,11 +257,13 @@ build_and_upload_repos() {
 
   mod git sync csv "$clone_dir" "$partition_file" --with-sources
 
-  # kill a build if it takes over 45 minutes assuming it's hung indefinitely
-  timeout 2700 mod build "$clone_dir" --no-download
+  # kill a build if it takes too long assuming it's hung indefinitely
+  # defaults to 2700 seconds (45 minutes)
+  local build_timeout="${BUILD_TIMEOUT:-2700}"
+  timeout "$build_timeout" mod build "$clone_dir" --no-download
   ret=$?
   if [ $ret -eq 124 ]; then
-    printf "\n* Build timed out after 45 minutes\n\n"
+    printf "\n* Build timed out after %s seconds\n\n" "$build_timeout"
   fi
 
   mod publish "$clone_dir"
