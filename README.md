@@ -95,13 +95,35 @@ mass-ingest-example/
 │   ├── observability/    # Grafana and Prometheus configs
 │   └── README.md
 │
-└── 3-scalability/        # AWS Batch production deployment
-    ├── chunk.sh          # Batch job partitioning script
-    ├── terraform/
-    │   ├── main.tf
-    │   ├── variables.tf
-    │   └── outputs.tf
-    └── README.md
+├── 3-scalability/        # AWS Batch production deployment
+│   ├── chunk.sh          # Batch job partitioning script
+│   ├── terraform/
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   └── README.md
+│
+└── diagnostics/          # Comprehensive diagnostic system
+    ├── diagnose.sh       # Main orchestration script
+    ├── lib/              # Shared libraries
+    │   ├── core.sh       # Colors, output formatting, utilities
+    │   └── latency.sh    # Latency and throughput testing
+    └── checks/           # Modular check scripts
+        ├── system.sh     # CPUs, memory, disk space
+        ├── tools.sh      # git, curl, jq, etc.
+        ├── docker.sh     # Container detection, CPU arch, emulation
+        ├── java.sh       # JDKs, JAVA_HOME
+        ├── cli.sh        # mod CLI version, config
+        ├── config.sh     # Env vars, credentials
+        ├── repos-csv.sh  # File validation, columns, origins
+        ├── network.sh    # Connectivity to all hosts
+        ├── ssl.sh        # SSL handshakes, cert expiry
+        ├── auth-publish.sh # Write/read/delete test
+        ├── auth-scm.sh   # .git-credentials validation
+        ├── publish-latency.sh # Publish URL latency and throttling
+        ├── maven-repos.sh # Maven repos from settings.xml
+        ├── dependency-repos.sh # User-specified repos (Gradle, etc.)
+        └── scm-repos.sh  # SCM connectivity per origin
 ```
 
 ## Prerequisites (all stages)
@@ -126,7 +148,9 @@ Before starting with any stage, you'll need:
 
 4. **Docker**: Installed and running (for stages 1 and 2)
 
-5. **AWS account**: Required only for stage 3
+5. **Bash**: Required in the container image (Alpine users: `apk add bash`)
+
+6. **AWS account**: Required only for stage 3
 
 ## Quick comparison
 
@@ -163,13 +187,31 @@ For private repositories, credentials are mounted at runtime (never baked into i
 See each stage's README for specific mounting instructions.
 
 ### Repository list format
-The `repos.csv` file must include:
-- `cloneUrl` - Full git clone URL
-- `branch` - Branch to build
-- `origin` - Source identifier (e.g., `github.com`)
-- `path` - Repository path/identifier
+The `repos.csv` file columns:
+- `cloneUrl` (required) - Full git clone URL
+- `origin` (required) - Source identifier (e.g., `github.com`)
+- `path` (required) - Repository path/identifier
+- `branch` (optional) - Branch to build (uses remote default if not specified)
 
 See [repos.csv documentation](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv) for advanced options.
+
+### Dependency repositories (optional)
+
+Create `dependency-repos.csv` to test connectivity to Maven/Gradle dependency repositories during diagnostics:
+
+```csv
+url,username,password,token
+https://nexus.example.com/releases,${NEXUS_USER},${NEXUS_PASSWORD},
+https://artifactory.example.com/libs,,,${ARTIFACTORY_TOKEN}
+https://repo.spring.io/release,,,
+```
+
+- Use `username` + `password` for basic auth
+- Use `token` for bearer auth (leave username/password empty)
+- Leave all auth fields empty for anonymous access
+- Use `${ENV_VAR}` syntax to reference environment variables
+
+See `dependency-repos.csv.example` for a template.
 
 ### Build arguments
 
@@ -181,6 +223,182 @@ All Dockerfiles support:
 
 We provide scripts to generate `repos.csv` from various sources:
 - [Repository Fetchers](https://github.com/moderneinc/repository-fetchers) - Scripts for GitHub, GitLab, Bitbucket, and more
+
+## Diagnostics
+
+The `diagnostics/` directory contains a comprehensive diagnostic system to validate your mass-ingest setup before starting ingestion.
+
+### Diagnostic mode (full validation)
+
+Run comprehensive diagnostics without starting ingestion:
+
+```bash
+DIAGNOSE=true docker compose up
+```
+
+This validates the entire setup and produces a detailed report:
+- System (CPUs, memory, disk space)
+- Required tools (git, curl, jq, unzip, tar)
+- Runtime environment (container detection, CPU architecture, emulation)
+- Java/JDKs (available JDKs, JAVA_HOME)
+- Moderne CLI (version, build config, proxy, trust store, tenant)
+- Configuration (env vars, credentials, git credentials)
+- repos.csv (file validation, columns, origins, sample entries)
+- Network (Maven Central, Gradle plugins, publish URL, SCM hosts)
+- SSL/Certificates (handshakes, expiry warnings)
+- Authentication (publish write/read/delete test, SCM credentials validation)
+- Publish latency (throughput testing, rate limit detection)
+- Maven repositories (dependency repo connectivity from settings.xml)
+- Dependency repositories (user-specified repos from dependency-repos.csv)
+- SCM repositories (connectivity testing per origin from repos.csv)
+
+The container exits with code 0 if all checks pass, or 1 if any failures are detected.
+
+**Use cases:**
+- Initial setup validation before first real run
+- After configuration changes before deploying
+- Troubleshooting when something stops working
+- Generating diagnostic output to send to Moderne support
+
+### Diagnostics at startup
+
+Set `DIAGNOSE_ON_START=true` to run diagnostics before ingestion starts:
+
+```bash
+docker run -e DIAGNOSE_ON_START=true ...
+```
+
+This runs all diagnostic checks and then proceeds to normal ingestion regardless of the results. Use this to capture diagnostic output in your logs while still attempting ingestion.
+
+### Running diagnostics directly
+
+You can run the main diagnostic script or individual checks:
+
+```bash
+# Full diagnostics
+./diagnostics/diagnose.sh
+
+# Individual checks can be run directly
+./diagnostics/checks/docker.sh
+./diagnostics/checks/network.sh
+./diagnostics/checks/auth-publish.sh
+```
+
+### Example output
+
+```
+Mass-ingest Diagnostics
+Generated: 2025-01-20 14:32 UTC
+
+=== System ===
+[PASS] CPUs: 4
+[PASS] Memory: 12.5GB / 16.0GB available
+[PASS] Disk (data): 45.2GB / 100.0GB available
+
+=== Required tools ===
+[PASS] git: 2.39.3
+[PASS] curl: 8.4.0
+[PASS] jq: 1.7
+[PASS] unzip: 6.00
+[PASS] tar: 1.35
+
+=== Runtime environment ===
+[PASS] Running inside Docker
+       Base image: Ubuntu 24.04.1 LTS
+[PASS] Architecture: x86_64 (no emulation detected)
+
+=== Java/JDKs ===
+[PASS] JAVA_HOME: /opt/java/openjdk
+       Detected JDKs (mod config java jdk list):
+         21.0.1-tem   $JAVA_HOME     /opt/java/openjdk
+         17.0.9-tem   OS directory   /usr/lib/jvm/temurin-17
+[PASS] 5 JDK(s) available in /usr/lib/jvm/
+
+=== Moderne CLI ===
+[PASS] CLI installed: v3.56.0
+       Configuration:
+         Trust store: default JVM
+         Proxy: not configured
+         LST artifacts: Maven (https://artifactory.company.com/moderne)
+         Build timeouts: default
+
+=== Configuration ===
+[PASS] DATA_DIR: /var/moderne (writable)
+[PASS] PUBLISH_URL: https://artifactory.company.com/moderne
+[PASS] Publish credentials: PUBLISH_USER/PASSWORD set
+       Git credentials:
+[PASS] HTTPS credentials: /root/.git-credentials (2 entries)
+
+=== repos.csv ===
+[PASS] File: /app/repos.csv (exists)
+[PASS] Repositories: 427
+[PASS] Required columns: cloneUrl, origin, path (present)
+[PASS] Additional column: branch (present)
+       Repositories by origin:
+         github.com: 412 repos
+         gitlab.internal.com: 15 repos
+       Sample entries (first 3):
+         https://github.com/company/repo-one (main)
+         https://github.com/company/repo-two (main)
+
+=== Network ===
+[PASS] Maven Central: reachable (45ms)
+[PASS] Gradle plugins: reachable (52ms)
+[PASS] PUBLISH_URL: reachable (23ms)
+[PASS] github.com: reachable (31ms)
+[FAIL] gitlab.internal.com: unreachable
+
+=== SSL/Certificates ===
+[PASS] artifactory.company.com: SSL OK (expires in 285 days)
+[PASS] github.com: SSL OK (expires in 180 days)
+[PASS] repo1.maven.org: SSL OK (expires in 340 days)
+
+=== Authentication - Publish ===
+[PASS] Write test: succeeded (HTTP 201)
+[PASS] Read test: succeeded (HTTP 200)
+[PASS] Overwrite test: succeeded (HTTP 201)
+[PASS] Delete test: succeeded (HTTP 204)
+
+=== SCM credentials ===
+[PASS] .git-credentials: found 2 credential(s)
+[PASS] .git-credentials: file is read-only (mode 400)
+
+=== Publish latency ===
+       Testing PUBLISH_URL (10 sequential requests)...
+       Sequential: min=23ms avg=45ms max=89ms
+[PASS] PUBLISH_URL: average latency 45ms
+       Testing PUBLISH_URL (3 × 20 concurrent)...
+       Parallel batches: 850ms, 820ms, 890ms
+[PASS] PUBLISH_URL: parallel throughput 42ms/request
+
+=== Maven repositories ===
+       Using: /root/.m2/settings.xml
+       Testing central (10 sequential requests)...
+       Sequential: min=38ms avg=42ms max=67ms
+[PASS] central: average latency 42ms
+       Testing central (3 × 20 concurrent)...
+       Parallel batches: 920ms, 880ms, 950ms
+[PASS] central: parallel throughput 45ms/request
+       Testing internal-nexus (via mirror: nexus-mirror) (10 sequential requests)...
+       Sequential: min=15ms avg=18ms max=24ms
+[PASS] internal-nexus (via mirror: nexus-mirror): average latency 18ms
+       Testing internal-nexus (via mirror: nexus-mirror) (3 × 20 concurrent)...
+       Parallel batches: 380ms, 350ms, 390ms
+[PASS] internal-nexus (via mirror: nexus-mirror): parallel throughput 18ms/request
+
+=== Dependency repositories ===
+       Using: ./dependency-repos.csv
+       Testing nexus.example.com (10 sequential requests)...
+       Sequential: min=19ms avg=23ms max=31ms
+[PASS] nexus.example.com: average latency 23ms
+       Testing nexus.example.com (3 × 20 concurrent)...
+       Parallel batches: 480ms, 450ms, 510ms
+[PASS] nexus.example.com: parallel throughput 24ms/request
+
+========================================
+RESULT: 1 failure(s), 0 warning(s), 24 passed
+========================================
+```
 
 ## Support and documentation
 

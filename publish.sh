@@ -4,6 +4,17 @@
 set -o nounset   # abort on unbound variable
 set -o pipefail  # don't hide errors within pipes
 
+# Check for diagnostic mode first (before requiring csv file)
+if [ "${DIAGNOSE:-}" = "true" ]; then
+    echo "Running comprehensive diagnostics..."
+    if [ -f "/app/diagnostics/diagnose.sh" ]; then
+        exec /app/diagnostics/diagnose.sh
+    else
+        echo "Error: diagnostics/diagnose.sh not found"
+        exit 1
+    fi
+fi
+
 # if no argument is provided, print an error message and exit
 if [ $# -eq 0 ]
   then
@@ -30,6 +41,7 @@ die() {
 
 main() {
   initialize_instance_metadata
+  run_startup_diagnostics
 
   # read the first positional argument as the source csv file
   csv_file=$1
@@ -116,6 +128,17 @@ ingest_repos() {
 initialize_instance_metadata() {
   TOKEN=$(curl --connect-timeout 2 -sf -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null)
   export INSTANCE_ID=$(curl --connect-timeout 2 -sf -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "localhost")
+}
+
+# Run startup diagnostics if enabled
+run_startup_diagnostics() {
+  if [ "${DIAGNOSE_ON_START:-}" = "true" ]; then
+    info "Running startup diagnostics"
+
+    if [ -f "/app/diagnostics/diagnose.sh" ]; then
+      /app/diagnostics/diagnose.sh || info "Diagnostic issues detected (see above)"
+    fi
+  fi
 }
 
 # Configure credentials at runtime (passed via environment variables)

@@ -247,6 +247,7 @@ ENV DATA_DIR=/var/moderne
 
 # Copy scripts
 COPY --chmod=755 publish.sh publish.sh
+COPY --chmod=755 diagnostics/ diagnostics/
 
 # Optional: mount from host
 COPY repos.csv repos.csv
