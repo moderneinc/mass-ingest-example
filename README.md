@@ -310,9 +310,11 @@ Generated: 2025-01-20 14:32 UTC
 [PASS] Architecture: x86_64 (no emulation detected)
 
 === Thread and process limits ===
+       Java builds use many threads. Low PID/thread limits cause 'pthread_create' errors.
+       Expect: unlimited or 8192+ for cgroup PID limit and ulimit.
 [PASS] Cgroup PID limit: unlimited (3 currently used)
 [PASS] Max user processes (ulimit -u): unlimited
-[PASS] Kernel threads-max: 127733
+       Kernel threads-max: 127733
 
 === Java/JDKs ===
 [PASS] JAVA_HOME: /opt/java/openjdk

@@ -8,6 +8,8 @@ if [[ -z "$SCRIPT_DIR" ]]; then
 fi
 
 section "Thread and process limits"
+info "Java builds use many threads. Low PID/thread limits cause 'pthread_create' errors."
+info "Expect: unlimited or 8192+ for cgroup PID limit and ulimit."
 
 # Detect container environment if not already done
 if [[ -z "${IN_CONTAINER:-}" ]]; then
@@ -77,16 +79,14 @@ if [[ -n "$ULIMIT_U" ]]; then
     fi
 fi
 
-# System-wide thread limit
-THREADS_MAX=""
+# System-wide thread limit (info only — almost never the bottleneck, defaults to 100k+)
 if [[ -f /proc/sys/kernel/threads-max ]]; then
     THREADS_MAX=$(cat /proc/sys/kernel/threads-max 2>/dev/null)
-fi
-
-if [[ -n "$THREADS_MAX" ]]; then
-    if [[ "$THREADS_MAX" -lt 8192 ]] 2>/dev/null; then
-        warn "Kernel threads-max: $THREADS_MAX (low)"
-    else
-        pass "Kernel threads-max: $THREADS_MAX"
+    if [[ -n "$THREADS_MAX" ]]; then
+        if [[ "$THREADS_MAX" -lt 8192 ]] 2>/dev/null; then
+            warn "Kernel threads-max: $THREADS_MAX (unusually low)"
+        else
+            info "Kernel threads-max: $THREADS_MAX"
+        fi
     fi
 fi
