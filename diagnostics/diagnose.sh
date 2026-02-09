@@ -106,6 +106,7 @@ run_check() {
 # 1. System resources (CPU, memory, disk)
 # 2. Required tools (git, curl, etc.)
 # 3. Docker/runtime environment
+# 3b. Thread/process limits
 # 4. Java/JDKs
 # 5. Moderne CLI
 # 6. Configuration (env vars, credentials)
@@ -118,6 +119,7 @@ run_check() {
 run_check "system"
 run_check "tools"
 run_check "docker"
+run_check "threads"
 run_check "java"
 run_check "cli"
 run_check "config"
