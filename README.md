@@ -112,6 +112,7 @@ mass-ingest-example/
         ├── system.sh     # CPUs, memory, disk space
         ├── tools.sh      # git, curl, jq, etc.
         ├── docker.sh     # Container detection, CPU arch, emulation
+        ├── threads.sh    # Cgroup PID limits, ulimit, kernel threads-max
         ├── java.sh       # JDKs, JAVA_HOME
         ├── cli.sh        # mod CLI version, config
         ├── config.sh     # Env vars, credentials
@@ -240,6 +241,7 @@ This validates the entire setup and produces a detailed report:
 - System (CPUs, memory, disk space)
 - Required tools (git, curl, jq, unzip, tar)
 - Runtime environment (container detection, CPU architecture, emulation)
+- Thread/process limits (cgroup PID limits, ulimit, kernel threads-max)
 - Java/JDKs (available JDKs, JAVA_HOME)
 - Moderne CLI (version, build config, proxy, trust store, tenant)
 - Configuration (env vars, credentials, git credentials)
@@ -306,6 +308,13 @@ Generated: 2025-01-20 14:32 UTC
 [PASS] Running inside Docker
        Base image: Ubuntu 24.04.1 LTS
 [PASS] Architecture: x86_64 (no emulation detected)
+
+=== Thread and process limits ===
+       Java builds use many threads. Low PID/thread limits cause 'pthread_create' errors.
+       Expect: unlimited or 8192+ for cgroup PID limit and ulimit.
+[PASS] Cgroup PID limit: unlimited (3 currently used)
+[PASS] Max user processes (ulimit -u): unlimited
+       Kernel threads-max: 127733
 
 === Java/JDKs ===
 [PASS] JAVA_HOME: /opt/java/openjdk
