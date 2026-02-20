@@ -138,15 +138,21 @@ ingest_repos() {
     send_logs "org-$ORGANIZATION"
   else
     select_repositories "$csv_file"
+    split_into_batches "$DATA_DIR/selected-repos.csv"
 
-    # create a partition name based on the current partition and the current date YYYY-MM-DD-HH-MM
-    partition_name=$(date +"%Y-%m-%d-%H-%M")
+    for batch_file in "$DATA_DIR/batches/"*; do
+      local partition_name
+      partition_name=$(basename "$batch_file" .csv)
 
-    if ! build_and_upload_repos "$partition_name" "$DATA_DIR/selected-repos.csv"; then
-      info "Error building and uploading repositories"
-    else
-      info "Successfully built and uploaded repositories"
-    fi
+      if ! build_and_upload_repos "$partition_name" "$batch_file"; then
+        info "Error building and uploading repositories from $partition_name"
+      else
+        info "Successfully built and uploaded repositories from $partition_name"
+      fi
+
+      rm -rf "$DATA_DIR/$partition_name"
+    done
+    rm -rf "$DATA_DIR/batches"
 
     # Upload results
     if [[ -z "${END_INDEX:-}" || -z "${START_INDEX:-}" ]]; then
@@ -277,6 +283,36 @@ select_repositories() {
     info "Selected all repositories from $csv_file"
 
     cp "$csv_file" "$DATA_DIR/selected-repos.csv"
+  fi
+}
+
+# Split a CSV into batch files under $DATA_DIR/batches/.
+# When BATCH_SIZE is set, each file contains at most BATCH_SIZE rows.
+# Without BATCH_SIZE the entire CSV is used as a single batch.
+split_into_batches() {
+  local csv_file=$1
+  local batch_dir="$DATA_DIR/batches"
+  mkdir -p "$batch_dir"
+
+  local batch_size="${BATCH_SIZE:-0}"
+  if [[ "$batch_size" -gt 0 ]]; then
+    local header
+    header=$(head -n 1 "$csv_file")
+
+    # split data rows (skip header) into chunk files
+    tail -n +2 "$csv_file" | split -l "$batch_size" - "$batch_dir/batch-"
+
+    # prepend the header to each chunk
+    for file in "$batch_dir"/batch-*; do
+      ( echo "$header"; cat "$file" ) > "$file.csv"
+      rm "$file"
+    done
+
+    local batch_count
+    batch_count=$(ls "$batch_dir"/*.csv | wc -l | tr -d ' ')
+    info "Split $(( $(wc -l < "$csv_file") - 1 )) repositories into $batch_count batches of $batch_size"
+  else
+    cp "$csv_file" "$batch_dir/all.csv"
   fi
 }
 

@@ -166,6 +166,7 @@ Maven/Artifactory environment variables:
 Optional environment variables for all storage types:
 - `MODERNE_TOKEN` - Moderne platform token
 - `MODERNE_TENANT` - Moderne tenant url (e.g., "https://app.moderne.io" or "https://tenant.moderne.io")
+- `BATCH_SIZE` - Number of repositories to process per batch (see [Batching](#batching) below)
 
 The container will:
 1. Start metrics server on port 8080
@@ -257,6 +258,30 @@ The Dockerfile includes commented sections for:
 - .NET
 
 Uncomment the relevant sections based on your needs.
+
+## Batching
+
+By default, all repositories in `repos.csv` are cloned, built, and published in a single pass. For larger repository lists this can exhaust disk space since all cloned sources and build artifacts exist on disk simultaneously.
+
+Set the `BATCH_SIZE` environment variable to process repositories in smaller batches. Each batch is cloned, built, published, and cleaned up before the next batch starts, keeping disk usage bounded.
+
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  -v $(pwd)/data:/var/moderne \
+  -e BATCH_SIZE=10 \
+  -e PUBLISH_URL=https://your-artifactory.com/artifactory/moderne-ingest/ \
+  -e PUBLISH_USER=your-username \
+  -e PUBLISH_PASSWORD=your-password \
+  mass-ingest:quickstart
+```
+
+**Choosing a batch size:**
+- **10-20** is a good starting point for most setups
+- Smaller batches use less disk but take longer due to per-batch overhead
+- Larger batches are faster but require more disk space
+
+For parallel processing across multiple containers, see [3-scalability](../3-scalability/).
 
 ## Storage requirements
 
