@@ -129,6 +129,8 @@ get_col_index() {
     # Use comma as delimiter and iterate to find exact match
     while IFS= read -r col; do
         idx=$((idx + 1))
+        # Strip double-quotes from column name (handles quoted CSV exports)
+        col="${col//\"/}"
         # Case-insensitive exact match (portable - works with Bash 3.x)
         local col_lower=$(echo "$col" | tr '[:upper:]' '[:lower:]')
         if [[ "$col_lower" == "$target_lower" ]]; then
