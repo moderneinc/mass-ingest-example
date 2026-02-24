@@ -30,7 +30,9 @@ case "$PUBLISH_URL" in
             [[ -n "${S3_ENDPOINT:-}" ]] && S3_CMD+=(--endpoint-url "$S3_ENDPOINT")
 
             # Write test
-            if "${S3_CMD[@]}" cp "$TEST_FILE" "$PUBLISH_URL/$TEST_KEY" >/dev/null 2>&1; then
+            S3_OUTPUT=$("${S3_CMD[@]}" cp "$TEST_FILE" "$PUBLISH_URL/$TEST_KEY" 2>&1)
+            S3_EXIT=$?
+            if [[ $S3_EXIT -eq 0 ]]; then
                 pass "S3 write: succeeded"
 
                 # Read test
@@ -50,7 +52,12 @@ case "$PUBLISH_URL" in
                 fi
             else
                 fail "S3 write: failed"
-                info "Check AWS credentials and bucket permissions"
+                # Show the actual error to help diagnose the issue
+                ERROR_LINE=$(echo "$S3_OUTPUT" | grep -v "^$" | tail -1)
+                if [[ -n "$ERROR_LINE" ]]; then
+                    info "$ERROR_LINE"
+                fi
+                info "Attempted: ${S3_CMD[*]} cp <file> $PUBLISH_URL/$TEST_KEY"
             fi
 
             rm -f "$TEST_FILE"
