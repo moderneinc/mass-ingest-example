@@ -129,6 +129,30 @@ docker run --rm \
   mass-ingest:quickstart
 ```
 
+**Example 5: Using EC2 IAM Role (Recommended for EC2)**
+
+When running on an EC2 instance with an IAM role attached, the AWS SDK automatically retrieves credentials from the [EC2 instance metadata service](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-metadata.html) (IMDS). No explicit credentials are needed:
+
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  -v $(pwd)/data:/var/moderne \
+  -e PUBLISH_URL=s3://your-bucket \
+  mass-ingest:quickstart
+```
+
+> **Important: IMDSv2 hop limit**
+>
+> Docker bridge networking adds a network hop between the container and the EC2 host. IMDSv2 defaults to a hop limit of 1, which means the container cannot reach the metadata service to retrieve credentials or region information. You must increase the hop limit to 2:
+>
+> ```bash
+> aws ec2 modify-instance-metadata-options \
+>   --instance-id <your-instance-id> \
+>   --http-put-response-hop-limit 2
+> ```
+>
+> Without this, `mod publish` will fail with `Unable to contact EC2 metadata service`. The [3-scalability](../3-scalability/) Terraform configuration already sets this automatically.
+
 **Example with MinIO (S3-compatible):**
 ```bash
 docker run --rm \
@@ -321,6 +345,15 @@ docker run -d \
 Check logs: `docker logs <container-id>`
 - Verify PUBLISH_URL, PUBLISH_USER, PUBLISH_PASSWORD environment variables are correctly set
 - Ensure repos.csv exists and is properly formatted
+
+### S3 publish fails with "Unable to contact EC2 metadata service"
+If you're running on EC2 with an IAM role, increase the IMDSv2 hop limit to 2:
+```bash
+aws ec2 modify-instance-metadata-options \
+  --instance-id <your-instance-id> \
+  --http-put-response-hop-limit 2
+```
+See [Example 5: Using EC2 IAM Role](#option-a-using-s3-storage) above for details.
 
 ### Build failures
 - Check individual repository logs in `/var/moderne/log.zip`
