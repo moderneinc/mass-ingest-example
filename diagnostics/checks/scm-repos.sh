@@ -6,6 +6,7 @@
 #
 # Note: CSV parsing assumes fields don't contain commas. Standard repos.csv
 # files (cloneUrl, branch, origin, path) don't have commas in field values.
+# Double-quotes around fields are stripped to handle quoted CSV exports.
 #
 # Environment variables:
 #   SKIP_SCM_REPOS    Skip this check entirely
@@ -44,7 +45,10 @@ fi
 # Format: origin|cloneUrl (pipe-separated to handle URLs with special chars)
 ORIGIN_DATA=$(awk -F',' -v origin_col="$ORIGIN_COL" -v url_col="$CLONEURL_COL" '
     NR > 1 && $url_col != "" {
-        origin = (origin_col != "") ? $origin_col : $url_col
+        url = $url_col
+        gsub(/"/, "", url)
+        origin = (origin_col != "") ? $origin_col : url
+        gsub(/"/, "", origin)
         # If no origin column, extract host from URL
         if (origin_col == "") {
             gsub(/.*:\/\//, "", origin)
@@ -52,7 +56,7 @@ ORIGIN_DATA=$(awk -F',' -v origin_col="$ORIGIN_COL" -v url_col="$CLONEURL_COL" '
             gsub(/.*@/, "", origin)
         }
         if (origin != "" && !seen[origin]++) {
-            print origin "|" $url_col
+            print origin "|" url
         }
     }
 ' "$CSV_FILE")
