@@ -404,7 +404,7 @@ General guidance is 1 worker per 1000 repositories provides a reasonable ingesti
 - **IAM**: Least-privilege roles for chunk and processor jobs
 - **Network**: Security groups restrict inbound, allow outbound
 - **Encryption**: EBS volumes encrypted at rest
-- **IMDSv2**: Required (http_tokens = "required")
+- **IMDSv2**: Required (`http_tokens = "required"`). The Terraform sets `http_put_response_hop_limit = 2` so Docker containers can reach the metadata service for IAM role credentials (Docker bridge networking adds a network hop)
 
 ## Cost estimation
 
