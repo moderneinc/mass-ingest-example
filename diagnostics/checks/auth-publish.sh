@@ -6,7 +6,7 @@ if [[ -z "$SCRIPT_DIR" ]]; then
     source "$(dirname "$0")/../lib/core.sh"
 fi
 
-section "Authentication - Publish"
+section "Authentication - Publish (${PUBLISH_URL:-not set})"
 
 # Skip if no publish URL
 if [[ -z "${PUBLISH_URL:-}" ]]; then

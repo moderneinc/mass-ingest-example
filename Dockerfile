@@ -235,6 +235,9 @@ RUN git config --global credential.helper "store --file=/root/.git-credentials"
 # OPTIONAL - Customize JVM options
 RUN mod config java options edit "-Xmx4g -Xss3m"
 
+# Disable Maven Central if your environment blocks access to repo.maven.apache.org
+# RUN mod config features no-maven-central
+
 # Available ports
 # 8080 - mod CLI monitor
 EXPOSE 8080
