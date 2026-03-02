@@ -215,8 +215,8 @@ RUN git config --global credential.helper "store --file=/root/.git-credentials"
 #             -file "$cert" \
 #             -keystore "$cacerts"; \
 #       done; \
-#     done \
-#  && mod config http trust-store edit java-home
+#     done
+# RUN mod config http trust-store edit java-home
 
 # mvnw scripts in maven projects may attempt to download maven-wrapper jars using wget.
 # If using self-signed certs, UNCOMMENT the following to concatenate them for wget:
