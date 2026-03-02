@@ -220,8 +220,8 @@ RUN git config --global credential.helper "store --file=/root/.git-credentials"
 
 # mvnw scripts in maven projects may attempt to download maven-wrapper jars using wget.
 # If using self-signed certs, UNCOMMENT the following to concatenate them for wget:
-# RUN cat /root/certs/*.crt > /root/ca-bundle.crt \
-#  && echo "ca_certificate = /root/ca-bundle.crt" > /root/.wgetrc
+# RUN cat /root/certs/*.crt > /root/ca-bundle.crt
+# RUN echo "ca_certificate = /root/ca-bundle.crt" > /root/.wgetrc
 
 ################################################################################
 # OPTIONAL: 3-scalability (AWS Batch) setup
