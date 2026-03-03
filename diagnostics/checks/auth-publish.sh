@@ -85,14 +85,15 @@ if [[ "$HAS_CREDS" == false ]]; then
     info "Testing anonymous access..."
 fi
 
-# Test path - use a unique path to avoid conflicts
-TEST_PATH="io/moderne/.diagnostic-test-$(date +%s).txt"
-TEST_URL="$PUBLISH_URL/$TEST_PATH"
+TS=$(date +%s)
 TEST_CONTENT="diagnostic test $(date)"
 TEST_CONTENT2="diagnostic test update $(date)"
 
-# Write test
-WRITE_RESULT=$(curl -s -o /dev/null -w '%{http_code}' "${CURL_AUTH[@]}" -X PUT "$TEST_URL" -d "$TEST_CONTENT" 2>/dev/null)
+# Step 1: Test with a valid Maven coordinate path (works on both strict and permissive)
+MAVEN_PATH="io/moderne/diagnostic-test/0.0.0/diagnostic-test-0.0.0-${TS}.txt"
+MAVEN_URL="$PUBLISH_URL/$MAVEN_PATH"
+
+WRITE_RESULT=$(curl -s -o /dev/null -w '%{http_code}' "${CURL_AUTH[@]}" -X PUT "$MAVEN_URL" -d "$TEST_CONTENT" 2>/dev/null)
 case "$WRITE_RESULT" in
     2*)
         pass "Test write: succeeded (HTTP $WRITE_RESULT)"
@@ -105,7 +106,7 @@ case "$WRITE_RESULT" in
 esac
 
 # Read test
-READ_RESULT=$(curl -s -o /dev/null -w '%{http_code}' "${CURL_AUTH[@]}" "$TEST_URL" 2>/dev/null)
+READ_RESULT=$(curl -s -o /dev/null -w '%{http_code}' "${CURL_AUTH[@]}" "$MAVEN_URL" 2>/dev/null)
 case "$READ_RESULT" in
     2*)
         pass "Test read: succeeded (HTTP $READ_RESULT)"
@@ -116,7 +117,7 @@ case "$READ_RESULT" in
 esac
 
 # Overwrite test
-OVERWRITE_RESULT=$(curl -s -o /dev/null -w '%{http_code}' "${CURL_AUTH[@]}" -X PUT "$TEST_URL" -d "$TEST_CONTENT2" 2>/dev/null)
+OVERWRITE_RESULT=$(curl -s -o /dev/null -w '%{http_code}' "${CURL_AUTH[@]}" -X PUT "$MAVEN_URL" -d "$TEST_CONTENT2" 2>/dev/null)
 case "$OVERWRITE_RESULT" in
     2*)
         pass "Test overwrite: succeeded (HTTP $OVERWRITE_RESULT)"
@@ -127,14 +128,25 @@ case "$OVERWRITE_RESULT" in
         ;;
 esac
 
-# Delete test (cleanup)
-DELETE_RESULT=$(curl -s -o /dev/null -w '%{http_code}' "${CURL_AUTH[@]}" -X DELETE "$TEST_URL" 2>/dev/null)
-case "$DELETE_RESULT" in
+# Cleanup Maven path test artifact
+curl -s -o /dev/null "${CURL_AUTH[@]}" -X DELETE "$MAVEN_URL" 2>/dev/null
+
+# Step 2: Test with a non-Maven path (only works on permissive layout)
+# Mass-ingest uploads build logs using paths like this, so permissive layout is required
+LOG_PATH="io/moderne/diagnostic-test/log-layout-test-${TS}.txt"
+LOG_URL="$PUBLISH_URL/$LOG_PATH"
+
+LOG_WRITE_RESULT=$(curl -s -o /dev/null -w '%{http_code}' "${CURL_AUTH[@]}" -X PUT "$LOG_URL" -d "$TEST_CONTENT" 2>/dev/null)
+case "$LOG_WRITE_RESULT" in
     2*)
-        pass "Test delete: succeeded (HTTP $DELETE_RESULT)"
+        pass "Layout policy: permissive (HTTP $LOG_WRITE_RESULT)"
+        # Cleanup
+        curl -s -o /dev/null "${CURL_AUTH[@]}" -X DELETE "$LOG_URL" 2>/dev/null
         ;;
     *)
-        warn "Test delete: failed (HTTP $DELETE_RESULT)"
-        info "Cleanup may be needed: $TEST_PATH"
+        fail "Layout policy: strict (HTTP $LOG_WRITE_RESULT)"
+        info "Repository rejects non-Maven-coordinate paths"
+        info "Disable strict Maven layout validation in your repository manager"
+        info "Mass-ingest requires permissive layout to upload build logs"
         ;;
 esac
