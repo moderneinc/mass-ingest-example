@@ -192,6 +192,15 @@ RUN mod config node installation edit /opt/node/node-20/bin/node /opt/node/node-
 # COPY python/pip.conf /root/.config/pip/pip.conf
 
 ################################################################################
+# OPTIONAL: Custom build steps (uncomment if needed)
+################################################################################
+# If your repositories include JavaScript or Python projects, uncomment the
+# following to configure the Moderne CLI to parse those languages.
+
+# RUN mkdir -p /root/.moderne/cli
+# COPY moderne.yml /root/.moderne/cli/moderne.yml
+
+################################################################################
 # RUNTIME CONFIGURATION
 ################################################################################
 
