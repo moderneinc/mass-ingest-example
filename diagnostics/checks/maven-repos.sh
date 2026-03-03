@@ -97,9 +97,24 @@ test_maven_repo() {
     run_comprehensive_latency_test "$name" "$url"
 }
 
-# Always test Maven Central
-info "Testing Maven Central..."
-test_maven_repo "central" "https://repo.maven.apache.org/maven2"
+# Check if no-maven-central feature is enabled in CLI config
+NO_MAVEN_CENTRAL=false
+for config_path in "$HOME/.moderne/cli/moderne.yml" "/root/.moderne/cli/moderne.yml"; do
+    if [[ -f "$config_path" ]] && grep -q "noMavenCentral: true" "$config_path" 2>/dev/null; then
+        NO_MAVEN_CENTRAL=true
+        break
+    fi
+done
+
+if [[ "$NO_MAVEN_CENTRAL" == "true" ]]; then
+    info "Maven Central: skipped (no-maven-central feature enabled)"
+else
+    info "Testing Maven Central..."
+    if ! test_maven_repo "central" "https://repo.maven.apache.org/maven2"; then
+        info "If Maven Central is intentionally blocked, run:"
+        info "  mod config features no-maven-central"
+    fi
+fi
 
 # Parse settings.xml if found
 if [[ -n "$SETTINGS_XML" ]]; then
