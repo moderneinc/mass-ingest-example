@@ -201,14 +201,18 @@ RUN git config --global credential.helper "store --file=/root/.git-credentials"
 
 # Place all .crt files in a certs/ directory next to the Dockerfile, then uncomment:
 # COPY certs/ /root/certs/
+#
+# Edit this list to match the JDKs installed above:
+# ENV CACERTS_PATHS="\
+#   /usr/lib/jvm/temurin-8-jdk/jre/lib/security/cacerts \
+#   /usr/lib/jvm/temurin-11-jdk/lib/security/cacerts \
+#   /usr/lib/jvm/temurin-17-jdk/lib/security/cacerts \
+#   /usr/lib/jvm/temurin-21-jdk/lib/security/cacerts \
+#   /usr/lib/jvm/temurin-25-jdk/lib/security/cacerts"
+#
 # RUN for cert in /root/certs/*.crt; do \
 #       alias=$(basename "$cert" .crt); \
-#       for cacerts in \
-#         /usr/lib/jvm/temurin-8-jdk/jre/lib/security/cacerts \
-#         /usr/lib/jvm/temurin-11-jdk/lib/security/cacerts \
-#         /usr/lib/jvm/temurin-17-jdk/lib/security/cacerts \
-#         /usr/lib/jvm/temurin-21-jdk/lib/security/cacerts \
-#         /usr/lib/jvm/temurin-25-jdk/lib/security/cacerts; do \
+#       for cacerts in $CACERTS_PATHS; do \
 #           keytool -import -noprompt -trustcacerts \
 #             -alias "$alias" \
 #             -storepass changeit \
