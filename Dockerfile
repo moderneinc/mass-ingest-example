@@ -9,9 +9,9 @@ FROM eclipse-temurin:21-jdk AS jdk21
 FROM eclipse-temurin:25-jdk AS jdk25
 
 # UNCOMMENT for multiple Node.js versions (JavaScript/TypeScript projects)
-FROM node:20 AS node20
-FROM node:22 AS node22
-FROM node:24 AS node24
+# FROM node:20 AS node20
+# FROM node:22 AS node22
+# FROM node:24 AS node24
 
 # UNCOMMENT if you use a custom maven image with settings
 # FROM <custom docker image> AS maven
