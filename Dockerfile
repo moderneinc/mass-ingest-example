@@ -124,11 +124,11 @@ RUN ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 
 # Node.js - multiple versions (uncomment for JavaScript/TypeScript projects)
 # Also uncomment the FROM node:XX lines near the top of this file
-COPY --from=node20 /usr/local /opt/node/node-20
-COPY --from=node22 /usr/local /opt/node/node-22
-COPY --from=node24 /usr/local /opt/node/node-24
-ENV PATH="/opt/node/node-24/bin:${PATH}"
-RUN mod config node installation edit /opt/node/node-20/bin/node /opt/node/node-22/bin/node /opt/node/node-24/bin/node
+# COPY --from=node20 /usr/local /opt/node/node-20
+# COPY --from=node22 /usr/local /opt/node/node-22
+# COPY --from=node24 /usr/local /opt/node/node-24
+# ENV PATH="/opt/node/node-24/bin:${PATH}"
+# RUN mod config node installation edit /opt/node/node-20/bin/node /opt/node/node-22/bin/node # /opt/node/node-24/bin/node
 
 # Python 3.11 (uncomment for Python projects)
 # Install prerequisites and COPY the deadsnakes PPA
