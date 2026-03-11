@@ -220,10 +220,12 @@ cache: $(BASE_TAR)
 		echo "Base image cached in VM."; \
 	fi
 
-$(BASE_TAR): Dockerfile $(wildcard repos/**/*)
-	@echo "Building base image locally..."
-	docker build -t mod-build-base .
-	@echo "Saving base image..."
+$(BASE_TAR): Dockerfile ../Dockerfile.fips $(wildcard repos/**/*)
+	@echo "Building production FIPS image (../Dockerfile.fips)..."
+	docker build -f ../Dockerfile.fips -t mass-ingest-fips ..
+	@echo "Building test layer..."
+	docker build --build-arg BASE_IMAGE=mass-ingest-fips -t mod-build-base .
+	@echo "Saving test image..."
 	docker save mod-build-base -o $@
 	@echo "Saved: $@ ($$(du -h $@ | cut -f1))"
 
