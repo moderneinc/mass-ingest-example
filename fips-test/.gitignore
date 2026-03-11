@@ -1,0 +1,5 @@
+# VM artifacts (large, generated)
+vm/
+
+# Allow gradle-wrapper.jar (overrides repo-root *.jar ignore)
+!repos/**/gradle-wrapper.jar
