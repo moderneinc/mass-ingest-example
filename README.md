@@ -82,6 +82,7 @@ This repository provides three progressive deployment examples. Each stage is **
 ```
 mass-ingest-example/
 ├── Dockerfile            # Container image definition (used by all stages)
+├── Dockerfile.fips       # FIPS 140-2/140-3 compliant variant (UBI 9)
 ├── publish.sh            # Main ingestion script
 ├── publish.ps1           # PowerShell version
 ├── repos.csv             # Example repository list
@@ -219,6 +220,61 @@ See `dependency-repos.csv.example` for a template.
 All Dockerfiles support:
 - `MODERNE_CLI_VERSION` - Specific CLI version (defaults to latest stable)
 - `MODERNE_CLI_STAGE` - Use `staging` for pre-release versions
+
+### FIPS-compliant image
+
+A separate `Dockerfile.fips` is provided for environments that require FIPS 140-2/140-3 compliance. It uses Red Hat UBI 9 with the FIPS crypto policy enabled, which restricts all cryptographic operations to FIPS-approved algorithms.
+
+**Build:**
+```bash
+docker build -f Dockerfile.fips -t mass-ingest:fips .
+```
+
+**Build arguments** (in addition to `MODERNE_CLI_VERSION`):
+
+| Argument             | Default                                      | Description                            |
+|----------------------|----------------------------------------------|----------------------------------------|
+| `MAVEN_REPO_URL`    | `https://repo1.maven.org/maven2`             | Maven repository for CLI and Maven     |
+| `GRADLE_DIST_URL`   | `https://services.gradle.org/distributions`  | Gradle distribution download URL       |
+| `GRADLE_VERSION`    | `8.14`                                       | Gradle version to install              |
+| `MAVEN_VERSION`     | `3.9.11`                                     | Maven version to install               |
+
+**Using internal mirrors:**
+
+Public download servers (Maven Central, Gradle services) may not support FIPS-compliant TLS cipher suites. The Dockerfile uses a separate download stage without FIPS restrictions to handle this. To make the entire build FIPS-compliant end to end, point the download URLs at internal mirrors that support FIPS-compliant TLS:
+
+```bash
+docker build -f Dockerfile.fips \
+  --build-arg MAVEN_REPO_URL=https://nexus.internal/repository/maven-central \
+  --build-arg GRADLE_DIST_URL=https://nexus.internal/repository/gradle-dist \
+  -t mass-ingest:fips .
+```
+
+When using internal mirrors, you can remove the `downloader` stage from the Dockerfile and move its `ARG` and `RUN` commands into the `base` stage (after the `dnf install` that provides `curl`). This makes the entire build FIPS-compliant.
+
+**Run:** All `docker run` commands from the stage READMEs work unchanged — just substitute the image name:
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  -v $(pwd)/data:/var/moderne \
+  -e PUBLISH_URL=https://your-artifactory.com/artifactory/moderne-ingest/ \
+  -e PUBLISH_USER=your-username \
+  -e PUBLISH_PASSWORD=your-password \
+  mass-ingest:fips
+```
+
+**Key differences from the standard image:**
+
+| Aspect          | Standard (`Dockerfile`)        | FIPS (`Dockerfile.fips`)              |
+|-----------------|--------------------------------|---------------------------------------|
+| Base image      | Eclipse Temurin (Ubuntu)       | Red Hat UBI 9                         |
+| JDK provider    | Adoptium Temurin               | Red Hat OpenJDK                       |
+| JDK versions    | 8, 11, 17, 21, 25              | 8, 11, 17, 21, 25                     |
+| Crypto policy   | Default (unrestricted)         | FIPS (`update-crypto-policies --set`) |
+| Certificate mgmt| Per-JDK keytool                | System trust store (`update-ca-trust`)|
+| Package manager | apt-get                        | dnf                                   |
+
+> **Note:** For full kernel-level FIPS compliance, the host OS must also be running in FIPS mode. The container enforces FIPS-approved algorithms at the userspace level (OpenSSL, Java security providers) regardless of host configuration.
 
 ## Generating repository lists
 

@@ -58,7 +58,7 @@ RUN if [ -n "${MODERNE_CLI_VERSION}" ]; then \
     fi
 
 # Create a shell script 'mod' that runs the moderne-cli JAR file
-RUN echo -e '#!/bin/sh\njava -jar /usr/local/bin/mod.jar "$@"' > /usr/local/bin/mod
+RUN printf '#!/bin/sh\njava -jar /usr/local/bin/mod.jar "$@"\n' > /usr/local/bin/mod
 
 # Make the 'mod' script executable
 RUN chmod +x /usr/local/bin/mod
@@ -249,6 +249,9 @@ RUN git config --global credential.helper "store --file=/root/.git-credentials"
 
 # OPTIONAL - Customize JVM options
 RUN mod config java options edit "-Xmx4g -Xss3m"
+
+# Disable Maven Central if your environment blocks access to repo.maven.apache.org
+# RUN mod config features no-maven-central
 
 # Available ports
 # 8080 - mod CLI monitor
