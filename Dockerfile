@@ -199,18 +199,33 @@ RUN git config --global credential.helper "store --file=/root/.git-credentials"
 # Only needed if your artifact repository, source control, or Moderne tenant
 # uses self-signed certificates.
 
-# Configure trust store if self-signed certificates are in use for artifact repository, source control, or moderne tenant
-# COPY mycert.crt /root/mycert.crt
-# RUN /usr/lib/jvm/temurin-8-jdk/bin/keytool -import -noprompt -storepass changeit -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-8-jdk/jre/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-11-jdk/bin/keytool -import -noprompt -storepass changeit -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-11-jdk/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-17-jdk/bin/keytool -import -noprompt -storepass changeit -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-17-jdk/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-21-jdk/bin/keytool -import -noprompt -storepass changeit -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-21-jdk/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-25-jdk/bin/keytool -import -noprompt -storepass changeit -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-25-jdk/lib/security/cacerts
+# Place all .crt files in a certs/ directory next to the Dockerfile, then uncomment:
+# COPY certs/ /root/certs/
+#
+# Edit this list to match the JDKs installed above:
+# ENV CACERTS_PATHS="\
+#   /usr/lib/jvm/temurin-8-jdk/jre/lib/security/cacerts \
+#   /usr/lib/jvm/temurin-11-jdk/lib/security/cacerts \
+#   /usr/lib/jvm/temurin-17-jdk/lib/security/cacerts \
+#   /usr/lib/jvm/temurin-21-jdk/lib/security/cacerts \
+#   /usr/lib/jvm/temurin-25-jdk/lib/security/cacerts"
+#
+# RUN for cert in /root/certs/*.crt; do \
+#       alias=$(basename "$cert" .crt); \
+#       for cacerts in $CACERTS_PATHS; do \
+#           keytool -import -noprompt -trustcacerts \
+#             -alias "$alias" \
+#             -storepass changeit \
+#             -file "$cert" \
+#             -keystore "$cacerts"; \
+#       done; \
+#     done
 # RUN mod config http trust-store edit java-home
 
 # mvnw scripts in maven projects may attempt to download maven-wrapper jars using wget.
-# UNCOMMENT the following to set wget's CA certificate
-# RUN echo "ca_certificate = /root/mycert.crt" > /root/.wgetrc
+# If using self-signed certs, UNCOMMENT the following to concatenate them for wget:
+# RUN cat /root/certs/*.crt > /root/ca-bundle.crt
+# RUN echo "ca_certificate = /root/ca-bundle.crt" > /root/.wgetrc
 
 ################################################################################
 # OPTIONAL: 3-scalability (AWS Batch) setup
