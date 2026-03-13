@@ -39,37 +39,6 @@ die() {
   exit 1
 }
 
-# Check if mod CLI version is >= required version (semver comparison)
-# Returns 0 (true) if current version >= required version, 1 (false) otherwise
-mod_version_at_least() {
-  local required_version=$1
-  local current_version
-  current_version=$(mod --version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
-
-  if [ -z "$current_version" ]; then
-    return 1
-  fi
-
-  # Split versions into components
-  local req_major req_minor req_patch
-  local cur_major cur_minor cur_patch
-
-  IFS='.' read -r req_major req_minor req_patch <<< "$required_version"
-  IFS='.' read -r cur_major cur_minor cur_patch <<< "$current_version"
-
-  # Compare major
-  if [ "$cur_major" -gt "$req_major" ]; then return 0; fi
-  if [ "$cur_major" -lt "$req_major" ]; then return 1; fi
-
-  # Compare minor
-  if [ "$cur_minor" -gt "$req_minor" ]; then return 0; fi
-  if [ "$cur_minor" -lt "$req_minor" ]; then return 1; fi
-
-  # Compare patch
-  if [ "$cur_patch" -ge "$req_patch" ]; then return 0; fi
-  return 1
-}
-
 main() {
   initialize_instance_metadata
   run_startup_diagnostics
@@ -128,9 +97,7 @@ ingest_repos() {
     printf "Organization: %s\n" "$ORGANIZATION"
     mkdir -p "$clone_dir"
     mod git sync csv "$clone_dir" "$csv_file" --organization "$ORGANIZATION" --with-sources
-    if mod_version_at_least "3.56.7"; then
-      mod log syncs add "$clone_dir" "$DATA_DIR/syncs.zip" --last-sync
-    fi
+    mod log syncs add "$clone_dir" "$DATA_DIR/syncs.zip" --last-sync
     mod git pull "$clone_dir"
     mod build "$clone_dir" --no-download
     mod publish "$clone_dir"
@@ -326,9 +293,7 @@ build_and_upload_repos() {
   export TERM=dumb
 
   mod git sync csv "$clone_dir" "$partition_file" --with-sources
-  if mod_version_at_least "3.56.7"; then
-    mod log syncs add "$clone_dir" "$DATA_DIR/syncs.zip" --last-sync
-  fi
+  mod log syncs add "$clone_dir" "$DATA_DIR/syncs.zip" --last-sync
 
   # kill a build if it takes too long assuming it's hung indefinitely
   # defaults to 2700 seconds (45 minutes)
