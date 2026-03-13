@@ -39,7 +39,20 @@ Required columns:
 - `origin` - Source control host (e.g., github.com)
 - `path` - Repository path (e.g., org/repo)
 
-### 2. Build the Docker image
+### 2. Build and run
+
+#### Option 1: Docker Compose (recommended)
+
+```bash
+cd 1-quickstart
+cp .env.example .env
+# Edit .env with your credentials
+docker compose up
+```
+
+#### Option 2: Docker run
+
+Build the image:
 
 ```bash
 docker build -t mass-ingest:quickstart ..
@@ -50,10 +63,10 @@ Optional build arguments:
 
 Example with specific CLI version:
 ```bash
-docker build -t mass-ingest:quickstart --build-arg MODERNE_CLI_VERSION=3.50.0 ..
+docker build -t mass-ingest:quickstart --build-arg MODERNE_CLI_VERSION=3.57.14 ..
 ```
 
-### 3. Run the container
+### Run the container
 
 Credentials are configured at runtime (not baked into the image). You can use S3, Artifactory, or any Maven-compatible repository.
 

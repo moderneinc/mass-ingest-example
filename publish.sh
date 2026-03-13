@@ -150,9 +150,13 @@ ingest_repos() {
         info "Successfully built and uploaded repositories from $partition_name"
       fi
 
-      rm -rf "$DATA_DIR/$partition_name"
+      if [ "${SKIP_CLEANUP:-}" != "true" ]; then
+        rm -rf "$DATA_DIR/$partition_name"
+      fi
     done
-    rm -rf "$DATA_DIR/batches"
+    if [ "${SKIP_CLEANUP:-}" != "true" ]; then
+      rm -rf "$DATA_DIR/batches"
+    fi
 
     # Upload results
     if [[ -z "${END_INDEX:-}" || -z "${START_INDEX:-}" ]]; then
@@ -244,7 +248,9 @@ configure_credentials() {
 prepare_environment() {
   info "Preparing environment"
   mkdir -p "$DATA_DIR"
-  rm -rf "${DATA_DIR:?}"/*
+  if [ "${SKIP_CLEANUP:-}" != "true" ]; then
+    rm -rf "${DATA_DIR:?}"/*
+  fi
   mkdir -p "$HOME/.moderne/cli/metrics/"
   rm -rf "$HOME/.moderne/cli/metrics"/*
 }
