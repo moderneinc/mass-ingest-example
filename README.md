@@ -88,6 +88,8 @@ mass-ingest-example/
 ├── repos.csv             # Example repository list
 │
 ├── 1-quickstart/         # Single container deployment
+│   ├── docker-compose.yml
+│   ├── .env.example
 │   └── README.md
 │
 ├── 2-observability/      # Docker Compose with monitoring
@@ -464,6 +466,25 @@ Generated: 2025-01-20 14:32 UTC
 RESULT: 1 failure(s), 0 warning(s), 24 passed
 ========================================
 ```
+
+## Troubleshooting
+
+### Debugging a single repository
+
+To manually run the publish script on a single repository and inspect the results:
+
+Drop into the container with a shell (works from either `1-quickstart/` or `2-observability/`):
+```bash
+docker compose run mass-ingest bash
+```
+
+Then inside the container:
+```bash
+export SKIP_CLEANUP=true
+./publish.sh repos.csv --start 3 --end 3
+```
+
+Setting `SKIP_CLEANUP=true` preserves the cloned/built data in `/var/moderne` after publishing, so you can inspect the output. Without it, the data is deleted after each batch to free disk space.
 
 ## Support and documentation
 

@@ -117,7 +117,7 @@ docker compose down -v
 To use a specific CLI version, add it to your `.env` file:
 
 ```
-MODERNE_CLI_VERSION=3.50.0
+MODERNE_CLI_VERSION=3.57.14
 ```
 
 Environment variables and build arguments from `.env` are automatically loaded by `docker-compose.yml`.
