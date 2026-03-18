@@ -1,0 +1,298 @@
+################################################################################
+# FIPS-Compliant Dockerfile
+#
+# Use this Dockerfile instead of the standard Dockerfile when deploying in
+# environments that require FIPS 140-2/140-3 compliance.
+#
+# Key differences from the standard Dockerfile:
+# - Uses Red Hat UBI 9 base image (FIPS-certified platform)
+# - Installs Red Hat OpenJDK builds (FIPS-aware via system crypto policies)
+# - Enables FIPS crypto policy (restricts to approved algorithms only)
+# - Uses system trust store for certificates (via update-ca-trust)
+# - JDKs 8, 11, 17, 21, 25 available (Red Hat builds, FIPS-aware)
+#
+# Build: docker build -f Dockerfile.fips -t mass-ingest-fips .
+#
+# Note: For full FIPS compliance, the host OS kernel should also be running in
+# FIPS mode. The crypto policy set here enforces FIPS-approved algorithms at the
+# userspace level (OpenSSL, GnuTLS, Java).
+################################################################################
+
+################################################################################
+# DOWNLOAD STAGE (pre-FIPS)
+#
+# External download servers (Maven Central, Gradle services) may not negotiate
+# FIPS-compatible TLS cipher suites. All downloads happen here without FIPS
+# restrictions. The artifacts are then copied into the FIPS-enabled runtime stage.
+#
+# If your internal mirrors support FIPS-compliant TLS, you can remove the
+# downloader stage and move the ARGs and RUN commands below into the base stage
+# (after the dnf install that provides curl).
+################################################################################
+
+FROM registry.access.redhat.com/ubi9/ubi AS downloader
+
+# Artifact locations - override these to point at internal mirrors
+ARG MAVEN_REPO_URL=https://repo1.maven.org/maven2
+ARG GRADLE_DIST_URL=https://services.gradle.org/distributions
+
+# Moderne CLI version — defaults to latest release from maven-metadata.xml
+ARG MODERNE_CLI_VERSION
+
+# Download Moderne CLI
+RUN CLI_VERSION="${MODERNE_CLI_VERSION}"; \
+    if [ -z "${CLI_VERSION}" ]; then \
+        CLI_VERSION=$(curl -s "${MAVEN_REPO_URL}/io/moderne/moderne-cli/maven-metadata.xml" \
+            | grep '<release>' | sed 's/.*<release>\(.*\)<\/release>.*/\1/'); \
+        if [ -z "${CLI_VERSION}" ]; then \
+            echo "Failed to resolve latest CLI version from ${MAVEN_REPO_URL}"; \
+            exit 1; \
+        fi; \
+    fi; \
+    echo "Downloading Moderne CLI ${CLI_VERSION}"; \
+    curl -fsSL -o /tmp/mod.jar "${MAVEN_REPO_URL}/io/moderne/moderne-cli/${CLI_VERSION}/moderne-cli-${CLI_VERSION}.jar"
+
+# Download Gradle (comment if projects don't use Gradle without a wrapper)
+ARG GRADLE_VERSION=8.14
+RUN curl -fsSL -o /tmp/gradle-${GRADLE_VERSION}-bin.zip "${GRADLE_DIST_URL}/gradle-${GRADLE_VERSION}-bin.zip"
+
+# Download Maven (comment if projects don't use Maven without a wrapper)
+# NOTE: Check for latest version: https://repo1.maven.org/maven2/org/apache/maven/apache-maven/
+ARG MAVEN_VERSION=3.9.11
+RUN curl -fsSL -o /tmp/apache-maven-${MAVEN_VERSION}-bin.tar.gz "${MAVEN_REPO_URL}/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz"
+
+# Download AWS CLI (uncomment for S3 repos.csv support)
+#RUN curl -fsSL -o /tmp/awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip"
+
+################################################################################
+# CORE SETUP (Required for all stages)
+################################################################################
+
+FROM registry.access.redhat.com/ubi9/ubi AS base
+
+# Enable FIPS crypto policy
+# This restricts all cryptographic operations to FIPS 140-2/140-3 approved
+# algorithms system-wide, including OpenSSL and Java security providers.
+RUN dnf install -y crypto-policies-scripts && \
+    update-crypto-policies --set FIPS
+
+# Force OpenSSL FIPS provider to load regardless of host kernel FIPS mode.
+# Without this, OpenSSL checks /proc/sys/crypto/fips_enabled and silently
+# falls back to the default provider on non-FIPS hosts.
+# Note: Red Hat disables `openssl fipsinstall`; their FIPS module ships with
+# pre-computed self-test verification, so we just activate the provider directly.
+RUN printf 'openssl_conf = openssl_init\n\
+\n\
+[openssl_init]\n\
+providers = provider_sect\n\
+alg_section = algorithm_sect\n\
+\n\
+[provider_sect]\n\
+fips = fips_sect\n\
+base = base_sect\n\
+\n\
+[fips_sect]\n\
+activate = 1\n\
+\n\
+[base_sect]\n\
+activate = 1\n\
+\n\
+[algorithm_sect]\n\
+default_properties = fips=yes\n' > /etc/pki/tls/openssl.cnf
+
+# Install JDKs from Red Hat repos (FIPS-aware via system crypto policies)
+RUN dnf install -y \
+    java-1.8.0-openjdk-devel \
+    java-11-openjdk-devel \
+    java-17-openjdk-devel \
+    java-21-openjdk-devel \
+    java-25-openjdk-devel
+
+# Install utilities
+# Note: git-lfs requires EPEL; --allowerasing replaces curl-minimal with full curl
+RUN dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+    dnf install -y --allowerasing \
+    curl git git-lfs jq libxml2 unzip wget zip vim-enhanced tar gzip && \
+    git lfs install && \
+    dnf clean all
+
+################################################################################
+# MODERNE CLI + LANGUAGE SUPPORT
+################################################################################
+# Credential configuration has been moved to runtime (publish.sh/publish.ps1)
+# to avoid baking sensitive credentials into Docker image layers.
+
+FROM base AS language-support
+
+WORKDIR /app
+
+# Install Moderne CLI
+COPY --from=downloader /tmp/mod.jar /usr/local/bin/mod.jar
+# The CLI requires JDK 25; point the wrapper at the Red Hat OpenJDK 25 install
+RUN printf '#!/bin/sh\n/usr/lib/jvm/java-25-openjdk/bin/java -jar /usr/local/bin/mod.jar "$@"\n' > /usr/local/bin/mod && \
+    chmod +x /usr/local/bin/mod
+
+# Gradle (comment if projects don't use Gradle without a wrapper)
+ARG GRADLE_VERSION=8.14
+COPY --from=downloader /tmp/gradle-${GRADLE_VERSION}-bin.zip gradle-${GRADLE_VERSION}-bin.zip
+RUN mkdir /opt/gradle
+RUN unzip -d /opt/gradle gradle-${GRADLE_VERSION}-bin.zip && rm gradle-${GRADLE_VERSION}-bin.zip
+ENV PATH="${PATH}:/opt/gradle/gradle-${GRADLE_VERSION}/bin"
+
+# Maven (comment if projects don't use Maven without a wrapper)
+ARG MAVEN_VERSION=3.9.11
+COPY --from=downloader /tmp/apache-maven-${MAVEN_VERSION}-bin.tar.gz apache-maven-${MAVEN_VERSION}-bin.tar.gz
+RUN tar xzvf apache-maven-${MAVEN_VERSION}-bin.tar.gz && rm apache-maven-${MAVEN_VERSION}-bin.tar.gz
+RUN mv apache-maven-${MAVEN_VERSION} /opt/apache-maven-${MAVEN_VERSION}
+RUN ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
+
+# Maven wrapper external to projects (uncomment if needed)
+# RUN /usr/local/bin/mvn -N wrapper:wrapper
+# RUN mkdir -p /opt/maven-wrapper/bin
+# RUN mv mvnw mvnw.cmd .mvn /opt/maven-wrapper/bin/
+# ENV PATH="${PATH}:/opt/maven-wrapper/bin"
+
+# Android SDK (uncomment for Android projects)
+# Note: add the download to the downloader stage above, then COPY here
+# RUN unzip commandlinetools-linux-8512546_latest.zip
+# RUN mkdir -p /usr/lib/android-sdk/cmdline-tools/latest/
+# RUN cp -R cmdline-tools/* /usr/lib/android-sdk/cmdline-tools/latest/
+# RUN yes | /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses
+# RUN /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-33"
+# RUN /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-32"
+# RUN /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-31"
+# RUN /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-30"
+# RUN /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-29"
+# RUN /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-28"
+# RUN /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-27"
+# RUN /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-26"
+# RUN /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-25"
+# ENV ANDROID_HOME=/usr/lib/android-sdk/cmdline-tools/latest
+# ENV ANDROID_SDK_ROOT=${ANDROID_HOME}
+
+# Bazel (uncomment for Bazel projects)
+# Note: add the download to the downloader stage above, then COPY here
+# RUN cp bazelisk-linux-amd64 /usr/local/bin/bazel
+# RUN chmod +x /usr/local/bin/bazel
+
+# Node.js (uncomment for JavaScript/TypeScript projects)
+# RUN dnf module enable -y nodejs:20 && \
+#     dnf install -y nodejs
+
+# Python 3.11 (uncomment for Python projects)
+# RUN dnf install -y python3.11 python3.11-devel python3.11-pip && \
+#     alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
+#     python3.11 -m pip install --upgrade pip
+
+# .NET SDK (uncomment for .NET projects)
+# RUN dnf install -y dotnet-sdk-6.0
+# RUN dnf install -y dotnet-sdk-8.0
+
+################################################################################
+# OPTIONAL: Custom Maven Settings (uncomment if needed)
+################################################################################
+# Most projects don't need custom Maven settings. Only uncomment if your
+# projects require specific Maven configuration.
+
+# Configure Maven Settings if they are required to build (choose between a settings file within this repo or the docker image variant):
+# COPY maven/settings.xml /root/.m2/settings.xml
+# RUN cp $MAVEN_CONFIG/settings.xml /root/.m2/settings.xml # For custom maven docker image
+# COPY maven/settings-security.xml /root/.m2/settings-security.xml
+# RUN mod config build maven settings edit /root/.m2/settings.xml
+
+################################################################################
+# RUNTIME CONFIGURATION
+################################################################################
+
+FROM language-support AS runner
+
+# Git authentication configuration
+# Git credentials are configured at runtime via volume mounts to avoid baking secrets into the image.
+# Configure git to use the credential store that will be mounted at runtime
+RUN git config --global credential.helper "store --file=/root/.git-credentials"
+# Optionally disable SSL verification if needed
+# RUN git config --global http.sslVerify false
+
+# Mount git credentials at runtime with:
+# docker run -v $(pwd)/.git-credentials:/root/.git-credentials:ro ...
+#
+# .git-credentials format (one line per host):
+# https://<username>:<password>@github.com
+# https://<token-name>:<token>@gitlab.com
+
+# SSH keys for git authentication (if needed instead of https credentials)
+# Mount at runtime to avoid baking secrets into the image:
+# docker run -v $(pwd)/.ssh:/root/.ssh:ro ...
+#
+# Ensure your .ssh directory contains:
+# - id_rsa (private key with 600 permissions)
+# - known_hosts (with 644 permissions)
+
+################################################################################
+# OPTIONAL: Self-signed Certificates (uncomment if needed)
+################################################################################
+# Only needed if your artifact repository, source control, or Moderne tenant
+# uses self-signed certificates.
+#
+# On RHEL/UBI, the preferred approach is to use the system trust store via
+# update-ca-trust. This is simpler than per-JDK keytool imports and works
+# correctly with FIPS crypto policies.
+
+# System trust store approach (recommended for UBI/RHEL):
+# COPY mycert.crt /etc/pki/ca-trust/source/anchors/mycert.crt
+# RUN update-ca-trust
+# RUN mod config http trust-store edit java-home
+
+# Alternative: per-JDK keytool import (if system trust store approach doesn't work)
+# COPY mycert.crt /root/mycert.crt
+# RUN keytool -import -noprompt -storepass changeit -file /root/mycert.crt -keystore $(readlink -f /usr/lib/jvm/java-1.8.0-openjdk)/jre/lib/security/cacerts
+# RUN keytool -import -noprompt -storepass changeit -file /root/mycert.crt -keystore $(readlink -f /usr/lib/jvm/java-11-openjdk)/lib/security/cacerts
+# RUN keytool -import -noprompt -storepass changeit -file /root/mycert.crt -keystore $(readlink -f /usr/lib/jvm/java-17-openjdk)/lib/security/cacerts
+# RUN keytool -import -noprompt -storepass changeit -file /root/mycert.crt -keystore $(readlink -f /usr/lib/jvm/java-21-openjdk)/lib/security/cacerts
+# RUN mod config http trust-store edit java-home
+
+# mvnw scripts in maven projects may attempt to download maven-wrapper jars using wget.
+# UNCOMMENT the following to set wget's CA certificate
+# RUN echo "ca_certificate = /root/mycert.crt" > /root/.wgetrc
+
+################################################################################
+# OPTIONAL: 3-scalability (AWS Batch) setup
+################################################################################
+
+# AWS CLI for S3 repos.csv support (~300MB)
+# To use: uncomment the download in the downloader stage AND uncomment below:
+#COPY --from=downloader /tmp/awscliv2.zip awscliv2.zip
+#RUN unzip awscliv2.zip && ./aws/install && rm -rf awscliv2.zip aws/
+
+# Chunk script for AWS Batch parallel processing
+# Uncomment to include the chunk.sh script for 3-scalability:
+# COPY --chmod=755 3-scalability/chunk.sh chunk.sh
+
+################################################################################
+# FINAL SETUP
+################################################################################
+
+# OPTIONAL - Customize JVM options
+RUN mod config java options edit "-Xmx4g -Xss3m"
+
+# Disable Maven Central if your environment blocks access to repo.maven.apache.org
+# RUN mod config features no-maven-central
+
+# Available ports
+# 8080 - mod CLI monitor
+EXPOSE 8080
+
+# Disables extra formating in the logs
+ENV CUSTOM_CI=true
+
+# Set the data directory for the publish script
+ENV DATA_DIR=/var/moderne
+
+# Copy scripts
+COPY --chmod=755 publish.sh publish.sh
+COPY --chmod=755 diagnostics/ diagnostics/
+
+# Optional: mount from host
+COPY repos.csv repos.csv
+
+CMD ["./publish.sh", "repos.csv"]
