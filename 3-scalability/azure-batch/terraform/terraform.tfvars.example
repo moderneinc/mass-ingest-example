@@ -1,0 +1,23 @@
+name                = "mass-ingest"
+resource_group_name = "your-resource-group"
+location            = "eastus"
+
+vnet_name   = "your-vnet"
+subnet_name = "your-subnet"
+nsg_name    = "your-subnet-nsg"
+
+image    = "myregistry.azurecr.io/mass-ingest:latest"
+acr_name = "myregistry"
+
+vm_size   = "Standard_D4s_v5"
+max_nodes = 64
+
+moderne_tenant = "https://app.moderne.io"
+key_vault_name = "your-keyvault"
+
+# Storage — Maven/Artifactory (recommended)
+publish_url = "https://artifactory.example.com/artifactory/moderne-ingest/"
+
+# Ingestion settings
+# csv_file   = "repos.csv"
+# chunk_size = 10
