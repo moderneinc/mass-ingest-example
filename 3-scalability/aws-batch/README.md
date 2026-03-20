@@ -38,10 +38,10 @@ Architecture:
 
 ### 1. Prepare your repository list
 
-Create or edit `../repos.csv` with your repositories and determine where you wish to store it. Mass Ingest is capable of pulling your `repos.csv` from local disk, S3, or unauthenticated HTTP(S).
+Create or edit `../../repos.csv` with your repositories and determine where you wish to store it. Mass Ingest is capable of pulling your `repos.csv` from local disk, S3, or unauthenticated HTTP(S).
 
 > [!INFO]
-> [`chunk.sh`](chunk.sh#L11) and [`publish.sh`](../publish.sh#L40) can be updated to enable authenticated HTTP(S), if desired.
+> [`chunk.sh`](chunk.sh#L11) and [`publish.sh`](../../publish.sh#L40) can be updated to enable authenticated HTTP(S), if desired.
 
 ```csv
 cloneUrl,branch,origin,path
@@ -59,7 +59,7 @@ Required columns:
 
 ```bash
 # Build the image from repository root
-docker build -t mass-ingest:latest ..
+docker build -t mass-ingest:latest ../..
 
 # Tag for your registry
 docker tag mass-ingest:latest <your-registry>/mass-ingest:latest
@@ -72,7 +72,7 @@ For AWS ECR:
 ```bash
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <account-id>.dkr.ecr.us-east-1.amazonaws.com
 
-docker build -t mass-ingest:latest ..
+docker build -t mass-ingest:latest ../..
 docker tag mass-ingest:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/mass-ingest:latest
 docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/mass-ingest:latest
 ```

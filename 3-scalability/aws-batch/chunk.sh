@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 main() {
   csv_file=$1
@@ -17,9 +18,9 @@ main() {
     exit 1
   fi
 
-  total_lines=$(( $(cat "$csv_file" | wc -l) - 1 ))
+  total_lines=$(( $(wc -l < "$local_csv_file") - 1 ))
 
-  for start in $(seq 1 $(( chunk_size + 1 )) $total_lines); do
+  for start in $(seq 1 "$chunk_size" "$total_lines"); do
     aws batch submit-job --job-name "$JOB_NAME" --job-queue "$JOB_QUEUE" --job-definition "$JOB_DEFINITION" --parameters "Start=$start,End=$(( start + chunk_size))"
   done
 }
