@@ -61,16 +61,16 @@ This repository provides three progressive deployment examples. Each stage is **
 - Enterprise environments
 
 **What's included:**
-- AWS Batch for parallel workers
+- Cloud-native batch services (AWS Batch, GCP Batch, Azure Batch)
 - Terraform infrastructure as code
-- EventBridge Scheduler for automation
-- Auto-scaling compute environment
+- Scheduled automation (daily/weekly)
+- Auto-scaling compute — scales to zero when idle
 - Production monitoring and cost optimization
 
 **Resources needed:**
-- AWS account with appropriate permissions
+- Cloud account (AWS, GCP, or Azure)
 - Terraform >= 1.0
-- VPC with NAT gateway
+- VPC/VNet with internet access
 - Configurable compute (scales from 0 to 256+ vCPUs)
 
 [→ Start with 3-scalability](./3-scalability/)
@@ -96,13 +96,20 @@ mass-ingest-example/
 │   ├── observability/    # Grafana and Prometheus configs
 │   └── README.md
 │
-├── 3-scalability/        # AWS Batch production deployment
-│   ├── chunk.sh          # Batch job partitioning script
-│   ├── terraform/
-│   │   ├── main.tf
-│   │   ├── variables.tf
-│   │   └── outputs.tf
-│   └── README.md
+├── 3-scalability/        # Cloud-native batch deployment (multi-cloud)
+│   ├── README.md          # Platform comparison and architecture overview
+│   ├── aws-batch/         # AWS Batch + EventBridge + Secrets Manager
+│   │   ├── chunk.sh
+│   │   ├── terraform/
+│   │   └── README.md
+│   ├── gcp-batch/         # GCP Batch + Cloud Scheduler + Secret Manager
+│   │   ├── chunk.sh
+│   │   ├── terraform/
+│   │   └── README.md
+│   └── azure-batch/       # Azure Batch + Automation + Key Vault
+│       ├── chunk.sh
+│       ├── terraform/
+│       └── README.md
 │
 └── diagnostics/          # Comprehensive diagnostic system
     ├── diagnose.sh       # Main orchestration script
@@ -152,16 +159,16 @@ Before starting with any stage, you'll need:
 
 5. **Bash**: Required in the container image (Alpine users: `apk add bash`)
 
-6. **AWS account**: Required only for stage 3
+6. **Cloud account**: AWS, GCP, or Azure account (required only for stage 3)
 
 ## Quick comparison
 
 | Feature | 1-quickstart | 2-observability | 3-scalability |
 |---------|---------|-----------|---------|
-| **Deployment** | Single container | Docker Compose | AWS Batch + Terraform |
-| **Monitoring** | CLI metrics endpoint | Grafana + Prometheus | CloudWatch + optional Grafana |
+| **Deployment** | Single container | Docker Compose | Cloud-native batch + Terraform |
+| **Monitoring** | CLI metrics endpoint | Grafana + Prometheus | Cloud-native logging + optional Grafana |
 | **Scaling** | Manual | Single host | Auto-scaling parallel workers |
-| **Scheduling** | Manual/cron | Docker restart policy | EventBridge Scheduler |
+| **Scheduling** | Manual/cron | Docker restart policy | Cloud-native scheduler |
 | **Cost** | Lowest | Low | Scales with usage |
 | **Setup time** | 15 minutes | 30 minutes | 1-2 hours |
 | **Ideal repo count** | < 100 | 100-1000 | 1000+ |
