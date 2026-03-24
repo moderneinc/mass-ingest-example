@@ -218,8 +218,8 @@ See `dependency-repos.csv.example` for a template.
 ### Build arguments
 
 All Dockerfiles support:
-- `MODERNE_CLI_VERSION` - Specific CLI version (defaults to latest stable)
-- `MODERNE_CLI_STAGE` - Use `staging` for pre-release versions
+- `MODERNE_CLI_VERSION` - Specific CLI version (defaults to latest release)
+- `MODERNE_CLI_STAGE` - `release` (default) for latest release from Maven Central, `snapshot` for latest snapshot
 
 ### FIPS-compliant image
 
