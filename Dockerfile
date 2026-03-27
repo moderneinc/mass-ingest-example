@@ -8,6 +8,11 @@ FROM eclipse-temurin:17-jdk AS jdk17
 FROM eclipse-temurin:21-jdk AS jdk21
 FROM eclipse-temurin:25-jdk AS jdk25
 
+# UNCOMMENT for multiple Node.js versions (JavaScript/TypeScript projects)
+# FROM node:20 AS node20
+# FROM node:22 AS node22
+# FROM node:24 AS node24
+
 # UNCOMMENT if you use a custom maven image with settings
 # FROM <custom docker image> AS maven
 
@@ -117,9 +122,13 @@ RUN ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 # RUN cp bazelisk-linux-amd64 /usr/local/bin/bazel
 # RUN chmod +x /usr/local/bin/bazel
 
-# Node.js (uncomment for JavaScript/TypeScript projects)
-# RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
-#     apt-get install -y --no-install-recommends nodejs
+# Node.js - multiple versions (uncomment for JavaScript/TypeScript projects)
+# Also uncomment the FROM node:XX lines near the top of this file
+# COPY --from=node20 /usr/local /opt/node/node-20
+# COPY --from=node22 /usr/local /opt/node/node-22
+# COPY --from=node24 /usr/local /opt/node/node-24
+# ENV PATH="/opt/node/node-24/bin:${PATH}"
+# RUN mod config node installation edit /opt/node/node-20/bin/node /opt/node/node-22/bin/node # /opt/node/node-24/bin/node
 
 # Python 3.11 (uncomment for Python projects)
 # Install prerequisites and COPY the deadsnakes PPA
@@ -166,6 +175,32 @@ RUN ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 # RUN mod config build maven settings edit /root/.m2/settings.xml
 
 ################################################################################
+# OPTIONAL: Custom NPM Configuration (uncomment if needed)
+################################################################################
+# If your JavaScript/TypeScript projects require a custom npm registry or
+# authentication, uncomment the following to configure an .npmrc file.
+
+# COPY npm/.npmrc /root/.npmrc
+
+################################################################################
+# OPTIONAL: Custom Python/pip Configuration (uncomment if needed)
+################################################################################
+# If your Python projects require a private package index or authentication,
+# uncomment the following to configure pip.
+
+# RUN mkdir -p /root/.config/pip
+# COPY python/pip.conf /root/.config/pip/pip.conf
+
+################################################################################
+# OPTIONAL: Custom build steps (uncomment if needed)
+################################################################################
+# If your repositories include JavaScript or Python projects, uncomment the
+# following to configure the Moderne CLI to parse those languages.
+
+# RUN mkdir -p /root/.moderne/cli
+# COPY moderne.yml /root/.moderne/cli/moderne.yml
+
+################################################################################
 # RUNTIME CONFIGURATION
 ################################################################################
 
@@ -199,18 +234,33 @@ RUN git config --global credential.helper "store --file=/root/.git-credentials"
 # Only needed if your artifact repository, source control, or Moderne tenant
 # uses self-signed certificates.
 
-# Configure trust store if self-signed certificates are in use for artifact repository, source control, or moderne tenant
-# COPY mycert.crt /root/mycert.crt
-# RUN /usr/lib/jvm/temurin-8-jdk/bin/keytool -import -noprompt -storepass changeit -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-8-jdk/jre/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-11-jdk/bin/keytool -import -noprompt -storepass changeit -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-11-jdk/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-17-jdk/bin/keytool -import -noprompt -storepass changeit -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-17-jdk/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-21-jdk/bin/keytool -import -noprompt -storepass changeit -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-21-jdk/lib/security/cacerts
-# RUN /usr/lib/jvm/temurin-25-jdk/bin/keytool -import -noprompt -storepass changeit -file /root/mycert.crt -keystore /usr/lib/jvm/temurin-25-jdk/lib/security/cacerts
+# Place all .crt files in a certs/ directory next to the Dockerfile, then uncomment:
+# COPY certs/ /root/certs/
+#
+# Edit this list to match the JDKs installed above:
+# ENV CACERTS_PATHS="\
+#   /usr/lib/jvm/temurin-8-jdk/jre/lib/security/cacerts \
+#   /usr/lib/jvm/temurin-11-jdk/lib/security/cacerts \
+#   /usr/lib/jvm/temurin-17-jdk/lib/security/cacerts \
+#   /usr/lib/jvm/temurin-21-jdk/lib/security/cacerts \
+#   /usr/lib/jvm/temurin-25-jdk/lib/security/cacerts"
+#
+# RUN for cert in /root/certs/*.crt; do \
+#       alias=$(basename "$cert" .crt); \
+#       for cacerts in $CACERTS_PATHS; do \
+#           keytool -import -noprompt -trustcacerts \
+#             -alias "$alias" \
+#             -storepass changeit \
+#             -file "$cert" \
+#             -keystore "$cacerts"; \
+#       done; \
+#     done
 # RUN mod config http trust-store edit java-home
 
 # mvnw scripts in maven projects may attempt to download maven-wrapper jars using wget.
-# UNCOMMENT the following to set wget's CA certificate
-# RUN echo "ca_certificate = /root/mycert.crt" > /root/.wgetrc
+# If using self-signed certs, UNCOMMENT the following to concatenate them for wget:
+# RUN cat /root/certs/*.crt > /root/ca-bundle.crt
+# RUN echo "ca_certificate = /root/ca-bundle.crt" > /root/.wgetrc
 
 ################################################################################
 # OPTIONAL: 3-scalability (AWS Batch) setup
