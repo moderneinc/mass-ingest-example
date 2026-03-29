@@ -33,3 +33,4 @@ replay_pid*
 # Git credentials and SSH keys (mount at runtime, never commit)
 .git-credentials
 .ssh/
+data/
