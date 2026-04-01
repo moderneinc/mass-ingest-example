@@ -35,22 +35,57 @@ FROM registry.access.redhat.com/ubi9/ubi AS downloader
 # Artifact locations - override these to point at internal mirrors
 ARG MAVEN_REPO_URL=https://repo1.maven.org/maven2
 ARG GRADLE_DIST_URL=https://services.gradle.org/distributions
+ARG MODERNE_CLI_RELEASES_REPO=https://repo1.maven.org/maven2
+ARG MODERNE_CLI_SNAPSHOTS_REPO=https://central.sonatype.com/repository/maven-snapshots
 
 # Moderne CLI version — defaults to latest release from maven-metadata.xml
 ARG MODERNE_CLI_VERSION
+ARG MODERNE_CLI_STAGE=release
 
-# Download Moderne CLI
+# Download modw wrapper script
 RUN CLI_VERSION="${MODERNE_CLI_VERSION}"; \
-    if [ -z "${CLI_VERSION}" ]; then \
-        CLI_VERSION=$(curl -s "${MAVEN_REPO_URL}/io/moderne/moderne-cli/maven-metadata.xml" \
+    if [ -n "${CLI_VERSION}" ]; then \
+        if echo "${CLI_VERSION}" | grep -q '\-SNAPSHOT$'; then \
+            METADATA_URL="$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/$CLI_VERSION/maven-metadata.xml"; \
+            TIMESTAMP=$(curl -s "$METADATA_URL" | sed -n 's/.*<timestamp>\(.*\)<\/timestamp>.*/\1/p'); \
+            BUILD_NUM=$(curl -s "$METADATA_URL" | sed -n 's/.*<buildNumber>\(.*\)<\/buildNumber>.*/\1/p'); \
+            if [ -z "$TIMESTAMP" ] || [ -z "$BUILD_NUM" ]; then \
+                echo "Failed to resolve snapshot artifact version"; exit 1; \
+            fi; \
+            ARTIFACT_VERSION="$(echo "$CLI_VERSION" | sed 's/-SNAPSHOT$//')-$TIMESTAMP-$BUILD_NUM"; \
+            echo "Downloading modw for snapshot: $CLI_VERSION"; \
+            curl -fsSL -o /tmp/modw "$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/$CLI_VERSION/moderne-cli-$ARTIFACT_VERSION-modw.sh"; \
+        else \
+            echo "Downloading modw for version: $CLI_VERSION"; \
+            curl -fsSL -o /tmp/modw "${MODERNE_CLI_RELEASES_REPO}/io/moderne/moderne-cli/${CLI_VERSION}/moderne-cli-${CLI_VERSION}-modw.sh"; \
+        fi; \
+    elif [ "${MODERNE_CLI_STAGE}" = "snapshot" ]; then \
+        CLI_VERSION=$(curl -s "$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/maven-metadata.xml" | sed -n 's/.*<latest>\(.*\)<\/latest>.*/\1/p'); \
+        if [ -z "$CLI_VERSION" ]; then \
+            CLI_VERSION=$(curl -s "$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/maven-metadata.xml" | sed -n 's/.*<version>\(.*-SNAPSHOT\)<\/version>.*/\1/p' | tail -1); \
+        fi; \
+        if [ -z "$CLI_VERSION" ]; then \
+            echo "Failed to resolve latest snapshot version"; exit 1; \
+        fi; \
+        METADATA_URL="$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/$CLI_VERSION/maven-metadata.xml"; \
+        TIMESTAMP=$(curl -s "$METADATA_URL" | sed -n 's/.*<timestamp>\(.*\)<\/timestamp>.*/\1/p'); \
+        BUILD_NUM=$(curl -s "$METADATA_URL" | sed -n 's/.*<buildNumber>\(.*\)<\/buildNumber>.*/\1/p'); \
+        if [ -z "$TIMESTAMP" ] || [ -z "$BUILD_NUM" ]; then \
+            echo "Failed to resolve snapshot artifact version"; exit 1; \
+        fi; \
+        ARTIFACT_VERSION="$(echo "$CLI_VERSION" | sed 's/-SNAPSHOT$//')-$TIMESTAMP-$BUILD_NUM"; \
+        echo "Downloading latest snapshot modw: $CLI_VERSION"; \
+        curl -fsSL -o /tmp/modw "$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/$CLI_VERSION/moderne-cli-$ARTIFACT_VERSION-modw.sh"; \
+    else \
+        CLI_VERSION=$(curl -s "${MODERNE_CLI_RELEASES_REPO}/io/moderne/moderne-cli/maven-metadata.xml" \
             | grep '<release>' | sed 's/.*<release>\(.*\)<\/release>.*/\1/'); \
         if [ -z "${CLI_VERSION}" ]; then \
-            echo "Failed to resolve latest CLI version from ${MAVEN_REPO_URL}"; \
+            echo "Failed to resolve latest CLI version from ${MODERNE_CLI_RELEASES_REPO}"; \
             exit 1; \
         fi; \
-    fi; \
-    echo "Downloading Moderne CLI ${CLI_VERSION}"; \
-    curl -fsSL -o /tmp/mod.jar "${MAVEN_REPO_URL}/io/moderne/moderne-cli/${CLI_VERSION}/moderne-cli-${CLI_VERSION}.jar"
+        echo "Downloading latest release modw: $CLI_VERSION"; \
+        curl -fsSL -o /tmp/modw "${MODERNE_CLI_RELEASES_REPO}/io/moderne/moderne-cli/${CLI_VERSION}/moderne-cli-${CLI_VERSION}-modw.sh"; \
+    fi
 
 # Download Gradle (comment if projects don't use Gradle without a wrapper)
 ARG GRADLE_VERSION=8.14
@@ -126,11 +161,21 @@ FROM base AS language-support
 
 WORKDIR /app
 
-# Install Moderne CLI
-COPY --from=downloader /tmp/mod.jar /usr/local/bin/mod.jar
-# The CLI requires JDK 25; point the wrapper at the Red Hat OpenJDK 25 install
-RUN printf '#!/bin/sh\n/usr/lib/jvm/java-25-openjdk/bin/java -jar /usr/local/bin/mod.jar "$@"\n' > /usr/local/bin/mod && \
-    chmod +x /usr/local/bin/mod
+# Install modw wrapper and create mod symlink
+COPY --from=downloader /tmp/modw /usr/local/bin/modw
+RUN chmod +x /usr/local/bin/modw && ln -sf modw /usr/local/bin/mod
+
+# Write wrapper properties so modw knows the version policy at runtime
+ARG MODERNE_CLI_VERSION
+ARG MODERNE_CLI_STAGE=release
+RUN mkdir -p /root/.moderne/cli/dist && \
+    if [ -n "${MODERNE_CLI_VERSION}" ]; then \
+        echo "version=${MODERNE_CLI_VERSION}" > /root/.moderne/cli/dist/moderne-wrapper.properties; \
+    elif [ "${MODERNE_CLI_STAGE}" = "snapshot" ]; then \
+        echo "version=LATEST" > /root/.moderne/cli/dist/moderne-wrapper.properties; \
+    else \
+        echo "version=RELEASE" > /root/.moderne/cli/dist/moderne-wrapper.properties; \
+    fi
 
 # Gradle (comment if projects don't use Gradle without a wrapper)
 ARG GRADLE_VERSION=8.14

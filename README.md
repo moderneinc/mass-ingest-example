@@ -218,8 +218,10 @@ See `dependency-repos.csv.example` for a template.
 ### Build arguments
 
 All Dockerfiles support:
-- `MODERNE_CLI_VERSION` - Specific CLI version (defaults to latest stable)
-- `MODERNE_CLI_STAGE` - Use `staging` for pre-release versions
+- `MODERNE_CLI_VERSION` - Specific CLI version (defaults to latest release)
+- `MODERNE_CLI_STAGE` - `release` (default) for latest release from Maven Central, `snapshot` for latest snapshot
+- `MODERNE_CLI_RELEASES_REPO` - Maven repository for release CLI artifacts (defaults to `https://repo1.maven.org/maven2`)
+- `MODERNE_CLI_SNAPSHOTS_REPO` - Maven repository for snapshot CLI artifacts (defaults to `https://central.sonatype.com/repository/maven-snapshots`)
 
 ### FIPS-compliant image
 
