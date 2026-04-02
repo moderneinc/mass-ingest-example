@@ -143,6 +143,33 @@ RUN dnf install -y \
     java-21-openjdk-devel \
     java-25-openjdk-devel
 
+# Disable TLS 1.3 for JDK 8 and 11
+# RHEL 9 backported TLS 1.3 (and the P11AEADCipher class) into JDK 8 and 11.
+# Under FIPS, all crypto goes through the NSS PKCS11 module. The backported
+# P11AEADCipher has a bug in AES-GCM decryption that causes TLS 1.3 handshakes
+# to fail with CKR_ENCRYPTED_DATA_INVALID. JDK 17+ has the fix. TLS 1.2 works
+# fine because it uses a different PKCS11 code path for AES-GCM.
+#
+# The fix adds TLSv1.3 to jdk.tls.disabledAlgorithms for JDK 8 and 11.
+# RHEL 9's system crypto-policies file overrides that setting at runtime
+# (via security.useSystemPropertiesFile=true), so we disable the system
+# override for these two JDKs and bake the full FIPS crypto-policies content
+# (with TLSv1.3 prepended) directly into their java.security files.
+# This is strictly more restrictive than stock FIPS. JDK 17+ is unaffected.
+RUN crypto=/etc/crypto-policies/back-ends/java.config && \
+    tls_disabled=$(grep '^jdk.tls.disabledAlgorithms=' "$crypto" | sed 's/^jdk.tls.disabledAlgorithms=//') && \
+    certpath_disabled=$(grep '^jdk.certpath.disabledAlgorithms=' "$crypto" | sed 's/^jdk.certpath.disabledAlgorithms=//') && \
+    named_curves=$(grep '^jdk.disabled.namedCurves=' "$crypto" | sed 's/^jdk.disabled.namedCurves=//') && \
+    for f in \
+      /usr/lib/jvm/java-1.8.0-openjdk-*/jre/lib/security/java.security \
+      /usr/lib/jvm/java-11-openjdk-*/conf/security/java.security; do \
+      sed -i 's|^security.useSystemPropertiesFile=true|security.useSystemPropertiesFile=false|' "$f" && \
+      sed -i "s|^jdk.tls.disabledAlgorithms=.*|jdk.tls.disabledAlgorithms=TLSv1.3, ${tls_disabled}|" "$f" && \
+      sed -i "s|^jdk.certpath.disabledAlgorithms=.*|jdk.certpath.disabledAlgorithms=${certpath_disabled}|" "$f" && \
+      sed -i "s|^jdk.disabled.namedCurves=.*|jdk.disabled.namedCurves=${named_curves}|" "$f" && \
+      sed -i '/^jdk.tls.legacyAlgorithms=/s/=.*/=/' "$f"; \
+    done
+
 # Install utilities
 # Note: git-lfs requires EPEL; --allowerasing replaces curl-minimal with full curl
 RUN dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \

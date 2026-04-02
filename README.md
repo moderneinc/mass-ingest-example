@@ -265,6 +265,10 @@ docker run --rm \
   mass-ingest:fips
 ```
 
+**JDK 8 and 11 TLS 1.3 workaround:**
+
+RHEL 9 backported TLS 1.3 into JDK 8 and 11, but the backported `P11AEADCipher` has a bug in AES-GCM decryption that causes TLS 1.3 handshakes to fail with `CKR_ENCRYPTED_DATA_INVALID` when running through NSS in FIPS mode. JDK 17+ has the fix. The Dockerfile disables TLS 1.3 for JDK 8 and 11, forcing them to use TLS 1.2 which works correctly. This is strictly more restrictive than stock FIPS — same algorithm restrictions plus TLS 1.3 disabled. JDK 17+ is unaffected and uses TLS 1.3 normally.
+
 **Key differences from the standard image:**
 
 | Aspect          | Standard (`Dockerfile`)        | FIPS (`Dockerfile.fips`)              |
