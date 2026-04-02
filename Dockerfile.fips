@@ -156,19 +156,44 @@ RUN dnf install -y \
 # override for these two JDKs and bake the full FIPS crypto-policies content
 # (with TLSv1.3 prepended) directly into their java.security files.
 # This is strictly more restrictive than stock FIPS. JDK 17+ is unaffected.
-RUN crypto=/etc/crypto-policies/back-ends/java.config && \
-    tls_disabled=$(grep '^jdk.tls.disabledAlgorithms=' "$crypto" | sed 's/^jdk.tls.disabledAlgorithms=//') && \
-    certpath_disabled=$(grep '^jdk.certpath.disabledAlgorithms=' "$crypto" | sed 's/^jdk.certpath.disabledAlgorithms=//') && \
-    named_curves=$(grep '^jdk.disabled.namedCurves=' "$crypto" | sed 's/^jdk.disabled.namedCurves=//') && \
-    for f in \
-      /usr/lib/jvm/java-1.8.0-openjdk-*/jre/lib/security/java.security \
-      /usr/lib/jvm/java-11-openjdk-*/conf/security/java.security; do \
-      sed -i 's|^security.useSystemPropertiesFile=true|security.useSystemPropertiesFile=false|' "$f" && \
-      sed -i "s|^jdk.tls.disabledAlgorithms=.*|jdk.tls.disabledAlgorithms=TLSv1.3, ${tls_disabled}|" "$f" && \
-      sed -i "s|^jdk.certpath.disabledAlgorithms=.*|jdk.certpath.disabledAlgorithms=${certpath_disabled}|" "$f" && \
-      sed -i "s|^jdk.disabled.namedCurves=.*|jdk.disabled.namedCurves=${named_curves}|" "$f" && \
-      sed -i '/^jdk.tls.legacyAlgorithms=/s/=.*/=/' "$f"; \
-    done
+RUN <<'PATCH_SCRIPT'
+#!/bin/bash
+set -e
+
+# System crypto-policies config that RHEL 9 applies to Java at runtime
+crypto=/etc/crypto-policies/back-ends/java.config
+
+# Extract the value after '=' for a given property name
+read_policy() { grep "^${1}=" "$crypto" | cut -d= -f2-; }
+
+# Capture current FIPS policy values so we can bake them into java.security
+# (needed because we're about to disable the runtime system-properties loading)
+tls_disabled=$(read_policy jdk.tls.disabledAlgorithms)
+certpath_disabled=$(read_policy jdk.certpath.disabledAlgorithms)
+named_curves=$(read_policy jdk.disabled.namedCurves)
+
+# Paths to java.security for affected JDKs (JDK 17+ has the fix and doesn't need patching)
+jdk8_security=/usr/lib/jvm/java-1.8.0-openjdk-*/jre/lib/security/java.security
+jdk11_security=/usr/lib/jvm/java-11-openjdk-*/conf/security/java.security
+
+for f in $jdk8_security $jdk11_security
+do
+  # Stop loading /etc/crypto-policies at runtime -- we bake the values in directly
+  sed -i 's|^security.useSystemPropertiesFile=true|security.useSystemPropertiesFile=false|' "$f"
+
+  # Prepend TLSv1.3 to disabled TLS algorithms -- the actual fix for the AES-GCM bug
+  sed -i "s|^jdk.tls.disabledAlgorithms=.*|jdk.tls.disabledAlgorithms=TLSv1.3, ${tls_disabled}|" "$f"
+
+  # Bake in certpath restrictions from FIPS policy (required since we disabled the system file)
+  sed -i "s|^jdk.certpath.disabledAlgorithms=.*|jdk.certpath.disabledAlgorithms=${certpath_disabled}|" "$f"
+
+  # Bake in named curve restrictions from FIPS policy
+  sed -i "s|^jdk.disabled.namedCurves=.*|jdk.disabled.namedCurves=${named_curves}|" "$f"
+
+  # Clear legacy algorithms -- not permitted under FIPS
+  sed -i '/^jdk.tls.legacyAlgorithms=/s/=.*/=/' "$f"
+done
+PATCH_SCRIPT
 
 # Install utilities
 # Note: git-lfs requires EPEL; --allowerasing replaces curl-minimal with full curl
