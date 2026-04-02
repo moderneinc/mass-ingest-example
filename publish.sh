@@ -367,31 +367,51 @@ send_logs() {
   elif [[ -n "${PUBLISH_USER:-}" && -n "${PUBLISH_PASSWORD:-}" ]]; then
     logs_url=$PUBLISH_URL/io/moderne/ingest-log/$index/$timestamp/ingest-log-cli-$timestamp-$index.zip
     info "Uploading logs to $logs_url"
-    if ! curl -s -S --insecure -u "$PUBLISH_USER":"$PUBLISH_PASSWORD" -X PUT "$logs_url" -T "$DATA_DIR/log.zip"; then
-        info "Failed to publish logs"
+    log_response=$(curl -s -S --insecure -w "\n%{http_code}" -u "$PUBLISH_USER":"$PUBLISH_PASSWORD" -X PUT "$logs_url" -T "$DATA_DIR/log.zip" 2>&1)
+    log_http_code=$(echo "$log_response" | tail -1)
+    log_body=$(echo "$log_response" | sed '$d')
+    if [[ "$log_http_code" -ge 200 && "$log_http_code" -lt 300 ]]; then
+      info "Successfully published logs (HTTP $log_http_code)"
+    else
+      info "Failed to publish logs (HTTP $log_http_code): $log_body"
     fi
 
     # Upload sync logs (if they exist)
     if [ -f "$DATA_DIR/syncs.zip" ]; then
       sync_logs_url=$PUBLISH_URL/io/moderne/ingest-sync-log/$index/$timestamp/ingest-sync-log-cli-$timestamp-$index.zip
       info "Uploading sync logs to $sync_logs_url"
-      if ! curl -s -S --insecure -u "$PUBLISH_USER":"$PUBLISH_PASSWORD" -X PUT "$sync_logs_url" -T "$DATA_DIR/syncs.zip"; then
-          info "Failed to publish sync logs"
+      sync_response=$(curl -s -S --insecure -w "\n%{http_code}" -u "$PUBLISH_USER":"$PUBLISH_PASSWORD" -X PUT "$sync_logs_url" -T "$DATA_DIR/syncs.zip" 2>&1)
+      sync_http_code=$(echo "$sync_response" | tail -1)
+      sync_body=$(echo "$sync_response" | sed '$d')
+      if [[ "$sync_http_code" -ge 200 && "$sync_http_code" -lt 300 ]]; then
+        info "Successfully published sync logs (HTTP $sync_http_code)"
+      else
+        info "Failed to publish sync logs (HTTP $sync_http_code): $sync_body"
       fi
     fi
   elif [[ -n "${PUBLISH_TOKEN:-}" ]]; then
     logs_url=$PUBLISH_URL/io/moderne/ingest-log/$index/$timestamp/ingest-log-cli-$timestamp-$index.zip
     info "Uploading logs to $logs_url"
-    if ! curl -s -S --insecure -H "Authorization: Bearer $PUBLISH_TOKEN" -X PUT "$logs_url" -T "$DATA_DIR/log.zip"; then
-        info "Failed to publish logs"
+    log_response=$(curl -s -S --insecure -w "\n%{http_code}" -H "Authorization: Bearer $PUBLISH_TOKEN" -X PUT "$logs_url" -T "$DATA_DIR/log.zip" 2>&1)
+    log_http_code=$(echo "$log_response" | tail -1)
+    log_body=$(echo "$log_response" | sed '$d')
+    if [[ "$log_http_code" -ge 200 && "$log_http_code" -lt 300 ]]; then
+      info "Successfully published logs (HTTP $log_http_code)"
+    else
+      info "Failed to publish logs (HTTP $log_http_code): $log_body"
     fi
 
     # Upload sync logs (if they exist)
     if [ -f "$DATA_DIR/syncs.zip" ]; then
       sync_logs_url=$PUBLISH_URL/io/moderne/ingest-sync-log/$index/$timestamp/ingest-sync-log-cli-$timestamp-$index.zip
       info "Uploading sync logs to $sync_logs_url"
-      if ! curl -s -S --insecure -H "Authorization: Bearer $PUBLISH_TOKEN" -X PUT "$sync_logs_url" -T "$DATA_DIR/syncs.zip"; then
-          info "Failed to publish sync logs"
+      sync_response=$(curl -s -S --insecure -w "\n%{http_code}" -H "Authorization: Bearer $PUBLISH_TOKEN" -X PUT "$sync_logs_url" -T "$DATA_DIR/syncs.zip" 2>&1)
+      sync_http_code=$(echo "$sync_response" | tail -1)
+      sync_body=$(echo "$sync_response" | sed '$d')
+      if [[ "$sync_http_code" -ge 200 && "$sync_http_code" -lt 300 ]]; then
+        info "Successfully published sync logs (HTTP $sync_http_code)"
+      else
+        info "Failed to publish sync logs (HTTP $sync_http_code): $sync_body"
       fi
     fi
   else
