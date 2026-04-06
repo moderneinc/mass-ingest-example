@@ -108,10 +108,24 @@ RUN mkdir -p /root/.moderne/cli/dist && \
 FROM modcli AS language-support
 
 # Gradle (comment if projects don't use Gradle without a wrapper)
-RUN wget --no-check-certificate https://services.gradle.org/distributions/gradle-8.14-bin.zip
-RUN mkdir /opt/gradle
-RUN unzip -d /opt/gradle gradle-8.14-bin.zip
-ENV PATH="${PATH}:/opt/gradle/gradle-8.14/bin"
+# Install one or more Gradle versions for repos that lack a Gradle wrapper.
+# To add versions for repos with older build scripts, add them to GRADLE_EXTRA_VERSIONS (comma-separated).
+# Then use the `gradleVersion` column in repos.csv to select which version to use per repo.
+ARG GRADLE_VERSION=8.14
+ARG GRADLE_EXTRA_VERSIONS=
+RUN mkdir -p /opt/gradle && \
+    wget --no-check-certificate https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip && \
+    unzip -d /opt/gradle gradle-${GRADLE_VERSION}-bin.zip && \
+    rm gradle-${GRADLE_VERSION}-bin.zip && \
+    for v in $(echo "${GRADLE_EXTRA_VERSIONS}" | tr ',' ' '); do \
+        wget --no-check-certificate https://services.gradle.org/distributions/gradle-${v}-bin.zip && \
+        unzip -d /opt/gradle gradle-${v}-bin.zip && \
+        rm gradle-${v}-bin.zip; \
+    done
+
+# Register all Gradle installations so the CLI can select the right version per repo.
+RUN mod config build gradle installation edit $(find /opt/gradle -maxdepth 1 -mindepth 1 -type d | sort -V)
+ENV PATH="${PATH}:/opt/gradle/gradle-${GRADLE_VERSION}/bin"
 
 # Maven (comment if projects don't use Maven without a wrapper)
 # NOTE: This version may be out of date as new versions are continually released. Check here for the latest version: https://repo1.maven.org/maven2/org/apache/maven/apache-maven/

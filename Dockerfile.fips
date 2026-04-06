@@ -88,8 +88,14 @@ RUN CLI_VERSION="${MODERNE_CLI_VERSION}"; \
     fi
 
 # Download Gradle (comment if projects don't use Gradle without a wrapper)
+# To add versions for repos with older build scripts, add them to GRADLE_EXTRA_VERSIONS (comma-separated).
+# Then use the `gradleVersion` column in repos.csv to select which version to use per repo.
 ARG GRADLE_VERSION=8.14
-RUN curl -fsSL -o /tmp/gradle-${GRADLE_VERSION}-bin.zip "${GRADLE_DIST_URL}/gradle-${GRADLE_VERSION}-bin.zip"
+ARG GRADLE_EXTRA_VERSIONS=
+RUN curl -fsSL -o /tmp/gradle-${GRADLE_VERSION}-bin.zip "${GRADLE_DIST_URL}/gradle-${GRADLE_VERSION}-bin.zip" && \
+    for v in $(echo "${GRADLE_EXTRA_VERSIONS}" | tr ',' ' '); do \
+        curl -fsSL -o /tmp/gradle-${v}-bin.zip "${GRADLE_DIST_URL}/gradle-${v}-bin.zip"; \
+    done
 
 # Download Maven (comment if projects don't use Maven without a wrapper)
 # NOTE: Check for latest version: https://repo1.maven.org/maven2/org/apache/maven/apache-maven/
@@ -231,9 +237,18 @@ RUN mkdir -p /root/.moderne/cli/dist && \
 
 # Gradle (comment if projects don't use Gradle without a wrapper)
 ARG GRADLE_VERSION=8.14
-COPY --from=downloader /tmp/gradle-${GRADLE_VERSION}-bin.zip gradle-${GRADLE_VERSION}-bin.zip
-RUN mkdir /opt/gradle
-RUN unzip -d /opt/gradle gradle-${GRADLE_VERSION}-bin.zip && rm gradle-${GRADLE_VERSION}-bin.zip
+ARG GRADLE_EXTRA_VERSIONS=
+COPY --from=downloader /tmp/gradle-*.zip /tmp/
+RUN mkdir -p /opt/gradle && \
+    unzip -d /opt/gradle /tmp/gradle-${GRADLE_VERSION}-bin.zip && \
+    rm /tmp/gradle-${GRADLE_VERSION}-bin.zip && \
+    for v in $(echo "${GRADLE_EXTRA_VERSIONS}" | tr ',' ' '); do \
+        unzip -d /opt/gradle /tmp/gradle-${v}-bin.zip && \
+        rm /tmp/gradle-${v}-bin.zip; \
+    done
+
+# Register all Gradle installations so the CLI can select the right version per repo.
+RUN mod config build gradle installation edit $(find /opt/gradle -maxdepth 1 -mindepth 1 -type d | sort -V)
 ENV PATH="${PATH}:/opt/gradle/gradle-${GRADLE_VERSION}/bin"
 
 # Maven (comment if projects don't use Maven without a wrapper)
