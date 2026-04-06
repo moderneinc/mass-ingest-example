@@ -88,8 +88,13 @@ RUN CLI_VERSION="${MODERNE_CLI_VERSION}"; \
     fi
 
 # Download Gradle (comment if projects don't use Gradle without a wrapper)
+# Download one or more Gradle versions for repos that lack a Gradle wrapper.
+# Add additional versions as needed (e.g., for repos whose build scripts require older Gradle).
 ARG GRADLE_VERSION=8.14
 RUN curl -fsSL -o /tmp/gradle-${GRADLE_VERSION}-bin.zip "${GRADLE_DIST_URL}/gradle-${GRADLE_VERSION}-bin.zip"
+# UNCOMMENT to download additional Gradle versions:
+# ARG GRADLE_VERSION_2=6.9.4
+# RUN curl -fsSL -o /tmp/gradle-${GRADLE_VERSION_2}-bin.zip "${GRADLE_DIST_URL}/gradle-${GRADLE_VERSION_2}-bin.zip"
 
 # Download Maven (comment if projects don't use Maven without a wrapper)
 # NOTE: Check for latest version: https://repo1.maven.org/maven2/org/apache/maven/apache-maven/
@@ -232,8 +237,20 @@ RUN mkdir -p /root/.moderne/cli/dist && \
 # Gradle (comment if projects don't use Gradle without a wrapper)
 ARG GRADLE_VERSION=8.14
 COPY --from=downloader /tmp/gradle-${GRADLE_VERSION}-bin.zip gradle-${GRADLE_VERSION}-bin.zip
-RUN mkdir /opt/gradle
-RUN unzip -d /opt/gradle gradle-${GRADLE_VERSION}-bin.zip && rm gradle-${GRADLE_VERSION}-bin.zip
+RUN mkdir -p /opt/gradle && \
+    unzip -d /opt/gradle gradle-${GRADLE_VERSION}-bin.zip && \
+    rm gradle-${GRADLE_VERSION}-bin.zip
+
+# UNCOMMENT to install additional Gradle versions for repos that need them.
+# Then use the `gradleVersion` column in repos.csv to select which version to use per repo.
+# ARG GRADLE_VERSION_2=6.9.4
+# COPY --from=downloader /tmp/gradle-${GRADLE_VERSION_2}-bin.zip gradle-${GRADLE_VERSION_2}-bin.zip
+# RUN unzip -d /opt/gradle gradle-${GRADLE_VERSION_2}-bin.zip && rm gradle-${GRADLE_VERSION_2}-bin.zip
+
+# Register all Gradle installations so the CLI can select the right version per repo.
+# List all /opt/gradle/* directories here. If you installed additional versions above, add them.
+RUN mod config build gradle installation edit /opt/gradle/gradle-${GRADLE_VERSION}
+# RUN mod config build gradle installation edit /opt/gradle/gradle-${GRADLE_VERSION} /opt/gradle/gradle-${GRADLE_VERSION_2}
 ENV PATH="${PATH}:/opt/gradle/gradle-${GRADLE_VERSION}/bin"
 
 # Maven (comment if projects don't use Maven without a wrapper)

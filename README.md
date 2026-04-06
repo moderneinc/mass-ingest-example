@@ -194,6 +194,7 @@ The `repos.csv` file columns:
 - `origin` (required) - Source identifier (e.g., `github.com`)
 - `path` (required) - Repository path/identifier
 - `branch` (optional) - Branch to build (uses remote default if not specified)
+- `gradleVersion` (optional) - Selects a specific Gradle version for repos without a wrapper (must match an installation registered via `mod config build gradle installation edit`)
 
 See [repos.csv documentation](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv) for advanced options.
 
