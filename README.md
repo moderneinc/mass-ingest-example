@@ -239,7 +239,8 @@ docker build -f Dockerfile.fips -t mass-ingest:fips .
 |----------------------|----------------------------------------------|----------------------------------------|
 | `MAVEN_REPO_URL`    | `https://repo1.maven.org/maven2`             | Maven repository for CLI and Maven     |
 | `GRADLE_DIST_URL`   | `https://services.gradle.org/distributions`  | Gradle distribution download URL       |
-| `GRADLE_VERSION`    | `8.14`                                       | Gradle version to install              |
+| `GRADLE_VERSION`    | `8.14`                                       | Primary Gradle version to install      |
+| `GRADLE_EXTRA_VERSIONS` | *(empty)*                                | Comma-separated additional Gradle versions (e.g., `6.9.4,5.6.4`) |
 | `MAVEN_VERSION`     | `3.9.11`                                     | Maven version to install               |
 
 **Using internal mirrors:**

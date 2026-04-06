@@ -109,23 +109,23 @@ FROM modcli AS language-support
 
 # Gradle (comment if projects don't use Gradle without a wrapper)
 # Install one or more Gradle versions for repos that lack a Gradle wrapper.
-# Add additional versions as needed (e.g., for repos whose build scripts require older Gradle).
-RUN wget --no-check-certificate https://services.gradle.org/distributions/gradle-8.14-bin.zip && \
-    mkdir -p /opt/gradle && \
-    unzip -d /opt/gradle gradle-8.14-bin.zip && \
-    rm gradle-8.14-bin.zip
-
-# UNCOMMENT to install additional Gradle versions for repos that need them.
+# To add versions for repos with older build scripts, add them to GRADLE_EXTRA_VERSIONS (comma-separated).
 # Then use the `gradleVersion` column in repos.csv to select which version to use per repo.
-# RUN wget --no-check-certificate https://services.gradle.org/distributions/gradle-6.9.4-bin.zip && \
-#     unzip -d /opt/gradle gradle-6.9.4-bin.zip && \
-#     rm gradle-6.9.4-bin.zip
+ARG GRADLE_VERSION=8.14
+ARG GRADLE_EXTRA_VERSIONS=
+RUN mkdir -p /opt/gradle && \
+    wget --no-check-certificate https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip && \
+    unzip -d /opt/gradle gradle-${GRADLE_VERSION}-bin.zip && \
+    rm gradle-${GRADLE_VERSION}-bin.zip && \
+    for v in $(echo "${GRADLE_EXTRA_VERSIONS}" | tr ',' ' '); do \
+        wget --no-check-certificate https://services.gradle.org/distributions/gradle-${v}-bin.zip && \
+        unzip -d /opt/gradle gradle-${v}-bin.zip && \
+        rm gradle-${v}-bin.zip; \
+    done
 
 # Register all Gradle installations so the CLI can select the right version per repo.
-# List all /opt/gradle/* directories here. If you installed additional versions above, add them.
-RUN mod config build gradle installation edit /opt/gradle/gradle-8.14
-# RUN mod config build gradle installation edit /opt/gradle/gradle-8.14 /opt/gradle/gradle-6.9.4
-ENV PATH="${PATH}:/opt/gradle/gradle-8.14/bin"
+RUN mod config build gradle installation edit $(find /opt/gradle -maxdepth 1 -mindepth 1 -type d | sort -V)
+ENV PATH="${PATH}:/opt/gradle/gradle-${GRADLE_VERSION}/bin"
 
 # Maven (comment if projects don't use Maven without a wrapper)
 # NOTE: This version may be out of date as new versions are continually released. Check here for the latest version: https://repo1.maven.org/maven2/org/apache/maven/apache-maven/
