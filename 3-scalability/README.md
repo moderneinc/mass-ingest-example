@@ -51,7 +51,7 @@ We recommend VM-based batch services (AWS Batch, GCP Batch, Azure Batch) over Ku
 
 - **Unreliable resource guarantees** — Kubernetes does not always give pods the CPU and memory they request. Under resource pressure, LST builds get throttled or evicted, causing flaky ingestion that appears to work sometimes and fail unpredictably.
 - **Debugging derailment** — Kubernetes deployments tend to derail into debugging K8s infrastructure (scheduling, networking, storage) instead of getting value from Moderne. The operational overhead is significant.
-- **Cost inefficiency** — Kubernetes clusters typically consume only ~15% of available CPU. In one case, moving a comparable workload from a 2-node K8s cluster to a single large VM reduced costs by 10x.
+- **Cost inefficiency** — Industry reports suggest Kubernetes clusters typically consume only ~15% of available CPU. In one case, moving a comparable workload from a 2-node K8s cluster to a single large VM reduced costs by an order of magnitude.
 - **Out-of-memory incidents** — Customers have run out of memory running mass ingestion on K8s with as few as 400 projects, even with resource requests configured.
 - **Mysterious build hangs** — Repositories that build successfully on a developer machine can hang indefinitely in a K8s pod due to memory pressure that is invisible to the build process.
 - **Container environment quirks** — Random uid/gid assignment in some K8s setups breaks filesystem operations. JDKs 8–18 have a `user.home` bug in containerized environments that causes directories named `?`.
