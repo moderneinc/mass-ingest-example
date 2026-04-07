@@ -39,17 +39,18 @@ variable "acr_name" {
   description = "Azure Container Registry name (optional, for ACR authentication)"
 }
 
+variable "acr_resource_group_name" {
+  type        = string
+  default     = ""
+  description = "Resource group containing the ACR (defaults to resource_group_name)"
+}
+
 variable "vm_size" {
   type    = string
   default = "Standard_D4s_v5"
 }
 
 variable "max_nodes" {
-  type    = number
-  default = 64
-}
-
-variable "disk_size_gb" {
   type    = number
   default = 64
 }

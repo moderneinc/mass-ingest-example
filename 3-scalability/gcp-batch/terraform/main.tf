@@ -138,7 +138,7 @@ resource "google_compute_firewall" "metrics" {
 resource "google_workflows_workflow" "mass_ingest" {
   name            = var.name
   region          = var.region
-  service_account = google_service_account.workflow.id
+  service_account = google_service_account.workflow.email
 
   source_contents = yamlencode({
     main = {

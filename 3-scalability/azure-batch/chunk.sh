@@ -29,21 +29,38 @@ main() {
 
   printf "Submitting %d processor tasks (%d repos, chunk size %d)\n" "$total_tasks" "$total_lines" "$chunk_size"
 
+  # Build environment settings JSON for processor tasks
+  # Forward all credential env vars from the chunk task to processor tasks
+  env_settings="[]"
+  for var_name in MODERNE_TENANT PUBLISH_URL MODERNE_TOKEN GIT_CREDENTIALS PUBLISH_USER PUBLISH_PASSWORD PUBLISH_TOKEN; do
+    val="${!var_name:-}"
+    if [[ -n "$val" ]]; then
+      env_settings=$(echo "$env_settings" | jq --arg name "$var_name" --arg val "$val" \
+        '. + [{"name": $name, "value": $val}]')
+    fi
+  done
+
   for (( i=0; i<total_tasks; i++ )); do
     start=$(( i * chunk_size + 1 ))
     end=$(( start + chunk_size ))
 
-    cat > /tmp/task-${i}.json <<EOF
-{
-  "id": "processor-${i}",
-  "commandLine": "./publish.sh ${local_csv_file} --start ${start} --end ${end}",
-  "containerSettings": {
-    "imageName": "${IMAGE}"
-  }
-}
-EOF
+    # Merge per-task env settings with shared credentials
+    task_json=$(jq -n \
+      --arg id "processor-${i}" \
+      --arg cmd "./publish.sh ${local_csv_file} --start ${start} --end ${end}" \
+      --arg image "$IMAGE" \
+      --argjson env "$env_settings" \
+      '{
+        id: $id,
+        commandLine: $cmd,
+        containerSettings: { imageName: $image },
+        environmentSettings: $env
+      }')
+
+    echo "$task_json" > /tmp/task-${i}.json
 
     az batch task create \
+      --account-endpoint "$BATCH_ACCOUNT_ENDPOINT" \
       --job-id "$BATCH_JOB_ID" \
       --json-file /tmp/task-${i}.json
   done

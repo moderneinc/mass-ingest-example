@@ -20,6 +20,11 @@ main() {
 
   total_lines=$(( $(wc -l < "$local_csv_file") - 1 ))
 
+  if [[ $total_lines -le 0 ]]; then
+    printf "No repositories found in %s\n" "$csv_file"
+    exit 0
+  fi
+
   for start in $(seq 1 "$chunk_size" "$total_lines"); do
     aws batch submit-job --job-name "$JOB_NAME" --job-queue "$JOB_QUEUE" --job-definition "$JOB_DEFINITION" --parameters "Start=$start,End=$(( start + chunk_size))"
   done

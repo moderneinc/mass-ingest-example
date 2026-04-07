@@ -52,7 +52,7 @@ resource "azurerm_key_vault_access_policy" "batch" {
 data "azurerm_container_registry" "acr" {
   count               = var.acr_name != "" ? 1 : 0
   name                = var.acr_name
-  resource_group_name = var.resource_group_name
+  resource_group_name = var.acr_resource_group_name != "" ? var.acr_resource_group_name : var.resource_group_name
 }
 
 resource "azurerm_role_assignment" "acr_pull" {
@@ -177,6 +177,13 @@ resource "azurerm_automation_runbook" "trigger" {
 
     $batchContext = Get-AzBatchAccount -AccountName "${azurerm_batch_account.batch.name}" -ResourceGroupName "${var.resource_group_name}"
 
+    # Fetch secrets from Key Vault
+    $moderneToken = (Get-AzKeyVaultSecret -VaultName "${var.key_vault_name}" -Name "moderne-token" -AsPlainText) 2>$null
+    $gitCredentials = (Get-AzKeyVaultSecret -VaultName "${var.key_vault_name}" -Name "git-credentials" -AsPlainText) 2>$null
+    $publishUser = (Get-AzKeyVaultSecret -VaultName "${var.key_vault_name}" -Name "publish-user" -AsPlainText) 2>$null
+    $publishPassword = (Get-AzKeyVaultSecret -VaultName "${var.key_vault_name}" -Name "publish-password" -AsPlainText) 2>$null
+    $publishToken = (Get-AzKeyVaultSecret -VaultName "${var.key_vault_name}" -Name "publish-token" -AsPlainText) 2>$null
+
     $jobId = "${var.name}-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
     New-AzBatchJob -Id $jobId -PoolInformation (New-Object Microsoft.Azure.Commands.Batch.Models.PSPoolInformation -Property @{PoolId="${azurerm_batch_pool.pool.name}"}) -BatchContext $batchContext
 
@@ -186,10 +193,18 @@ resource "azurerm_automation_runbook" "trigger" {
 
     $envVars = @(
       (New-Object Microsoft.Azure.Commands.Batch.Models.PSEnvironmentSetting -Property @{Name="BATCH_JOB_ID"; Value=$jobId}),
+      (New-Object Microsoft.Azure.Commands.Batch.Models.PSEnvironmentSetting -Property @{Name="BATCH_ACCOUNT_ENDPOINT"; Value="${azurerm_batch_account.batch.name}.${var.location}.batch.azure.com"}),
       (New-Object Microsoft.Azure.Commands.Batch.Models.PSEnvironmentSetting -Property @{Name="IMAGE"; Value="${var.image}"}),
       (New-Object Microsoft.Azure.Commands.Batch.Models.PSEnvironmentSetting -Property @{Name="MODERNE_TENANT"; Value="${var.moderne_tenant}"}),
       (New-Object Microsoft.Azure.Commands.Batch.Models.PSEnvironmentSetting -Property @{Name="PUBLISH_URL"; Value="${var.publish_url}"})
     )
+
+    # Add secrets as environment variables (only if they exist in Key Vault)
+    if ($moderneToken) { $envVars += (New-Object Microsoft.Azure.Commands.Batch.Models.PSEnvironmentSetting -Property @{Name="MODERNE_TOKEN"; Value=$moderneToken}) }
+    if ($gitCredentials) { $envVars += (New-Object Microsoft.Azure.Commands.Batch.Models.PSEnvironmentSetting -Property @{Name="GIT_CREDENTIALS"; Value=$gitCredentials}) }
+    if ($publishUser) { $envVars += (New-Object Microsoft.Azure.Commands.Batch.Models.PSEnvironmentSetting -Property @{Name="PUBLISH_USER"; Value=$publishUser}) }
+    if ($publishPassword) { $envVars += (New-Object Microsoft.Azure.Commands.Batch.Models.PSEnvironmentSetting -Property @{Name="PUBLISH_PASSWORD"; Value=$publishPassword}) }
+    if ($publishToken) { $envVars += (New-Object Microsoft.Azure.Commands.Batch.Models.PSEnvironmentSetting -Property @{Name="PUBLISH_TOKEN"; Value=$publishToken}) }
 
     $task = New-Object Microsoft.Azure.Commands.Batch.Models.PSCloudTask -Property @{
       Id = "chunk"
