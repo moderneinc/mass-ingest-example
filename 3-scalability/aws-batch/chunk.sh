@@ -18,7 +18,7 @@ main() {
     exit 1
   fi
 
-  total_lines=$(( $(wc -l < "$local_csv_file") - 1 ))
+  total_lines=$(( $(cat "$local_csv_file" | wc -l) - 1 ))
 
   if [[ $total_lines -le 0 ]]; then
     printf "No repositories found in %s\n" "$csv_file"

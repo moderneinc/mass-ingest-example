@@ -75,6 +75,13 @@ resource "google_secret_manager_secret_iam_member" "publish_token" {
   member    = "serviceAccount:${google_service_account.batch_task.email}"
 }
 
+# Grant batch task SA permission to pull container images from Artifact Registry
+resource "google_project_iam_member" "batch_task_artifact_registry_reader" {
+  project = var.project_id
+  role    = "roles/artifactregistry.reader"
+  member  = "serviceAccount:${google_service_account.batch_task.email}"
+}
+
 # Grant batch task SA permission to report status and write logs
 resource "google_project_iam_member" "batch_task_batch_agent" {
   project = var.project_id
@@ -148,7 +155,8 @@ resource "google_workflows_workflow" "mass_ingest" {
           init = {
             assign = [
               { totalRepos = "$${args.totalRepos}" },
-              { taskCount = "$${int(math.ceil(totalRepos / ${var.chunk_size}))}" },
+              { taskCount = "$${int((totalRepos + ${var.chunk_size} - 1) / ${var.chunk_size})}" },
+              { jobId = "$${\"${var.name}-\" + string(int(sys.now()))}" },
             ]
           }
         },
@@ -157,7 +165,7 @@ resource "google_workflows_workflow" "mass_ingest" {
             call = "googleapis.batch.v1.projects.locations.jobs.create"
             args = {
               parent = "projects/${var.project_id}/locations/${var.region}"
-              jobId  = "${var.name}-$${sys.now()}"
+              jobId  = "$${jobId}"
               body = {
                 taskGroups = [
                   {

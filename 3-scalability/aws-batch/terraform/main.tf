@@ -238,7 +238,7 @@ resource "aws_batch_job_definition" "chunk_job_definition" {
       },
       {
         name = "JOB_DEFINITION",
-        value = aws_batch_job_definition.ingest_job_definition.arn
+        value = aws_batch_job_definition.processor_job_definition.arn
       },
     ]
   })

@@ -128,8 +128,6 @@ resource "azurerm_batch_pool" "pool" {
   task_scheduling_policy {
     node_fill_type = "Pack"
   }
-
-  tags = var.tags
 }
 
 # NSG rule for metrics scraping
