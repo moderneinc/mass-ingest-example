@@ -8,9 +8,8 @@ Production-scale deployment using cloud-native batch services for parallel repos
 |---|---|---|---|
 | **AWS** | [AWS Batch](https://aws.amazon.com/batch/) | EC2 instances | [aws-batch/](./aws-batch/) |
 | **GCP** | [Google Cloud Batch](https://cloud.google.com/batch) | Compute Engine VMs | [gcp-batch/](./gcp-batch/) |
-| **Azure** | [Azure Batch](https://azure.microsoft.com/en-us/products/batch) | Azure VMs | [azure-batch/](./azure-batch/) |
 
-All three examples implement the same architecture — only the infrastructure-as-code and cloud-specific tooling differ.
+Both examples implement the same architecture — only the infrastructure-as-code and cloud-specific tooling differ.
 
 ## Architecture
 
@@ -43,7 +42,7 @@ These files are shared across all platforms and live at the repository root:
 
 ## Why VM-based batch services (not Kubernetes)
 
-We recommend VM-based batch services (AWS Batch, GCP Batch, Azure Batch) over Kubernetes for mass ingestion. This recommendation is based on real-world experience across multiple customer deployments.
+We recommend VM-based batch services (AWS Batch, GCP Batch) over Kubernetes for mass ingestion. This recommendation is based on real-world experience across multiple customer deployments.
 
 **LST builds are resource-intensive.** Building Lossless Semantic Trees involves cloning repositories, resolving dependencies, and running full Java builds. This requires dedicated CPU and memory — the kind of workload where resource contention causes hard-to-diagnose failures.
 
@@ -60,7 +59,7 @@ We recommend VM-based batch services (AWS Batch, GCP Batch, Azure Batch) over Ku
 
 - **Dedicated resources** — each job gets a full VM with guaranteed CPU and memory
 - **No scheduling surprises** — no pod eviction, no CPU throttling, no noisy neighbors
-- **Scale to zero** — all three services tear down VMs when jobs complete
+- **Scale to zero** — batch services tear down VMs when jobs complete
 - **Same container image** — you still use Docker containers, just on dedicated VMs
 - **Simpler debugging** — when something goes wrong, you debug your build, not your orchestration platform
 

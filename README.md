@@ -61,14 +61,14 @@ This repository provides three progressive deployment examples. Each stage is **
 - Enterprise environments
 
 **What's included:**
-- Cloud-native batch services (AWS Batch, GCP Batch, Azure Batch)
+- Cloud-native batch services (AWS Batch, GCP Batch)
 - Terraform infrastructure as code
 - Scheduled automation (daily/weekly)
 - Auto-scaling compute — scales to zero when idle
 - Production monitoring and cost optimization
 
 **Resources needed:**
-- Cloud account (AWS, GCP, or Azure)
+- Cloud account (AWS or GCP)
 - Terraform >= 1.0
 - VPC/VNet with internet access
 - Configurable compute (scales from 0 to 256+ vCPUs)
@@ -106,10 +106,6 @@ mass-ingest-example/
 │   │   ├── chunk.sh
 │   │   ├── terraform/
 │   │   └── README.md
-│   └── azure-batch/       # Azure Batch + Automation + Key Vault
-│       ├── chunk.sh
-│       ├── terraform/
-│       └── README.md
 │
 └── diagnostics/          # Comprehensive diagnostic system
     ├── diagnose.sh       # Main orchestration script
@@ -159,7 +155,7 @@ Before starting with any stage, you'll need:
 
 5. **Bash**: Required in the container image (Alpine users: `apk add bash`)
 
-6. **Cloud account**: AWS, GCP, or Azure account (required only for stage 3)
+6. **Cloud account**: AWS or GCP account (required only for stage 3)
 
 ## Quick comparison
 
