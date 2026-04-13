@@ -139,9 +139,40 @@ resource "google_compute_firewall" "metrics" {
   target_service_accounts = [google_service_account.batch_task.email]
 }
 
-# Workflow that creates and runs the batch job with N parallel tasks
-# The workflow receives totalRepos as a parameter and computes taskCount.
+# Workflow that creates and runs the batch job with N parallel tasks.
+# When csv_file is a URL, the workflow fetches it and counts lines automatically.
+# When csv_file is a local path, total_repos must be provided.
 # Each task runs chunk.sh which computes --start/--end from BATCH_TASK_INDEX.
+
+locals {
+  # Build workflow steps conditionally based on whether we need to fetch the CSV
+  fetch_steps = var.total_repos > 0 ? [] : [
+    {
+      fetch_csv = {
+        call = "http.get"
+        args = {
+          url = var.csv_file
+        }
+        result = "csvResponse"
+      }
+    }
+  ]
+
+  init_assigns = concat(
+    var.total_repos > 0 ? [
+      { totalRepos = var.total_repos },
+    ] : [
+      { csvLines = "$${text.split(csvResponse.body, \"\\n\")}" },
+      { lastLine = "$${csvLines[len(csvLines) - 1]}" },
+      { totalRepos = "$${if(lastLine == \"\", len(csvLines) - 2, len(csvLines) - 1)}" },
+    ],
+    [
+      { taskCount = "$${int((totalRepos + ${var.chunk_size} - 1) / ${var.chunk_size})}" },
+      { jobId = "$${\"${var.name}-\" + string(int(sys.now()))}" },
+    ]
+  )
+}
+
 resource "google_workflows_workflow" "mass_ingest" {
   name            = var.name
   region          = var.region
@@ -149,25 +180,12 @@ resource "google_workflows_workflow" "mass_ingest" {
 
   source_contents = yamlencode({
     main = {
-      steps = [
-        {
-          fetch_csv = {
-            call = "http.get"
-            args = {
-              url = var.csv_url
-            }
-            result = "csvResponse"
-          }
-        },
+      steps = concat(
+        local.fetch_steps,
+        [
         {
           init = {
-            assign = [
-              { csvLines = "$${text.split(csvResponse.body, \"\\n\")}" },
-              { lastLine = "$${csvLines[len(csvLines) - 1]}" },
-              { totalRepos = "$${if(lastLine == \"\", len(csvLines) - 2, len(csvLines) - 1)}" },
-              { taskCount = "$${int((totalRepos + ${var.chunk_size} - 1) / ${var.chunk_size})}" },
-              { jobId = "$${\"${var.name}-\" + string(int(sys.now()))}" },
-            ]
+            assign = local.init_assigns
           }
         },
         {
@@ -201,7 +219,7 @@ resource "google_workflows_workflow" "mass_ingest" {
                           {
                             MODERNE_TENANT = var.moderne_tenant
                             PUBLISH_URL    = var.publish_url
-                            CSV_URL        = var.csv_url
+                            CSV_FILE       = var.csv_file
                             CHUNK_SIZE     = tostring(var.chunk_size)
                           },
                           var.s3_endpoint != "" ? { S3_ENDPOINT = var.s3_endpoint } : {},
@@ -268,7 +286,7 @@ resource "google_workflows_workflow" "mass_ingest" {
             return = "$${createResult}"
           }
         }
-      ]
+      ])
     }
   })
 

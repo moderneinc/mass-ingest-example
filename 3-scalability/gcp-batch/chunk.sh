@@ -2,20 +2,18 @@
 set -euo pipefail
 
 # GCP Batch sets BATCH_TASK_INDEX (0-based) and BATCH_TASK_COUNT.
-# CHUNK_SIZE and CSV_URL are passed via environment from the Terraform/Workflow config.
+# CHUNK_SIZE and CSV_FILE are passed via environment from the Terraform/Workflow config.
 
-csv_url="${CSV_URL}"
+csv_file="${1:-$CSV_FILE}"
 chunk_size="${CHUNK_SIZE:-10}"
 task_index="${BATCH_TASK_INDEX:-0}"
 
-# Download CSV from URL
-if [[ "$csv_url" == "http://"* || "$csv_url" == "https://"* ]]; then
-  curl -sfL "$csv_url" -o repos.csv
+# Download CSV if it's a URL
+if [[ "$csv_file" == "http://"* || "$csv_file" == "https://"* ]]; then
+  curl -sfL "$csv_file" -o repos.csv
   csv_file="repos.csv"
-elif [[ -f "$csv_url" ]]; then
-  csv_file="$csv_url"
-else
-  printf "CSV not found: %s\n" "$csv_url"
+elif [[ ! -f "$csv_file" ]]; then
+  printf "CSV not found: %s\n" "$csv_file"
   exit 1
 fi
 

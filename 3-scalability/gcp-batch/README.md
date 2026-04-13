@@ -19,8 +19,8 @@ This example deploys mass-ingest at scale using:
 
 Architecture:
 1. **Cloud Scheduler** triggers the workflow on a cron schedule
-2. **Cloud Workflow** fetches the CSV from the configured URL, counts repositories, and creates a Batch job with the right number of tasks
-3. **Batch tasks** — N parallel tasks, each downloading the CSV and running `chunk.sh` which computes `--start`/`--end` from `BATCH_TASK_INDEX`
+2. **Cloud Workflow** determines the number of tasks (fetches CSV from URL to count lines, or uses a provided `total_repos`) and creates a Batch job
+3. **Batch tasks** — N parallel tasks, each running `chunk.sh` which downloads the CSV (if URL) and computes `--start`/`--end` from `BATCH_TASK_INDEX`
 4. **VMs scale to zero** when all tasks complete
 
 > **Note:** Unlike the AWS example, GCP does not use a separate chunk job. The Cloud Workflow handles task count calculation and creates the Batch job directly with N parallel tasks.
@@ -32,7 +32,7 @@ Architecture:
 - Docker for building the image
 - `gcloud` CLI configured (`gcloud auth login`)
 - Artifact Registry repository for Docker images
-- repos.csv hosted at an HTTP/HTTPS URL (e.g., GCS bucket, Artifactory, or any web server)
+- repos.csv — either hosted at an HTTP/HTTPS URL or baked into the container image
 - Access to one of the following storage options:
   - Maven/Artifactory repository (recommended)
   - GCS bucket with S3-compatible interop (optional)
@@ -41,7 +41,7 @@ Architecture:
 
 ### 1. Prepare your repository list
 
-Create your `repos.csv` and host it at an HTTP/HTTPS URL accessible by the batch VMs (e.g., a GCS bucket, Artifactory, or any web server).
+Create your `repos.csv`:
 
 ```csv
 cloneUrl,branch,origin,path
@@ -49,10 +49,13 @@ https://github.com/org/repo1,main,github.com,org/repo1
 https://github.com/org/repo2,main,github.com,org/repo2
 ```
 
-For example, to upload to a GCS bucket:
+**Option A: Host at a URL (recommended)** — the workflow counts repos automatically:
 ```bash
 gsutil cp repos.csv gs://your-bucket/repos.csv
 ```
+Set `csv_file` to the URL (e.g., `https://storage.googleapis.com/your-bucket/repos.csv`).
+
+**Option B: Bake into the container image** — add the CSV to your Docker build and set `csv_file = "repos.csv"`. You must also set `total_repos` to the number of repos (excluding the header row).
 
 ### 2. Build and push Docker image
 
@@ -112,7 +115,7 @@ Copy and edit the example:
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
 ```
 
-**Important:** Set `csv_url` to an HTTP/HTTPS URL where your `repos.csv` is hosted. The Cloud Workflow fetches this URL at runtime to count repositories and determine the number of parallel tasks. Each batch task also downloads the CSV from this URL.
+**Important:** Set `csv_file` to the location of your `repos.csv` — either an HTTP/HTTPS URL or a local file path baked into the container image. When using a URL, the workflow counts repos automatically. When using a local path, also set `total_repos`.
 
 See `terraform/terraform.tfvars.example` for all available options.
 
@@ -141,13 +144,13 @@ gcloud workflows execute mass-ingest --location=us-central1
 ## How it works
 
 ### Cloud Workflow
-1. Fetches `repos.csv` from the configured URL and counts lines to determine total repositories
+1. Determines total repositories — fetches the CSV from the URL and counts lines, or uses the provided `total_repos`
 2. Computes `taskCount = ceil(totalRepos / chunkSize)`
 3. Creates a GCP Batch job with N parallel tasks
 
 ### Batch tasks
 Each task:
-1. Runs `chunk.sh` which downloads the CSV from `CSV_URL` and reads `BATCH_TASK_INDEX` from the environment
+1. Runs `chunk.sh` which downloads the CSV (if URL) or reads it locally, and reads `BATCH_TASK_INDEX` from the environment
 2. Computes `start = index * chunk_size + 1` and `end = start + chunk_size`
 3. Calls `publish.sh --start $start --end $end`
 4. Clones, builds, and publishes LSTs for its partition of repositories
@@ -190,7 +193,7 @@ schedule = "0 0 * * 0"  # Weekly on Sunday
 chunk_size = 50  # Repositories per worker
 ```
 
-> **Note:** The workflow automatically counts repositories from the CSV URL at runtime — no need to update configuration when repos.csv changes.
+> **Note:** When using an HTTP/HTTPS URL, the workflow automatically counts repositories at runtime — no need to update configuration when repos.csv changes. When using a local file, update `total_repos` when your CSV changes.
 
 ## Monitoring
 
@@ -198,12 +201,12 @@ chunk_size = 50  # Repositories per worker
 
 View logs for batch tasks:
 ```bash
-gcloud logging read 'resource.type="cloud_batch_task"' --limit=100 --format=json
+gcloud logging read 'logName:"batch_task_logs"' --limit=100 --format='value(textPayload)'
 ```
 
-Filter by job:
+Filter by job name:
 ```bash
-gcloud logging read 'resource.type="cloud_batch_task" AND resource.labels.job_id="mass-ingest-1234567890"' --limit=100
+gcloud logging read '"mass-ingest-1234567890"' --limit=100 --format='value(textPayload)'
 ```
 
 ### Batch console
@@ -236,7 +239,7 @@ In `main.tf`, add to the allocation policy's instance policy:
 provisioningModel = "SPOT"
 ```
 
-> **Note:** Spot VMs can be preempted. GCP Batch will automatically retry preempted tasks.
+> **Note:** Spot VMs can be preempted. Configure `maxRetryCount` in the task spec to automatically retry preempted tasks (default is 0 — no retries).
 
 ### Auto-scaling
 

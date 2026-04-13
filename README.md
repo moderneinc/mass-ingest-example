@@ -70,7 +70,7 @@ This repository provides three progressive deployment examples. Each stage is **
 **Resources needed:**
 - Cloud account (AWS or GCP)
 - Terraform >= 1.0
-- VPC/VNet with internet access
+- VPC with internet access
 - Configurable compute (scales from 0 to 256+ vCPUs)
 
 [→ Start with 3-scalability](./3-scalability/)

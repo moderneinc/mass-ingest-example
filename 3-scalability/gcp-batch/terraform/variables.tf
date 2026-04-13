@@ -98,9 +98,16 @@ variable "s3_region" {
   description = "S3 region for GCS interop (e.g., auto)"
 }
 
-variable "csv_url" {
+variable "csv_file" {
   type        = string
-  description = "HTTP/HTTPS URL to the repos.csv file. Used by the workflow to count repos and by each task to download the CSV at runtime."
+  default     = "repos.csv"
+  description = "Path or URL to the repos.csv file. HTTP/HTTPS URLs are downloaded at runtime; local paths reference a file baked into the container image."
+}
+
+variable "total_repos" {
+  type        = number
+  default     = 0
+  description = "Total number of repositories (excluding header). Required when csv_file is a local path. When 0 (default) and csv_file is a URL, the workflow counts lines automatically."
 }
 
 variable "chunk_size" {
