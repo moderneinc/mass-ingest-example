@@ -40,7 +40,7 @@ Architecture:
 
 Create or edit `../../repos.csv` with your repositories and determine where you wish to store it. Mass Ingest is capable of pulling your `repos.csv` from local disk, S3, or unauthenticated HTTP(S).
 
-> [!INFO]
+> [!NOTE]
 > [`chunk.sh`](chunk.sh#L11) and [`publish.sh`](../../publish.sh#L40) can be updated to enable authenticated HTTP(S), if desired.
 
 ```csv

@@ -157,14 +157,14 @@ Each task:
 
 ### Compute
 - Each task gets a dedicated Compute Engine VM
-- Default: `n2-standard-4` (4 vCPU, 16 GB RAM, 64 GB disk)
+- Default: `n2-standard-4` (4 vCPU, 15 GB RAM, 64 GB disk)
 - VMs are provisioned on demand and deleted when the job completes
 
 ## Configuration
 
 ### Machine type
 
-Default: `n2-standard-4` (4 vCPU, 16 GB RAM). Each task gets a full VM — no resource contention with other workloads.
+Default: `n2-standard-4` (4 vCPU, 15 GB RAM). Each task gets a full VM — no resource contention with other workloads.
 
 Larger repositories or monorepos may need more CPU and memory. Adjust in `terraform.tfvars`:
 ```hcl
