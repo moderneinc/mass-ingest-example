@@ -195,6 +195,8 @@ chunk_size = 50  # Repositories per worker
 
 > **Note:** When using an HTTP/HTTPS URL, the workflow automatically counts repositories at runtime — no need to update configuration when repos.csv changes. When using a local file, update `total_repos` when your CSV changes.
 
+> **Large CSVs (40,000+ repos):** Cloud Workflows has a response size limit on HTTP requests. For very large repo lists, set `total_repos` explicitly instead of relying on automatic counting.
+
 ## Monitoring
 
 ### Cloud Logging
