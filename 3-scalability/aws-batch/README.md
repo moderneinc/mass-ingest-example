@@ -1,4 +1,4 @@
-# Scalability: Scale to production
+# Scalability: AWS Batch
 
 Production-scale deployment using AWS Batch for parallel repository processing.
 

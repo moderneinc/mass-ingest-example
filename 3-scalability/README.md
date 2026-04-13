@@ -15,11 +15,13 @@ Both examples implement the same architecture — only the infrastructure-as-cod
 
 All platforms follow the same pattern:
 
-1. **Scheduled trigger** (daily/weekly cron) starts the chunk job
-2. **Chunk job** reads `repos.csv`, calculates partitions, submits N processor jobs
-3. **Processor jobs** each process a slice of the CSV (`--start N --end M`) using the shared `publish.sh` script
+1. **Scheduled trigger** (daily/weekly cron) starts the orchestration
+2. **Orchestrator** determines partitions from the repo list and creates N parallel tasks
+3. **Tasks** each process a slice of the CSV (`--start N --end M`) using the shared `publish.sh` script
 4. **Workers shut down** when their slice is complete — compute scales to zero
 5. **Next trigger** repeats the cycle
+
+> **Note:** The exact orchestration differs by platform. AWS uses a separate chunk job that submits processor jobs. GCP uses a Cloud Workflow that computes task count and creates a single Batch job with N parallel tasks.
 
 ```
 ┌─────────────┐     ┌───────────┐     ┌──────────────┐

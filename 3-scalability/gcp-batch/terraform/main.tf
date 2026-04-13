@@ -163,7 +163,8 @@ resource "google_workflows_workflow" "mass_ingest" {
           init = {
             assign = [
               { csvLines = "$${text.split(csvResponse.body, \"\\n\")}" },
-              { totalRepos = "$${len(csvLines) - 1}" },
+              { lastLine = "$${csvLines[len(csvLines) - 1]}" },
+              { totalRepos = "$${if(lastLine == \"\", len(csvLines) - 2, len(csvLines) - 1)}" },
               { taskCount = "$${int((totalRepos + ${var.chunk_size} - 1) / ${var.chunk_size})}" },
               { jobId = "$${\"${var.name}-\" + string(int(sys.now()))}" },
             ]
