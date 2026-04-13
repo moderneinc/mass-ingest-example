@@ -19,8 +19,8 @@ This example deploys mass-ingest at scale using:
 
 Architecture:
 1. **Cloud Scheduler** triggers the workflow on a cron schedule
-2. **Cloud Workflow** computes task count from `total_repos / chunk_size` and creates a Batch job
-3. **Batch tasks** — N parallel tasks, each running `chunk.sh` which computes `--start`/`--end` from `BATCH_TASK_INDEX`
+2. **Cloud Workflow** fetches the CSV from the configured URL, counts repositories, and creates a Batch job with the right number of tasks
+3. **Batch tasks** — N parallel tasks, each downloading the CSV and running `chunk.sh` which computes `--start`/`--end` from `BATCH_TASK_INDEX`
 4. **VMs scale to zero** when all tasks complete
 
 > **Note:** Unlike the AWS example, GCP does not use a separate chunk job. The Cloud Workflow handles task count calculation and creates the Batch job directly with N parallel tasks.
@@ -32,7 +32,7 @@ Architecture:
 - Docker for building the image
 - `gcloud` CLI configured (`gcloud auth login`)
 - Artifact Registry repository for Docker images
-- repos.csv file with repositories to ingest
+- repos.csv hosted at an HTTP/HTTPS URL (e.g., GCS bucket, Artifactory, or any web server)
 - Access to one of the following storage options:
   - Maven/Artifactory repository (recommended)
   - GCS bucket with S3-compatible interop (optional)
@@ -41,12 +41,17 @@ Architecture:
 
 ### 1. Prepare your repository list
 
-Create or edit `../../repos.csv` with your repositories.
+Create your `repos.csv` and host it at an HTTP/HTTPS URL accessible by the batch VMs (e.g., a GCS bucket, Artifactory, or any web server).
 
 ```csv
 cloneUrl,branch,origin,path
 https://github.com/org/repo1,main,github.com,org/repo1
 https://github.com/org/repo2,main,github.com,org/repo2
+```
+
+For example, to upload to a GCS bucket:
+```bash
+gsutil cp repos.csv gs://your-bucket/repos.csv
 ```
 
 ### 2. Build and push Docker image
@@ -107,7 +112,7 @@ Copy and edit the example:
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
 ```
 
-**Important:** Set `total_repos` to the number of repositories in your `repos.csv` (excluding the header row). This determines how many parallel tasks the Batch job creates.
+**Important:** Set `csv_url` to an HTTP/HTTPS URL where your `repos.csv` is hosted. The Cloud Workflow fetches this URL at runtime to count repositories and determine the number of parallel tasks. Each batch task also downloads the CSV from this URL.
 
 See `terraform/terraform.tfvars.example` for all available options.
 
@@ -130,21 +135,19 @@ This creates:
 ### 6. Trigger manually (optional)
 
 ```bash
-gcloud workflows execute mass-ingest \
-  --data='{"totalRepos": 1000}' \
-  --location=us-central1
+gcloud workflows execute mass-ingest --location=us-central1
 ```
 
 ## How it works
 
 ### Cloud Workflow
-1. Receives `totalRepos` as input (from scheduler or manual trigger)
+1. Fetches `repos.csv` from the configured URL and counts lines to determine total repositories
 2. Computes `taskCount = ceil(totalRepos / chunkSize)`
 3. Creates a GCP Batch job with N parallel tasks
 
 ### Batch tasks
 Each task:
-1. Runs `chunk.sh` which reads `BATCH_TASK_INDEX` from the environment
+1. Runs `chunk.sh` which downloads the CSV from `CSV_URL` and reads `BATCH_TASK_INDEX` from the environment
 2. Computes `start = index * chunk_size + 1` and `end = start + chunk_size`
 3. Calls `publish.sh --start $start --end $end`
 4. Clones, builds, and publishes LSTs for its partition of repositories
@@ -158,9 +161,9 @@ Each task:
 
 ### Machine type
 
-Default: `n2-standard-4` (4 vCPU, 16 GB RAM)
+Default: `n2-standard-4` (4 vCPU, 16 GB RAM). Each task gets a full VM — no resource contention with other workloads.
 
-Adjust in `terraform.tfvars`:
+Larger repositories or monorepos may need more CPU and memory. Adjust in `terraform.tfvars`:
 ```hcl
 machine_type = "n2-standard-8"  # 8 vCPU, 32 GB RAM
 ```
@@ -187,7 +190,7 @@ schedule = "0 0 * * 0"  # Weekly on Sunday
 chunk_size = 50  # Repositories per worker
 ```
 
-> **Remember:** Update `total_repos` when your repos.csv changes, so the workflow creates the correct number of tasks.
+> **Note:** The workflow automatically counts repositories from the CSV URL at runtime — no need to update configuration when repos.csv changes.
 
 ## Monitoring
 

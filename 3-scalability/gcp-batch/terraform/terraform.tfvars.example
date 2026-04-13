@@ -29,8 +29,7 @@ publish_url = "https://artifactory.example.com/artifactory/moderne-ingest/"
 # git_credentials_secret = "mass-ingest-git-credentials"
 # ssh_credentials_secret = "mass-ingest-ssh-key"
 
-# Ingestion settings
-total_repos = 1000  # Number of repos in repos.csv (excluding header)
-# csv_file    = "repos.csv"
+# Repository list — HTTP/HTTPS URL to your repos.csv
+csv_url = "https://storage.googleapis.com/your-bucket/repos.csv"
 # chunk_size  = 10
 # schedule    = "0 0 * * *"

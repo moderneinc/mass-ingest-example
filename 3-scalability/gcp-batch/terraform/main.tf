@@ -149,12 +149,21 @@ resource "google_workflows_workflow" "mass_ingest" {
 
   source_contents = yamlencode({
     main = {
-      params = ["args"]
       steps = [
+        {
+          fetch_csv = {
+            call = "http.get"
+            args = {
+              url = var.csv_url
+            }
+            result = "csvResponse"
+          }
+        },
         {
           init = {
             assign = [
-              { totalRepos = "$${args.totalRepos}" },
+              { csvLines = "$${text.split(csvResponse.body, \"\\n\")}" },
+              { totalRepos = "$${len(csvLines) - 1}" },
               { taskCount = "$${int((totalRepos + ${var.chunk_size} - 1) / ${var.chunk_size})}" },
               { jobId = "$${\"${var.name}-\" + string(int(sys.now()))}" },
             ]
@@ -177,7 +186,7 @@ resource "google_workflows_workflow" "mass_ingest" {
                           container = {
                             imageUri   = var.image
                             entrypoint = "/bin/bash"
-                            commands   = ["-c", "./chunk.sh $${CSV_FILE}"]
+                            commands   = ["-c", "./chunk.sh"]
                           }
                         }
                       ]
@@ -191,7 +200,7 @@ resource "google_workflows_workflow" "mass_ingest" {
                           {
                             MODERNE_TENANT = var.moderne_tenant
                             PUBLISH_URL    = var.publish_url
-                            CSV_FILE       = var.csv_file
+                            CSV_URL        = var.csv_url
                             CHUNK_SIZE     = tostring(var.chunk_size)
                           },
                           var.s3_endpoint != "" ? { S3_ENDPOINT = var.s3_endpoint } : {},
@@ -276,7 +285,7 @@ resource "google_cloud_scheduler_job" "trigger" {
     http_method = "POST"
     uri         = "https://workflowexecutions.googleapis.com/v1/${google_workflows_workflow.mass_ingest.id}/executions"
     body = base64encode(jsonencode({
-      argument = jsonencode({ totalRepos = var.total_repos })
+      argument = jsonencode({})
     }))
     headers = {
       "Content-Type" = "application/json"
