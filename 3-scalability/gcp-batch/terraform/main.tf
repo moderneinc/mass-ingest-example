@@ -160,7 +160,7 @@ locals {
 
   init_assigns = concat(
     var.total_repos > 0 ? [
-      { totalRepos = var.total_repos },
+      { totalRepos = "$${${var.total_repos}}" },
     ] : [
       { csvLines = "$${text.split(csvResponse.body, \"\\n\")}" },
       { lastLine = "$${csvLines[len(csvLines) - 1]}" },
