@@ -390,13 +390,13 @@ Note: This does not delete:
 
 General guidance is 1 worker per 1000 repositories provides a reasonable ingestion time at scale.
 
-| Repository count | Recommended config |
-|-----------------|-------------------|
-| < 100 | Use 1-quickstart or 2-observability |
-| 100-1000 | 1-2 workers |
-| 1000-10000 | 5-10 workers |
-| 10000-50000 | 10-50 workers |
-| 50000+ | 50+ workers, adjust max_vcpus |
+| Repository count | Recommended `chunk_size` | Resulting tasks |
+|---|---|---|
+| < 100 | Use 1-quickstart or 2-observability | — |
+| 100-1,000 | 50 | 2-20 |
+| 1,000-10,000 | 50-100 | 10-200 |
+| 10,000-50,000 | 100-200 | 50-500 |
+| 50,000+ | 200+ | Adjust `max_vcpus` to match |
 
 ## Security considerations
 

@@ -21,7 +21,8 @@ All platforms follow the same pattern:
 4. **Workers shut down** when their slice is complete — compute scales to zero
 5. **Next trigger** repeats the cycle
 
-> **Note:** The exact orchestration differs by platform. AWS uses a separate chunk job that submits processor jobs. GCP uses a Cloud Workflow that computes task count and creates a single Batch job with N parallel tasks.
+> [!NOTE]
+> The exact orchestration differs by platform. AWS uses a separate chunk job that submits processor jobs. GCP uses a Cloud Workflow that computes task count and creates a single Batch job with N parallel tasks.
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌──────────────┐
@@ -65,4 +66,5 @@ We recommend VM-based batch services (AWS Batch, GCP Batch) over Kubernetes for 
 - **Same container image** — you still use Docker containers, just on dedicated VMs
 - **Simpler debugging** — when something goes wrong, you debug your build, not your orchestration platform
 
-> **Note:** Some customers have successfully deployed mass ingestion on Kubernetes, but it required significant effort to tune resource limits, node affinity, and scheduling policies. If you must use Kubernetes, ensure each pod gets a dedicated node or use guaranteed QoS with generous resource limits.
+> [!NOTE]
+> Some customers have successfully deployed mass ingestion on Kubernetes, but it required significant effort to tune resource limits, node affinity, and scheduling policies. If you must use Kubernetes, ensure each pod gets a dedicated node or use guaranteed QoS with generous resource limits.

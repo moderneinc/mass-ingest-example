@@ -23,7 +23,8 @@ Architecture:
 3. **Batch tasks** — N parallel tasks, each running `chunk.sh` which downloads the CSV (if URL) and computes `--start`/`--end` from `BATCH_TASK_INDEX`
 4. **VMs scale to zero** when all tasks complete
 
-> **Note:** Unlike the AWS example, GCP does not use a separate chunk job. The Cloud Workflow handles task count calculation and creates the Batch job directly with N parallel tasks.
+> [!NOTE]
+> Unlike the AWS example, GCP does not use a separate chunk job. The Cloud Workflow handles task count calculation and creates the Batch job directly with N parallel tasks.
 
 ## Prerequisites
 
@@ -55,7 +56,8 @@ gsutil cp repos.csv gs://your-bucket/repos.csv
 ```
 Set `csv_file` to the URL (e.g., `https://storage.googleapis.com/your-bucket/repos.csv`).
 
-> **Note:** The URL must be publicly readable (unauthenticated). For GCS, either make the object public or use a signed URL. If you cannot make the CSV publicly accessible, use Option B instead.
+> [!NOTE]
+> The URL must be publicly readable (unauthenticated). For GCS, either make the object public or use a signed URL. If you cannot make the CSV publicly accessible, use Option B instead.
 
 **Option B: Bake into the container image** — add the CSV to your Docker build and set `csv_file = "repos.csv"`. You must also set `total_repos` to the number of repos (excluding the header row).
 
@@ -195,8 +197,10 @@ schedule = "0 0 * * 0"  # Weekly on Sunday
 chunk_size = 50  # Repositories per worker
 ```
 
-> **Note:** When using an HTTP/HTTPS URL, the workflow automatically counts repositories at runtime — no need to update configuration when repos.csv changes. When using a local file, update `total_repos` when your CSV changes.
+> [!NOTE]
+> When using an HTTP/HTTPS URL, the workflow automatically counts repositories at runtime — no need to update configuration when repos.csv changes. When using a local file, update `total_repos` when your CSV changes.
 
+> [!IMPORTANT]
 > **Large CSVs (40,000+ repos):** Cloud Workflows has a response size limit on HTTP requests. For very large repo lists, set `total_repos` explicitly instead of relying on automatic counting.
 
 ## Monitoring
@@ -243,7 +247,8 @@ In `main.tf`, add to the allocation policy's instance policy:
 provisioningModel = "SPOT"
 ```
 
-> **Note:** Spot VMs can be preempted. Configure `maxRetryCount` in the task spec to automatically retry preempted tasks (default is 0 — no retries).
+> [!WARNING]
+> Spot VMs can be preempted. Configure `maxRetryCount` in the task spec to automatically retry preempted tasks (default is 0 — no retries).
 
 ### Auto-scaling
 
@@ -318,17 +323,18 @@ This requires HMAC keys for authentication (not service account keys). Create HM
 gsutil hmac create your-service-account@your-project.iam.gserviceaccount.com
 ```
 
-> **Note:** GCS interop has limitations compared to native S3 (different multipart upload behavior, HMAC auth instead of IAM). Maven/Artifactory is simpler and recommended.
+> [!NOTE]
+> GCS interop has limitations compared to native S3 (different multipart upload behavior, HMAC auth instead of IAM). Maven/Artifactory is simpler and recommended.
 
 ## Scaling guidance
 
-| Repository count | Recommended config |
-|---|---|
-| < 100 | Use 1-quickstart or 2-observability |
-| 100-1,000 | 1-2 workers |
-| 1,000-10,000 | 5-10 workers |
-| 10,000-50,000 | 10-50 workers |
-| 50,000+ | 50+ workers |
+| Repository count | Recommended `chunk_size` | Resulting tasks |
+|---|---|---|
+| < 100 | Use 1-quickstart or 2-observability | — |
+| 100-1,000 | 50 | 2-20 |
+| 1,000-10,000 | 50-100 | 10-200 |
+| 10,000-50,000 | 100-200 | 50-500 |
+| 50,000+ | 200+ | Adjust to your quota |
 
 ## Security considerations
 

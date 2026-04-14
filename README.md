@@ -285,7 +285,8 @@ RHEL 9 backported TLS 1.3 into JDK 8 and 11, but the backported `P11AEADCipher` 
 | Certificate mgmt| Per-JDK keytool                | System trust store (`update-ca-trust`)|
 | Package manager | apt-get                        | dnf                                   |
 
-> **Note:** For full kernel-level FIPS compliance, the host OS must also be running in FIPS mode. The container enforces FIPS-approved algorithms at the userspace level (OpenSSL, Java security providers) regardless of host configuration.
+> [!NOTE]
+> For full kernel-level FIPS compliance, the host OS must also be running in FIPS mode. The container enforces FIPS-approved algorithms at the userspace level (OpenSSL, Java security providers) regardless of host configuration.
 
 ## Generating repository lists
 

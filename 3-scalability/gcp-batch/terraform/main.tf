@@ -133,7 +133,7 @@ resource "google_project_iam_member" "workflow_sa_user" {
   member  = "serviceAccount:${google_service_account.workflow.email}"
 }
 
-# Firewall rule — allow metrics scraping on port 8080
+# Firewall rule — allow Prometheus metrics scraping on port 8080
 resource "google_compute_firewall" "metrics" {
   name    = "${var.name}-metrics"
   network = var.network
@@ -219,7 +219,7 @@ resource "google_workflows_workflow" "mass_ingest" {
                       ]
                       computeResource = {
                         cpuMilli  = 4000
-                        memoryMib = 15360
+                        memoryMib = 16384
                       }
                       maxRunDuration = "3600s"
                       environment = {
