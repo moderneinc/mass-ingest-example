@@ -41,7 +41,7 @@ Architecture:
 Create or edit `../../repos.csv` with your repositories and determine where you wish to store it. Mass Ingest is capable of pulling your `repos.csv` from local disk, S3, or unauthenticated HTTP(S).
 
 > [!NOTE]
-> [`chunk.sh`](chunk.sh#L11) and [`publish.sh`](../../publish.sh#L40) can be updated to enable authenticated HTTP(S), if desired.
+> [`chunk.sh`](chunk.sh#L11) and [`publish.sh`](../../publish.sh#L51) can be updated to enable authenticated HTTP(S), if desired.
 
 ```csv
 cloneUrl,branch,origin,path
@@ -390,7 +390,7 @@ Note: This does not delete:
 
 General guidance is 1 worker per 1000 repositories provides a reasonable ingestion time at scale.
 
-| Repository count | Recommended `chunk_size` | Resulting tasks |
+| Repository count | Recommended `ingest_chunk_size` | Resulting tasks |
 |---|---|---|
 | < 100 | Use 1-quickstart or 2-observability | — |
 | 100-1,000 | 50 | 2-20 |
