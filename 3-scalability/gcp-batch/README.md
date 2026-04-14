@@ -20,7 +20,7 @@ This example deploys mass-ingest at scale using:
 Architecture:
 1. **Cloud Scheduler** triggers the workflow on a cron schedule
 2. **Cloud Workflow** determines the number of tasks (fetches CSV from URL to count lines, or uses a provided `total_repos`) and creates a Batch job
-3. **Batch tasks** — N parallel tasks, each running `chunk.sh` which downloads the CSV (if URL) and computes `--start`/`--end` from `BATCH_TASK_INDEX`
+3. **Batch tasks** — N parallel tasks, each running `task.sh` which downloads the CSV (if URL) and computes `--start`/`--end` from `BATCH_TASK_INDEX`
 4. **VMs scale to zero** when all tasks complete
 
 > [!NOTE]
@@ -54,12 +54,12 @@ https://github.com/org/repo2,main,github.com,org/repo2
 ```bash
 gsutil cp repos.csv gs://your-bucket/repos.csv
 ```
-Set `csv_file` to the URL (e.g., `https://storage.googleapis.com/your-bucket/repos.csv`).
+Set `ingest_csv_file` to the URL (e.g., `https://storage.googleapis.com/your-bucket/repos.csv`).
 
 > [!NOTE]
 > The URL must be publicly readable (unauthenticated). For GCS, either make the object public or use a signed URL. If you cannot make the CSV publicly accessible, use Option B instead.
 
-**Option B: Bake into the container image** — add the CSV to your Docker build and set `csv_file = "repos.csv"`. You must also set `total_repos` to the number of repos (excluding the header row).
+**Option B: Bake into the container image** — add the CSV to your Docker build and set `ingest_csv_file = "repos.csv"`. You must also set `total_repos` to the number of repos (excluding the header row).
 
 ### 2. Build and push Docker image
 
@@ -119,7 +119,7 @@ Copy and edit the example:
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
 ```
 
-**Important:** Set `csv_file` to the location of your `repos.csv` — either an HTTP/HTTPS URL or a local file path baked into the container image. When using a URL, the workflow counts repos automatically. When using a local path, also set `total_repos`.
+**Important:** Set `ingest_csv_file` to the location of your `repos.csv` — either an HTTP/HTTPS URL or a local file path baked into the container image. When using a URL, the workflow counts repos automatically. When using a local path, also set `total_repos`.
 
 See `terraform/terraform.tfvars.example` for all available options.
 
@@ -154,7 +154,7 @@ gcloud workflows execute mass-ingest --location=<your-region>
 
 ### Batch tasks
 Each task:
-1. Runs `chunk.sh` which downloads the CSV (if URL) or reads it locally, and reads `BATCH_TASK_INDEX` from the environment
+1. Runs `task.sh` which downloads the CSV (if URL) or reads it locally, and reads `BATCH_TASK_INDEX` from the environment
 2. Computes `start = index * chunk_size + 1` and `end = start + chunk_size`
 3. Calls `publish.sh --start $start --end $end`
 4. Clones, builds, and publishes LSTs for its partition of repositories
@@ -194,7 +194,7 @@ schedule = "0 0 * * 0"  # Weekly on Sunday
 ### Partition size
 
 ```hcl
-chunk_size = 50  # Repositories per worker
+ingest_chunk_size = 50  # Repositories per worker
 ```
 
 > [!NOTE]
@@ -248,7 +248,7 @@ provisioningModel = "SPOT"
 ```
 
 > [!WARNING]
-> Spot VMs can be preempted. Configure `maxRetryCount` in the task spec to automatically retry preempted tasks (default is 0 — no retries).
+> Spot VMs can be preempted. Set `max_retry_count` in `terraform.tfvars` to automatically retry preempted tasks (default is 0 — no retries).
 
 ### Auto-scaling
 
@@ -256,31 +256,12 @@ The configuration already scales to zero — VMs are only created when a job run
 
 ## Troubleshooting
 
-### API not enabled
+See dedicated [troubleshooting](./TROUBLESHOOTING.md) page.
 
-If you see "API not enabled" errors:
+Quick fix for common API errors:
 ```bash
 gcloud services enable batch.googleapis.com workflows.googleapis.com cloudscheduler.googleapis.com secretmanager.googleapis.com
 ```
-
-### Quota exceeded
-
-Check and request quota increases:
-- **IAM & Admin** → **Quotas** in the console
-- Common limits: CPUs per region, VM instances per project
-
-### Tasks fail immediately
-
-- Check container image is accessible from Artifact Registry
-- Verify service account has Secret Manager access
-- Review task logs in Cloud Logging
-- Check `PUBLISH_URL` and credential configuration
-
-### Network timeouts
-
-- Verify the VPC has a Cloud NAT or external IP access for outbound traffic
-- Check firewall rules allow egress to required services
-- Ensure Secret Manager and Artifact Registry are reachable
 
 ## Cleanup
 
@@ -328,7 +309,7 @@ gsutil hmac create your-service-account@your-project.iam.gserviceaccount.com
 
 ## Scaling guidance
 
-| Repository count | Recommended `chunk_size` | Resulting tasks |
+| Repository count | Recommended `ingest_chunk_size` | Resulting tasks |
 |---|---|---|
 | < 100 | Use 1-quickstart or 2-observability | — |
 | 100-1,000 | 50 | 2-20 |
@@ -359,3 +340,10 @@ Actual costs vary based on repository sizes, build complexity, machine types, an
 - [repos.csv reference](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv)
 - [Google Cloud Batch documentation](https://cloud.google.com/batch/docs)
 - [Terraform Google provider](https://registry.terraform.io/providers/hashicorp/google/latest/docs)
+
+## Optional enhancements
+
+- Set up Cloud Monitoring alerting policies for job failures
+- Configure Pub/Sub notifications for job completion
+- Integrate with Cloud Build for automatic image updates
+- Add custom metrics for business intelligence

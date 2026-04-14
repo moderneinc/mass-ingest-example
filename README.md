@@ -103,7 +103,7 @@ mass-ingest-example/
 │   │   ├── terraform/
 │   │   └── README.md
 │   ├── gcp-batch/         # GCP Batch + Cloud Scheduler + Secret Manager
-│   │   ├── chunk.sh
+│   │   ├── task.sh
 │   │   ├── terraform/
 │   │   └── README.md
 │

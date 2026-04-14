@@ -27,8 +27,10 @@ moderne_s3_bucket_name = "your-bucket"
 # moderne_ssh_credentials = "arn:aws:secretsmanager:<region>:<account>:secret:mass-ingest/ssh-private-key"
 
 # Ingestion settings
-# ingest_csv_file   = "repos.csv"
-# ingest_chunk_size = 10
+# ingest_csv_file     = "repos.csv"
+# ingest_chunk_size   = 10
+# instance_type       = "m6a.xlarge"
+# schedule_expression = "cron(0 0 * * ? *)"
 
 default_tags = {
   Environment = "production"

@@ -5,7 +5,8 @@ name       = "mass-ingest"
 network    = "default"
 subnetwork = "default"
 
-image = "us-docker.pkg.dev/your-project/mass-ingest/mass-ingest:latest"
+image_registry = "us-docker.pkg.dev/your-project/mass-ingest/mass-ingest"
+image_tag      = "latest"
 
 machine_type = "n2-standard-4"
 
@@ -31,11 +32,12 @@ publish_url = "https://artifactory.example.com/artifactory/moderne-ingest/"
 
 # Repository list — URL or local file path
 # Option A: HTTP/HTTPS URL (recommended — workflow counts repos automatically)
-csv_file = "https://storage.googleapis.com/your-bucket/repos.csv"
+ingest_csv_file = "https://storage.googleapis.com/your-bucket/repos.csv"
 
 # Option B: Local file baked into container image (requires total_repos)
-# csv_file    = "repos.csv"
-# total_repos = 1000
+# ingest_csv_file = "repos.csv"
+# total_repos     = 1000
 
-# chunk_size  = 10
-# schedule    = "0 0 * * *"
+# ingest_chunk_size = 10
+# schedule          = "0 0 * * *"
+# max_retry_count   = 0

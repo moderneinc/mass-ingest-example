@@ -25,9 +25,14 @@ variable "subnetwork" {
   default     = "default"
 }
 
-variable "image" {
+variable "image_registry" {
   type        = string
-  description = "Container image URL (e.g., us-docker.pkg.dev/project/repo/mass-ingest:latest)"
+  description = "Container image registry (e.g., us-docker.pkg.dev/project/repo/mass-ingest)"
+}
+
+variable "image_tag" {
+  type    = string
+  default = "latest"
 }
 
 variable "machine_type" {
@@ -98,13 +103,13 @@ variable "s3_region" {
   description = "S3 region for GCS interop (e.g., auto)"
 }
 
-variable "csv_file" {
+variable "ingest_csv_file" {
   type        = string
   description = "Path or URL to the repos.csv file. HTTP/HTTPS URLs are fetched at runtime (must be publicly readable); local paths reference a file baked into the container image."
 
   validation {
-    condition     = var.csv_file != ""
-    error_message = "csv_file must be set to a URL (https://...) or a local file path baked into the container image."
+    condition     = var.ingest_csv_file != ""
+    error_message = "ingest_csv_file must be set to a URL (https://...) or a local file path baked into the container image."
   }
 }
 
@@ -114,9 +119,15 @@ variable "total_repos" {
   description = "Total number of repositories (excluding header). Required when csv_file is a local path. When 0 (default) and csv_file is a URL, the workflow counts lines automatically."
 }
 
-variable "chunk_size" {
+variable "ingest_chunk_size" {
   type    = number
   default = 10
+}
+
+variable "max_retry_count" {
+  type        = number
+  default     = 0
+  description = "Maximum retries per task (useful with Spot VMs where tasks can be preempted)"
 }
 
 variable "schedule" {

@@ -248,17 +248,17 @@ Each processor job:
 
 ### Compute resources
 
-Adjust in `terraform/main.tf`:
+Default: `m6a.xlarge` (4 vCPU, 16 GB RAM). Adjust in `terraform.tfvars`:
 
 ```hcl
-resource "aws_batch_compute_environment" "compute_environment" {
-  compute_resources {
-    type = "EC2"  # or "FARGATE" for serverless
-    instance_type = ["m6a.xlarge"]
-    min_vcpus = 0     # Scale to zero when idle
-    max_vcpus = 256   # Maximum parallel workers
-  }
-}
+instance_type = "m6a.2xlarge"  # 8 vCPU, 32 GB RAM
+```
+
+Scale limits are configured in `main.tf`:
+
+```hcl
+min_vcpus = 0     # Scale to zero when idle
+max_vcpus = 256   # Maximum parallel workers
 ```
 
 ### Worker resources
@@ -288,13 +288,10 @@ resource "aws_batch_job_definition" "processor_job_definition" {
 
 Default: Daily at midnight UTC
 
-Modify in `terraform/main.tf`:
+Modify in `terraform.tfvars`:
 ```hcl
-resource "aws_scheduler_schedule" "daily_trigger" {
-  schedule_expression = "cron(0 0 * * ? *)"  # Daily at midnight
-  # schedule_expression = "cron(0 */6 * * ? *)"  # Every 6 hours
-  # schedule_expression = "rate(12 hours)"  # Every 12 hours
-}
+schedule_expression = "cron(0 */6 * * ? *)"  # Every 6 hours
+# schedule_expression = "rate(12 hours)"      # Every 12 hours
 ```
 
 ### Partition size

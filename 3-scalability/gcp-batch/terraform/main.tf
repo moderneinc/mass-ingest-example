@@ -15,7 +15,7 @@ provider "google" {
 # Validate that local CSV paths have total_repos set
 check "csv_config" {
   assert {
-    condition     = can(regex("^https?://", var.csv_file)) || var.total_repos > 0
+    condition     = can(regex("^https?://", var.ingest_csv_file)) || var.total_repos > 0
     error_message = "When csv_file is a local path (not a URL), total_repos must be set to the number of repositories in the CSV (excluding the header row)."
   }
 }
@@ -150,7 +150,7 @@ resource "google_compute_firewall" "metrics" {
 # Workflow that creates and runs the batch job with N parallel tasks.
 # When csv_file is a URL, the workflow fetches it and counts lines automatically.
 # When csv_file is a local path, total_repos must be provided.
-# Each task runs chunk.sh which computes --start/--end from BATCH_TASK_INDEX.
+# Each task runs task.sh which computes --start/--end from BATCH_TASK_INDEX.
 
 locals {
   # Build workflow steps conditionally based on whether we need to fetch the CSV
@@ -159,7 +159,7 @@ locals {
       fetch_csv = {
         call = "http.get"
         args = {
-          url = var.csv_file
+          url = var.ingest_csv_file
         }
         result = "csvResponse"
       }
@@ -175,7 +175,7 @@ locals {
       { totalRepos = "$${if(lastLine == \"\", len(csvLines) - 2, len(csvLines) - 1)}" },
     ],
     [
-      { taskCount = "$${int((totalRepos + ${var.chunk_size} - 1) / ${var.chunk_size})}" },
+      { taskCount = "$${int((totalRepos + ${var.ingest_chunk_size} - 1) / ${var.ingest_chunk_size})}" },
       { jobId = "$${\"${var.name}-\" + string(int(sys.now()))}" },
     ]
   )
@@ -211,9 +211,9 @@ resource "google_workflows_workflow" "mass_ingest" {
                       runnables = [
                         {
                           container = {
-                            imageUri   = var.image
+                            imageUri   = "${var.image_registry}:${var.image_tag}"
                             entrypoint = "/bin/bash"
-                            commands   = ["-c", "./chunk.sh"]
+                            commands   = ["-c", "./task.sh"]
                           }
                         }
                       ]
@@ -222,13 +222,14 @@ resource "google_workflows_workflow" "mass_ingest" {
                         memoryMib = 16384
                       }
                       maxRunDuration = "3600s"
+                      maxRetryCount  = var.max_retry_count
                       environment = {
                         variables = merge(
                           {
                             MODERNE_TENANT = var.moderne_tenant
                             PUBLISH_URL    = var.publish_url
-                            CSV_FILE       = var.csv_file
-                            CHUNK_SIZE     = tostring(var.chunk_size)
+                            CSV_FILE       = var.ingest_csv_file
+                            CHUNK_SIZE     = tostring(var.ingest_chunk_size)
                           },
                           var.s3_endpoint != "" ? { S3_ENDPOINT = var.s3_endpoint } : {},
                           var.s3_region != "" ? { S3_REGION = var.s3_region } : {},
@@ -243,14 +244,11 @@ resource "google_workflows_workflow" "mass_ingest" {
                           var.ssh_credentials_secret != "" ? {
                             GIT_SSH_CREDENTIALS = "projects/${var.project_id}/secrets/${var.ssh_credentials_secret}/versions/latest"
                           } : {},
-                          var.publish_user_secret != "" ? {
-                            PUBLISH_USER = "projects/${var.project_id}/secrets/${var.publish_user_secret}/versions/latest"
-                          } : {},
-                          var.publish_password_secret != "" ? {
-                            PUBLISH_PASSWORD = "projects/${var.project_id}/secrets/${var.publish_password_secret}/versions/latest"
-                          } : {},
                           var.publish_token_secret != "" ? {
                             PUBLISH_TOKEN = "projects/${var.project_id}/secrets/${var.publish_token_secret}/versions/latest"
+                          } : var.publish_user_secret != "" ? {
+                            PUBLISH_USER     = "projects/${var.project_id}/secrets/${var.publish_user_secret}/versions/latest"
+                            PUBLISH_PASSWORD = "projects/${var.project_id}/secrets/${var.publish_password_secret}/versions/latest"
                           } : {},
                         )
                       }
