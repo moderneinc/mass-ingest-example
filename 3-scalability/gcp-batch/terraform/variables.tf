@@ -100,8 +100,12 @@ variable "s3_region" {
 
 variable "csv_file" {
   type        = string
-  default     = "repos.csv"
-  description = "Path or URL to the repos.csv file. HTTP/HTTPS URLs are downloaded at runtime; local paths reference a file baked into the container image."
+  description = "Path or URL to the repos.csv file. HTTP/HTTPS URLs are fetched at runtime (must be publicly readable); local paths reference a file baked into the container image."
+
+  validation {
+    condition     = var.csv_file != ""
+    error_message = "csv_file must be set to a URL (https://...) or a local file path baked into the container image."
+  }
 }
 
 variable "total_repos" {

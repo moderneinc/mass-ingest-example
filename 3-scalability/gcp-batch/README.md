@@ -55,6 +55,8 @@ gsutil cp repos.csv gs://your-bucket/repos.csv
 ```
 Set `csv_file` to the URL (e.g., `https://storage.googleapis.com/your-bucket/repos.csv`).
 
+> **Note:** The URL must be publicly readable (unauthenticated). For GCS, either make the object public or use a signed URL. If you cannot make the CSV publicly accessible, use Option B instead.
+
 **Option B: Bake into the container image** — add the CSV to your Docker build and set `csv_file = "repos.csv"`. You must also set `total_repos` to the number of repos (excluding the header row).
 
 ### 2. Build and push Docker image
@@ -138,7 +140,7 @@ This creates:
 ### 6. Trigger manually (optional)
 
 ```bash
-gcloud workflows execute mass-ingest --location=us-central1
+gcloud workflows execute mass-ingest --location=<your-region>
 ```
 
 ## How it works
@@ -157,14 +159,14 @@ Each task:
 
 ### Compute
 - Each task gets a dedicated Compute Engine VM
-- Default: `n2-standard-4` (4 vCPU, 15 GB RAM, 64 GB disk)
+- Default: `n2-standard-4` (4 vCPU, 16 GB RAM, 64 GB disk)
 - VMs are provisioned on demand and deleted when the job completes
 
 ## Configuration
 
 ### Machine type
 
-Default: `n2-standard-4` (4 vCPU, 15 GB RAM). Each task gets a full VM — no resource contention with other workloads.
+Default: `n2-standard-4` (4 vCPU, 16 GB RAM). Each task gets a full VM — no resource contention with other workloads.
 
 Larger repositories or monorepos may need more CPU and memory. Adjust in `terraform.tfvars`:
 ```hcl

@@ -12,6 +12,14 @@ provider "google" {
   region  = var.region
 }
 
+# Validate that local CSV paths have total_repos set
+check "csv_config" {
+  assert {
+    condition     = can(regex("^https?://", var.csv_file)) || var.total_repos > 0
+    error_message = "When csv_file is a local path (not a URL), total_repos must be set to the number of repositories in the CSV (excluding the header row)."
+  }
+}
+
 # Enable required APIs
 resource "google_project_service" "apis" {
   for_each = toset([
