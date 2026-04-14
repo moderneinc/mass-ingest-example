@@ -197,6 +197,7 @@ The `repos.csv` file columns:
 - `origin` (required) - Source identifier (e.g., `github.com`)
 - `path` (required) - Repository path/identifier
 - `branch` (optional) - Branch to build (uses remote default if not specified)
+- `gradleVersion` (optional) - Selects a specific Gradle version for repos without a wrapper (must match an installation registered via `mod config build gradle installation edit`)
 
 See [repos.csv documentation](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv) for advanced options.
 
@@ -221,8 +222,10 @@ See `dependency-repos.csv.example` for a template.
 ### Build arguments
 
 All Dockerfiles support:
-- `MODERNE_CLI_VERSION` - Specific CLI version (defaults to latest stable)
-- `MODERNE_CLI_STAGE` - Use `staging` for pre-release versions
+- `MODERNE_CLI_VERSION` - Specific CLI version (defaults to latest release)
+- `MODERNE_CLI_STAGE` - `release` (default) for latest release from Maven Central, `snapshot` for latest snapshot
+- `MODERNE_CLI_RELEASES_REPO` - Maven repository for release CLI artifacts (defaults to `https://repo1.maven.org/maven2`)
+- `MODERNE_CLI_SNAPSHOTS_REPO` - Maven repository for snapshot CLI artifacts (defaults to `https://central.sonatype.com/repository/maven-snapshots`)
 
 ### FIPS-compliant image
 
@@ -239,7 +242,8 @@ docker build -f Dockerfile.fips -t mass-ingest:fips .
 |----------------------|----------------------------------------------|----------------------------------------|
 | `MAVEN_REPO_URL`    | `https://repo1.maven.org/maven2`             | Maven repository for CLI and Maven     |
 | `GRADLE_DIST_URL`   | `https://services.gradle.org/distributions`  | Gradle distribution download URL       |
-| `GRADLE_VERSION`    | `8.14`                                       | Gradle version to install              |
+| `GRADLE_VERSION`    | `8.14`                                       | Primary Gradle version to install      |
+| `GRADLE_EXTRA_VERSIONS` | *(empty)*                                | Comma-separated additional Gradle versions (e.g., `6.9.4,5.6.4`) |
 | `MAVEN_VERSION`     | `3.9.11`                                     | Maven version to install               |
 
 **Using internal mirrors:**
@@ -265,6 +269,10 @@ docker run --rm \
   -e PUBLISH_PASSWORD=your-password \
   mass-ingest:fips
 ```
+
+**JDK 8 and 11 TLS 1.3 workaround:**
+
+RHEL 9 backported TLS 1.3 into JDK 8 and 11, but the backported `P11AEADCipher` has a bug in AES-GCM decryption that causes TLS 1.3 handshakes to fail with `CKR_ENCRYPTED_DATA_INVALID` when running through NSS in FIPS mode. JDK 17+ has the fix. The Dockerfile disables TLS 1.3 for JDK 8 and 11, forcing them to use TLS 1.2 which works correctly. This is strictly more restrictive than stock FIPS — same algorithm restrictions plus TLS 1.3 disabled. JDK 17+ is unaffected and uses TLS 1.3 normally.
 
 **Key differences from the standard image:**
 

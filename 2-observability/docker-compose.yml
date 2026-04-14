@@ -4,6 +4,8 @@ services:
       context: ..
       args:
         MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION:-}
+        MODERNE_CLI_RELEASES_REPO: ${MODERNE_CLI_RELEASES_REPO:-}
+        MODERNE_CLI_SNAPSHOTS_REPO: ${MODERNE_CLI_SNAPSHOTS_REPO:-}
     env_file:
       - .env
     restart: unless-stopped

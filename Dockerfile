@@ -8,6 +8,11 @@ FROM eclipse-temurin:17-jdk AS jdk17
 FROM eclipse-temurin:21-jdk AS jdk21
 FROM eclipse-temurin:25-jdk AS jdk25
 
+# UNCOMMENT for multiple Node.js versions (JavaScript/TypeScript projects)
+# FROM node:20 AS node20
+# FROM node:22 AS node22
+# FROM node:24 AS node24
+
 # UNCOMMENT if you use a custom maven image with settings
 # FROM <custom docker image> AS maven
 
@@ -27,41 +32,68 @@ COPY --from=jdk25 /opt/java/openjdk /usr/lib/jvm/temurin-25-jdk
 ################################################################################
 
 FROM dependencies AS modcli
-ARG MODERNE_CLI_STAGE=stable
+ARG MODERNE_CLI_STAGE=release
 ARG MODERNE_CLI_VERSION
-# Set the environment variable MODERNE_CLI_VERSION
-ENV MODERNE_CLI_VERSION=${MODERNE_CLI_VERSION}
+ARG MODERNE_CLI_RELEASES_REPO=https://repo1.maven.org/maven2
+ARG MODERNE_CLI_SNAPSHOTS_REPO=https://central.sonatype.com/repository/maven-snapshots
 
 WORKDIR /app
 
-# Download the specified version of moderne-cli JAR file if MODERNE_CLI_VERSION is provided,
-# otherwise download the latest version
+# Download the modw wrapper script from Maven Central (release) or Sonatype snapshots (snapshot).
+# modw is a self-bootstrapping wrapper that handles Java detection, CLI JAR download, and AOT caching.
 RUN if [ -n "${MODERNE_CLI_VERSION}" ]; then \
-        echo "Downloading version: ${MODERNE_CLI_VERSION}"; \
-        curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/${MODERNE_CLI_VERSION}/moderne-cli-${MODERNE_CLI_VERSION}.jar" --output /usr/local/bin/mod.jar; \
-    elif [ "${MODERNE_CLI_STAGE}" == "staging" ]; then \
-        LATEST_VERSION=$(curl -s --insecure --request GET --url "https://api.github.com/repos/moderneinc/moderne-cli-releases/releases" | jq '.[0].tag_name' -r | sed "s/^v//"); \
-        if [ -z "${LATEST_VERSION}" ]; then \
-            echo "Failed to get latest staging version"; \
-            exit 1; \
+        echo "Downloading modw for version: ${MODERNE_CLI_VERSION}"; \
+        if echo "${MODERNE_CLI_VERSION}" | grep -q '\-SNAPSHOT$'; then \
+            SNAPSHOT_VERSION="${MODERNE_CLI_VERSION}"; \
+            METADATA_URL="$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/$SNAPSHOT_VERSION/maven-metadata.xml"; \
+            TIMESTAMP=$(curl -s "$METADATA_URL" | sed -n 's/.*<timestamp>\(.*\)<\/timestamp>.*/\1/p'); \
+            BUILD_NUM=$(curl -s "$METADATA_URL" | sed -n 's/.*<buildNumber>\(.*\)<\/buildNumber>.*/\1/p'); \
+            if [ -z "$TIMESTAMP" ] || [ -z "$BUILD_NUM" ]; then \
+                echo "Failed to resolve snapshot artifact version"; exit 1; \
+            fi; \
+            ARTIFACT_VERSION="$(echo "$SNAPSHOT_VERSION" | sed 's/-SNAPSHOT$//')-$TIMESTAMP-$BUILD_NUM"; \
+            curl -fsSL -o /usr/local/bin/modw "$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/$SNAPSHOT_VERSION/moderne-cli-$ARTIFACT_VERSION-modw.sh"; \
+        else \
+            curl -fsSL -o /usr/local/bin/modw "$MODERNE_CLI_RELEASES_REPO/io/moderne/moderne-cli/${MODERNE_CLI_VERSION}/moderne-cli-${MODERNE_CLI_VERSION}-modw.sh"; \
         fi; \
-        echo "Downloading latest staging version: ${LATEST_VERSION}"; \
-        curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/${LATEST_VERSION}/moderne-cli-${LATEST_VERSION}.jar" --output /usr/local/bin/mod.jar; \
+    elif [ "${MODERNE_CLI_STAGE}" = "snapshot" ]; then \
+        LATEST_VERSION=$(curl -s "$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/maven-metadata.xml" | sed -n 's/.*<latest>\(.*\)<\/latest>.*/\1/p'); \
+        if [ -z "$LATEST_VERSION" ]; then \
+            LATEST_VERSION=$(curl -s "$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/maven-metadata.xml" | sed -n 's/.*<version>\(.*-SNAPSHOT\)<\/version>.*/\1/p' | tail -1); \
+        fi; \
+        if [ -z "$LATEST_VERSION" ]; then \
+            echo "Failed to resolve latest snapshot version"; exit 1; \
+        fi; \
+        echo "Downloading latest snapshot modw: $LATEST_VERSION"; \
+        METADATA_URL="$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/$LATEST_VERSION/maven-metadata.xml"; \
+        TIMESTAMP=$(curl -s "$METADATA_URL" | sed -n 's/.*<timestamp>\(.*\)<\/timestamp>.*/\1/p'); \
+        BUILD_NUM=$(curl -s "$METADATA_URL" | sed -n 's/.*<buildNumber>\(.*\)<\/buildNumber>.*/\1/p'); \
+        if [ -z "$TIMESTAMP" ] || [ -z "$BUILD_NUM" ]; then \
+            echo "Failed to resolve snapshot artifact version"; exit 1; \
+        fi; \
+        ARTIFACT_VERSION="$(echo "$LATEST_VERSION" | sed 's/-SNAPSHOT$//')-$TIMESTAMP-$BUILD_NUM"; \
+        curl -fsSL -o /usr/local/bin/modw "$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/$LATEST_VERSION/moderne-cli-$ARTIFACT_VERSION-modw.sh"; \
     else \
-        LATEST_VERSION=$(curl -s --insecure --request GET --url "https://api.github.com/repos/moderneinc/moderne-cli-releases/releases/latest" | jq '.tag_name' -r | sed "s/^v//"); \
-        if [ -z "${LATEST_VERSION}" ]; then \
-            echo "Failed to get latest stable version"; \
-            exit 1; \
+        LATEST_VERSION=$(curl -s "$MODERNE_CLI_RELEASES_REPO/io/moderne/moderne-cli/maven-metadata.xml" | sed -n 's/.*<release>\(.*\)<\/release>.*/\1/p'); \
+        if [ -z "$LATEST_VERSION" ]; then \
+            echo "Failed to resolve latest release version"; exit 1; \
         fi; \
-        echo "Downloading latest stable version: ${LATEST_VERSION}"; \
-        curl -s --insecure --request GET --url "https://repo1.maven.org/maven2/io/moderne/moderne-cli/${LATEST_VERSION}/moderne-cli-${LATEST_VERSION}.jar" --output /usr/local/bin/mod.jar; \
+        echo "Downloading latest release modw: $LATEST_VERSION"; \
+        curl -fsSL -o /usr/local/bin/modw "$MODERNE_CLI_RELEASES_REPO/io/moderne/moderne-cli/$LATEST_VERSION/moderne-cli-$LATEST_VERSION-modw.sh"; \
     fi
 
-# Create a shell script 'mod' that runs the moderne-cli JAR file
-RUN printf '#!/bin/sh\njava -jar /usr/local/bin/mod.jar "$@"\n' > /usr/local/bin/mod
+# Make modw executable and create mod symlink
+RUN chmod +x /usr/local/bin/modw && ln -sf modw /usr/local/bin/mod
 
-# Make the 'mod' script executable
-RUN chmod +x /usr/local/bin/mod
+# Write wrapper properties so modw knows the version policy at runtime
+RUN mkdir -p /root/.moderne/cli/dist && \
+    if [ -n "${MODERNE_CLI_VERSION}" ]; then \
+        echo "version=${MODERNE_CLI_VERSION}" > /root/.moderne/cli/dist/moderne-wrapper.properties; \
+    elif [ "${MODERNE_CLI_STAGE}" = "snapshot" ]; then \
+        echo "version=LATEST" > /root/.moderne/cli/dist/moderne-wrapper.properties; \
+    else \
+        echo "version=RELEASE" > /root/.moderne/cli/dist/moderne-wrapper.properties; \
+    fi
 
 # Credential configuration has been moved to runtime (publish.sh/publish.ps1) to avoid
 # baking sensitive credentials into Docker image layers. Credentials are now passed as
@@ -76,10 +108,24 @@ RUN chmod +x /usr/local/bin/mod
 FROM modcli AS language-support
 
 # Gradle (comment if projects don't use Gradle without a wrapper)
-RUN wget --no-check-certificate https://services.gradle.org/distributions/gradle-8.14-bin.zip
-RUN mkdir /opt/gradle
-RUN unzip -d /opt/gradle gradle-8.14-bin.zip
-ENV PATH="${PATH}:/opt/gradle/gradle-8.14/bin"
+# Install one or more Gradle versions for repos that lack a Gradle wrapper.
+# To add versions for repos with older build scripts, add them to GRADLE_EXTRA_VERSIONS (comma-separated).
+# Then use the `gradleVersion` column in repos.csv to select which version to use per repo.
+ARG GRADLE_VERSION=8.14
+ARG GRADLE_EXTRA_VERSIONS=
+RUN mkdir -p /opt/gradle && \
+    wget --no-check-certificate https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip && \
+    unzip -d /opt/gradle gradle-${GRADLE_VERSION}-bin.zip && \
+    rm gradle-${GRADLE_VERSION}-bin.zip && \
+    for v in $(echo "${GRADLE_EXTRA_VERSIONS}" | tr ',' ' '); do \
+        wget --no-check-certificate https://services.gradle.org/distributions/gradle-${v}-bin.zip && \
+        unzip -d /opt/gradle gradle-${v}-bin.zip && \
+        rm gradle-${v}-bin.zip; \
+    done
+
+# Register all Gradle installations so the CLI can select the right version per repo.
+RUN mod config build gradle installation edit $(find /opt/gradle -maxdepth 1 -mindepth 1 -type d | sort -V)
+ENV PATH="${PATH}:/opt/gradle/gradle-${GRADLE_VERSION}/bin"
 
 # Maven (comment if projects don't use Maven without a wrapper)
 # NOTE: This version may be out of date as new versions are continually released. Check here for the latest version: https://repo1.maven.org/maven2/org/apache/maven/apache-maven/
@@ -117,9 +163,13 @@ RUN ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 # RUN cp bazelisk-linux-amd64 /usr/local/bin/bazel
 # RUN chmod +x /usr/local/bin/bazel
 
-# Node.js (uncomment for JavaScript/TypeScript projects)
-# RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
-#     apt-get install -y --no-install-recommends nodejs
+# Node.js - multiple versions (uncomment for JavaScript/TypeScript projects)
+# Also uncomment the FROM node:XX lines near the top of this file
+# COPY --from=node20 /usr/local /opt/node/node-20
+# COPY --from=node22 /usr/local /opt/node/node-22
+# COPY --from=node24 /usr/local /opt/node/node-24
+# ENV PATH="/opt/node/node-24/bin:${PATH}"
+# RUN mod config node installation edit /opt/node/node-20/bin/node /opt/node/node-22/bin/node # /opt/node/node-24/bin/node
 
 # Python 3.11 (uncomment for Python projects)
 # Install prerequisites and COPY the deadsnakes PPA
@@ -164,6 +214,32 @@ RUN ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 # RUN cp $MAVEN_CONFIG/settings.xml /root/.m2/settings.xml # For custom maven docker imagee
 # COPY maven/settings-security.xml /root/.m2/settings-security.xml
 # RUN mod config build maven settings edit /root/.m2/settings.xml
+
+################################################################################
+# OPTIONAL: Custom NPM Configuration (uncomment if needed)
+################################################################################
+# If your JavaScript/TypeScript projects require a custom npm registry or
+# authentication, uncomment the following to configure an .npmrc file.
+
+# COPY npm/.npmrc /root/.npmrc
+
+################################################################################
+# OPTIONAL: Custom Python/pip Configuration (uncomment if needed)
+################################################################################
+# If your Python projects require a private package index or authentication,
+# uncomment the following to configure pip.
+
+# RUN mkdir -p /root/.config/pip
+# COPY python/pip.conf /root/.config/pip/pip.conf
+
+################################################################################
+# OPTIONAL: Custom build steps (uncomment if needed)
+################################################################################
+# If your repositories include JavaScript or Python projects, uncomment the
+# following to configure the Moderne CLI to parse those languages.
+
+# RUN mkdir -p /root/.moderne/cli
+# COPY moderne.yml /root/.moderne/cli/moderne.yml
 
 ################################################################################
 # RUNTIME CONFIGURATION

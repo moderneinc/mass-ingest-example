@@ -35,26 +35,67 @@ FROM registry.access.redhat.com/ubi9/ubi AS downloader
 # Artifact locations - override these to point at internal mirrors
 ARG MAVEN_REPO_URL=https://repo1.maven.org/maven2
 ARG GRADLE_DIST_URL=https://services.gradle.org/distributions
+ARG MODERNE_CLI_RELEASES_REPO=https://repo1.maven.org/maven2
+ARG MODERNE_CLI_SNAPSHOTS_REPO=https://central.sonatype.com/repository/maven-snapshots
 
 # Moderne CLI version — defaults to latest release from maven-metadata.xml
 ARG MODERNE_CLI_VERSION
+ARG MODERNE_CLI_STAGE=release
 
-# Download Moderne CLI
+# Download modw wrapper script
 RUN CLI_VERSION="${MODERNE_CLI_VERSION}"; \
-    if [ -z "${CLI_VERSION}" ]; then \
-        CLI_VERSION=$(curl -s "${MAVEN_REPO_URL}/io/moderne/moderne-cli/maven-metadata.xml" \
+    if [ -n "${CLI_VERSION}" ]; then \
+        if echo "${CLI_VERSION}" | grep -q '\-SNAPSHOT$'; then \
+            METADATA_URL="$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/$CLI_VERSION/maven-metadata.xml"; \
+            TIMESTAMP=$(curl -s "$METADATA_URL" | sed -n 's/.*<timestamp>\(.*\)<\/timestamp>.*/\1/p'); \
+            BUILD_NUM=$(curl -s "$METADATA_URL" | sed -n 's/.*<buildNumber>\(.*\)<\/buildNumber>.*/\1/p'); \
+            if [ -z "$TIMESTAMP" ] || [ -z "$BUILD_NUM" ]; then \
+                echo "Failed to resolve snapshot artifact version"; exit 1; \
+            fi; \
+            ARTIFACT_VERSION="$(echo "$CLI_VERSION" | sed 's/-SNAPSHOT$//')-$TIMESTAMP-$BUILD_NUM"; \
+            echo "Downloading modw for snapshot: $CLI_VERSION"; \
+            curl -fsSL -o /tmp/modw "$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/$CLI_VERSION/moderne-cli-$ARTIFACT_VERSION-modw.sh"; \
+        else \
+            echo "Downloading modw for version: $CLI_VERSION"; \
+            curl -fsSL -o /tmp/modw "${MODERNE_CLI_RELEASES_REPO}/io/moderne/moderne-cli/${CLI_VERSION}/moderne-cli-${CLI_VERSION}-modw.sh"; \
+        fi; \
+    elif [ "${MODERNE_CLI_STAGE}" = "snapshot" ]; then \
+        CLI_VERSION=$(curl -s "$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/maven-metadata.xml" | sed -n 's/.*<latest>\(.*\)<\/latest>.*/\1/p'); \
+        if [ -z "$CLI_VERSION" ]; then \
+            CLI_VERSION=$(curl -s "$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/maven-metadata.xml" | sed -n 's/.*<version>\(.*-SNAPSHOT\)<\/version>.*/\1/p' | tail -1); \
+        fi; \
+        if [ -z "$CLI_VERSION" ]; then \
+            echo "Failed to resolve latest snapshot version"; exit 1; \
+        fi; \
+        METADATA_URL="$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/$CLI_VERSION/maven-metadata.xml"; \
+        TIMESTAMP=$(curl -s "$METADATA_URL" | sed -n 's/.*<timestamp>\(.*\)<\/timestamp>.*/\1/p'); \
+        BUILD_NUM=$(curl -s "$METADATA_URL" | sed -n 's/.*<buildNumber>\(.*\)<\/buildNumber>.*/\1/p'); \
+        if [ -z "$TIMESTAMP" ] || [ -z "$BUILD_NUM" ]; then \
+            echo "Failed to resolve snapshot artifact version"; exit 1; \
+        fi; \
+        ARTIFACT_VERSION="$(echo "$CLI_VERSION" | sed 's/-SNAPSHOT$//')-$TIMESTAMP-$BUILD_NUM"; \
+        echo "Downloading latest snapshot modw: $CLI_VERSION"; \
+        curl -fsSL -o /tmp/modw "$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/$CLI_VERSION/moderne-cli-$ARTIFACT_VERSION-modw.sh"; \
+    else \
+        CLI_VERSION=$(curl -s "${MODERNE_CLI_RELEASES_REPO}/io/moderne/moderne-cli/maven-metadata.xml" \
             | grep '<release>' | sed 's/.*<release>\(.*\)<\/release>.*/\1/'); \
         if [ -z "${CLI_VERSION}" ]; then \
-            echo "Failed to resolve latest CLI version from ${MAVEN_REPO_URL}"; \
+            echo "Failed to resolve latest CLI version from ${MODERNE_CLI_RELEASES_REPO}"; \
             exit 1; \
         fi; \
-    fi; \
-    echo "Downloading Moderne CLI ${CLI_VERSION}"; \
-    curl -fsSL -o /tmp/mod.jar "${MAVEN_REPO_URL}/io/moderne/moderne-cli/${CLI_VERSION}/moderne-cli-${CLI_VERSION}.jar"
+        echo "Downloading latest release modw: $CLI_VERSION"; \
+        curl -fsSL -o /tmp/modw "${MODERNE_CLI_RELEASES_REPO}/io/moderne/moderne-cli/${CLI_VERSION}/moderne-cli-${CLI_VERSION}-modw.sh"; \
+    fi
 
 # Download Gradle (comment if projects don't use Gradle without a wrapper)
+# To add versions for repos with older build scripts, add them to GRADLE_EXTRA_VERSIONS (comma-separated).
+# Then use the `gradleVersion` column in repos.csv to select which version to use per repo.
 ARG GRADLE_VERSION=8.14
-RUN curl -fsSL -o /tmp/gradle-${GRADLE_VERSION}-bin.zip "${GRADLE_DIST_URL}/gradle-${GRADLE_VERSION}-bin.zip"
+ARG GRADLE_EXTRA_VERSIONS=
+RUN curl -fsSL -o /tmp/gradle-${GRADLE_VERSION}-bin.zip "${GRADLE_DIST_URL}/gradle-${GRADLE_VERSION}-bin.zip" && \
+    for v in $(echo "${GRADLE_EXTRA_VERSIONS}" | tr ',' ' '); do \
+        curl -fsSL -o /tmp/gradle-${v}-bin.zip "${GRADLE_DIST_URL}/gradle-${v}-bin.zip"; \
+    done
 
 # Download Maven (comment if projects don't use Maven without a wrapper)
 # NOTE: Check for latest version: https://repo1.maven.org/maven2/org/apache/maven/apache-maven/
@@ -108,6 +149,58 @@ RUN dnf install -y \
     java-21-openjdk-devel \
     java-25-openjdk-devel
 
+# Disable TLS 1.3 for JDK 8 and 11
+# RHEL 9 backported TLS 1.3 (and the P11AEADCipher class) into JDK 8 and 11.
+# Under FIPS, all crypto goes through the NSS PKCS11 module. The backported
+# P11AEADCipher has a bug in AES-GCM decryption that causes TLS 1.3 handshakes
+# to fail with CKR_ENCRYPTED_DATA_INVALID. JDK 17+ has the fix. TLS 1.2 works
+# fine because it uses a different PKCS11 code path for AES-GCM.
+#
+# The fix adds TLSv1.3 to jdk.tls.disabledAlgorithms for JDK 8 and 11.
+# RHEL 9's system crypto-policies file overrides that setting at runtime
+# (via security.useSystemPropertiesFile=true), so we disable the system
+# override for these two JDKs and bake the full FIPS crypto-policies content
+# (with TLSv1.3 prepended) directly into their java.security files.
+# This is strictly more restrictive than stock FIPS. JDK 17+ is unaffected.
+RUN <<'PATCH_SCRIPT'
+#!/bin/bash
+set -e
+
+# System crypto-policies config that RHEL 9 applies to Java at runtime
+crypto=/etc/crypto-policies/back-ends/java.config
+
+# Extract the value after '=' for a given property name
+read_policy() { grep "^${1}=" "$crypto" | cut -d= -f2-; }
+
+# Capture current FIPS policy values so we can bake them into java.security
+# (needed because we're about to disable the runtime system-properties loading)
+tls_disabled=$(read_policy jdk.tls.disabledAlgorithms)
+certpath_disabled=$(read_policy jdk.certpath.disabledAlgorithms)
+named_curves=$(read_policy jdk.disabled.namedCurves)
+
+# Paths to java.security for affected JDKs (JDK 17+ has the fix and doesn't need patching)
+jdk8_security=/usr/lib/jvm/java-1.8.0-openjdk-*/jre/lib/security/java.security
+jdk11_security=/usr/lib/jvm/java-11-openjdk-*/conf/security/java.security
+
+for f in $jdk8_security $jdk11_security
+do
+  # Stop loading /etc/crypto-policies at runtime -- we bake the values in directly
+  sed -i 's|^security.useSystemPropertiesFile=true|security.useSystemPropertiesFile=false|' "$f"
+
+  # Prepend TLSv1.3 to disabled TLS algorithms -- the actual fix for the AES-GCM bug
+  sed -i "s|^jdk.tls.disabledAlgorithms=.*|jdk.tls.disabledAlgorithms=TLSv1.3, ${tls_disabled}|" "$f"
+
+  # Bake in certpath restrictions from FIPS policy (required since we disabled the system file)
+  sed -i "s|^jdk.certpath.disabledAlgorithms=.*|jdk.certpath.disabledAlgorithms=${certpath_disabled}|" "$f"
+
+  # Bake in named curve restrictions from FIPS policy
+  sed -i "s|^jdk.disabled.namedCurves=.*|jdk.disabled.namedCurves=${named_curves}|" "$f"
+
+  # Clear legacy algorithms -- not permitted under FIPS
+  sed -i '/^jdk.tls.legacyAlgorithms=/s/=.*/=/' "$f"
+done
+PATCH_SCRIPT
+
 # Install utilities
 # Note: git-lfs requires EPEL; --allowerasing replaces curl-minimal with full curl
 RUN dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
@@ -126,17 +219,36 @@ FROM base AS language-support
 
 WORKDIR /app
 
-# Install Moderne CLI
-COPY --from=downloader /tmp/mod.jar /usr/local/bin/mod.jar
-# The CLI requires JDK 25; point the wrapper at the Red Hat OpenJDK 25 install
-RUN printf '#!/bin/sh\n/usr/lib/jvm/java-25-openjdk/bin/java -jar /usr/local/bin/mod.jar "$@"\n' > /usr/local/bin/mod && \
-    chmod +x /usr/local/bin/mod
+# Install modw wrapper and create mod symlink
+COPY --from=downloader /tmp/modw /usr/local/bin/modw
+RUN chmod +x /usr/local/bin/modw && ln -sf modw /usr/local/bin/mod
+
+# Write wrapper properties so modw knows the version policy at runtime
+ARG MODERNE_CLI_VERSION
+ARG MODERNE_CLI_STAGE=release
+RUN mkdir -p /root/.moderne/cli/dist && \
+    if [ -n "${MODERNE_CLI_VERSION}" ]; then \
+        echo "version=${MODERNE_CLI_VERSION}" > /root/.moderne/cli/dist/moderne-wrapper.properties; \
+    elif [ "${MODERNE_CLI_STAGE}" = "snapshot" ]; then \
+        echo "version=LATEST" > /root/.moderne/cli/dist/moderne-wrapper.properties; \
+    else \
+        echo "version=RELEASE" > /root/.moderne/cli/dist/moderne-wrapper.properties; \
+    fi
 
 # Gradle (comment if projects don't use Gradle without a wrapper)
 ARG GRADLE_VERSION=8.14
-COPY --from=downloader /tmp/gradle-${GRADLE_VERSION}-bin.zip gradle-${GRADLE_VERSION}-bin.zip
-RUN mkdir /opt/gradle
-RUN unzip -d /opt/gradle gradle-${GRADLE_VERSION}-bin.zip && rm gradle-${GRADLE_VERSION}-bin.zip
+ARG GRADLE_EXTRA_VERSIONS=
+COPY --from=downloader /tmp/gradle-*.zip /tmp/
+RUN mkdir -p /opt/gradle && \
+    unzip -d /opt/gradle /tmp/gradle-${GRADLE_VERSION}-bin.zip && \
+    rm /tmp/gradle-${GRADLE_VERSION}-bin.zip && \
+    for v in $(echo "${GRADLE_EXTRA_VERSIONS}" | tr ',' ' '); do \
+        unzip -d /opt/gradle /tmp/gradle-${v}-bin.zip && \
+        rm /tmp/gradle-${v}-bin.zip; \
+    done
+
+# Register all Gradle installations so the CLI can select the right version per repo.
+RUN mod config build gradle installation edit $(find /opt/gradle -maxdepth 1 -mindepth 1 -type d | sort -V)
 ENV PATH="${PATH}:/opt/gradle/gradle-${GRADLE_VERSION}/bin"
 
 # Maven (comment if projects don't use Maven without a wrapper)

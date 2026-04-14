@@ -46,7 +46,7 @@ docker build -t mass-ingest:quickstart ..
 ```
 
 Optional build arguments:
-- `MODERNE_CLI_VERSION` - Specific CLI version (optional, defaults to latest stable)
+- `MODERNE_CLI_VERSION` - Specific CLI version (optional, defaults to latest release)
 
 Example with specific CLI version:
 ```bash

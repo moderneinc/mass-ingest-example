@@ -1,0 +1,11 @@
+specs: specs.moderne.ai/v1/cli
+build:
+  steps:
+    - type: maven
+    - type: gradle
+    - type: bazel
+    - type: javascript
+    - type: python
+    - type: resource
+      inclusion: |-
+        **/*
