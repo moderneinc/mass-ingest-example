@@ -1,0 +1,38 @@
+name       = "mass-ingest"
+vpc_id     = "vpc-xxxxx"
+subnet_ids = ["subnet-xxxxx", "subnet-yyyyy"]
+
+image_registry = "<account-id>.dkr.ecr.<region>.amazonaws.com/mass-ingest"
+image_tag      = "latest"
+
+moderne_tenant = "https://app.moderne.io"
+moderne_token  = "arn:aws:secretsmanager:<region>:<account>:secret:mass-ingest/moderne-token"
+
+# Storage — choose one option:
+
+# Option A: S3
+moderne_publish_url    = "s3://your-bucket"
+moderne_s3_bucket_name = "your-bucket"
+# moderne_s3_region    = "us-west-2"
+# moderne_s3_endpoint  = "https://minio.example.com"
+
+# Option B: Maven/Artifactory
+# moderne_publish_url      = "https://artifactory.example.com/artifactory/moderne-ingest/"
+# moderne_publish_user     = "arn:aws:secretsmanager:<region>:<account>:secret:mass-ingest/publishing:username::"
+# moderne_publish_password = "arn:aws:secretsmanager:<region>:<account>:secret:mass-ingest/publishing:password::"
+# moderne_publish_token    = "arn:aws:secretsmanager:<region>:<account>:secret:mass-ingest/publishing:token::"
+
+# Git authentication — choose one:
+# moderne_git_credentials = "arn:aws:secretsmanager:<region>:<account>:secret:mass-ingest/git-credentials"
+# moderne_ssh_credentials = "arn:aws:secretsmanager:<region>:<account>:secret:mass-ingest/ssh-private-key"
+
+# Ingestion settings
+# ingest_csv_file     = "repos.csv"
+# ingest_chunk_size   = 10
+# instance_type       = "m6a.xlarge"
+# schedule_expression = "cron(0 0 * * ? *)"
+
+default_tags = {
+  Environment = "production"
+  Project     = "mass-ingest"
+}

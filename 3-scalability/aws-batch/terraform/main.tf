@@ -105,7 +105,7 @@ resource "aws_batch_compute_environment" "compute_environment" {
   compute_resources {
     type = "EC2"
     instance_type = [
-      "m6a.xlarge",
+      var.instance_type,
     ]
 
     min_vcpus = 0
@@ -238,7 +238,7 @@ resource "aws_batch_job_definition" "chunk_job_definition" {
       },
       {
         name = "JOB_DEFINITION",
-        value = aws_batch_job_definition.ingest_job_definition.arn
+        value = aws_batch_job_definition.processor_job_definition.arn
       },
     ]
   })
@@ -445,7 +445,7 @@ resource "aws_iam_role_policy" "scheduler_batch_access" {
 # Schedules
 resource "aws_scheduler_schedule" "daily_trigger" {
   name = "${var.name}-daily-trigger"
-  schedule_expression = "cron(0 0 * * ? *)"
+  schedule_expression = var.schedule_expression
   flexible_time_window {
     mode = "OFF"
   }

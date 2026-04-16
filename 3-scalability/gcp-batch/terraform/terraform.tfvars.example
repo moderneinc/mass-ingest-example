@@ -1,0 +1,43 @@
+project_id = "your-gcp-project-id"
+region     = "us-central1"
+name       = "mass-ingest"
+
+network    = "default"
+subnetwork = "default"
+
+image_registry = "us-docker.pkg.dev/your-project/mass-ingest/mass-ingest"
+image_tag      = "latest"
+
+machine_type = "n2-standard-4"
+
+moderne_tenant       = "https://app.moderne.io"
+moderne_token_secret = "mass-ingest-moderne-token"
+
+# Storage — choose one option:
+
+# Option A: Maven/Artifactory (recommended)
+publish_url = "https://artifactory.example.com/artifactory/moderne-ingest/"
+# publish_user_secret     = "mass-ingest-publish-user"
+# publish_password_secret = "mass-ingest-publish-password"
+# publish_token_secret    = "mass-ingest-publish-token"
+
+# Option B: GCS via S3-compatible interop (optional)
+# publish_url  = "s3://your-gcs-bucket"
+# s3_endpoint  = "https://storage.googleapis.com"
+# s3_region    = "auto"
+
+# Git authentication — choose one:
+# git_credentials_secret = "mass-ingest-git-credentials"
+# ssh_credentials_secret = "mass-ingest-ssh-key"
+
+# Repository list — URL or local file path
+# Option A: HTTP/HTTPS URL (recommended — workflow counts repos automatically)
+ingest_csv_file = "https://storage.googleapis.com/your-bucket/repos.csv"
+
+# Option B: Local file baked into container image (requires total_repos)
+# ingest_csv_file = "repos.csv"
+# total_repos     = 1000
+
+# ingest_chunk_size = 10
+# schedule          = "0 0 * * *"
+# max_retry_count   = 0

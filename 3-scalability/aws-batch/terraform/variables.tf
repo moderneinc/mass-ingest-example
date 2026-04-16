@@ -96,6 +96,18 @@ variable "ingest_chunk_size" {
   default = 10
 }
 
+variable "instance_type" {
+  type        = string
+  default     = "m6a.xlarge"
+  description = "EC2 instance type for batch compute environment"
+}
+
+variable "schedule_expression" {
+  type        = string
+  default     = "cron(0 0 * * ? *)"
+  description = "EventBridge Scheduler expression (default: daily at midnight UTC)"
+}
+
 variable "default_tags" {
   type = map(string)
   default = {

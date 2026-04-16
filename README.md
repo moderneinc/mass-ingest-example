@@ -61,16 +61,16 @@ This repository provides three progressive deployment examples. Each stage is **
 - Enterprise environments
 
 **What's included:**
-- AWS Batch for parallel workers
+- Cloud-native batch services (AWS Batch, GCP Batch)
 - Terraform infrastructure as code
-- EventBridge Scheduler for automation
-- Auto-scaling compute environment
+- Scheduled automation (daily/weekly)
+- Auto-scaling compute — scales to zero when idle
 - Production monitoring and cost optimization
 
 **Resources needed:**
-- AWS account with appropriate permissions
+- Cloud account (AWS or GCP)
 - Terraform >= 1.0
-- VPC with NAT gateway
+- VPC with internet access
 - Configurable compute (scales from 0 to 256+ vCPUs)
 
 [→ Start with 3-scalability](./3-scalability/)
@@ -96,13 +96,16 @@ mass-ingest-example/
 │   ├── observability/    # Grafana and Prometheus configs
 │   └── README.md
 │
-├── 3-scalability/        # AWS Batch production deployment
-│   ├── chunk.sh          # Batch job partitioning script
-│   ├── terraform/
-│   │   ├── main.tf
-│   │   ├── variables.tf
-│   │   └── outputs.tf
-│   └── README.md
+├── 3-scalability/        # Cloud-native batch deployment (multi-cloud)
+│   ├── README.md          # Platform comparison and architecture overview
+│   ├── aws-batch/         # AWS Batch + EventBridge + Secrets Manager
+│   │   ├── chunk.sh
+│   │   ├── terraform/
+│   │   └── README.md
+│   ├── gcp-batch/         # GCP Batch + Cloud Scheduler + Secret Manager
+│   │   ├── task.sh
+│   │   ├── terraform/
+│   │   └── README.md
 │
 └── diagnostics/          # Comprehensive diagnostic system
     ├── diagnose.sh       # Main orchestration script
@@ -152,16 +155,16 @@ Before starting with any stage, you'll need:
 
 5. **Bash**: Required in the container image (Alpine users: `apk add bash`)
 
-6. **AWS account**: Required only for stage 3
+6. **Cloud account**: AWS or GCP account (required only for stage 3)
 
 ## Quick comparison
 
 | Feature | 1-quickstart | 2-observability | 3-scalability |
 |---------|---------|-----------|---------|
-| **Deployment** | Single container | Docker Compose | AWS Batch + Terraform |
-| **Monitoring** | CLI metrics endpoint | Grafana + Prometheus | CloudWatch + optional Grafana |
+| **Deployment** | Single container | Docker Compose | Cloud-native batch + Terraform |
+| **Monitoring** | CLI metrics endpoint | Grafana + Prometheus | Cloud-native logging + optional Grafana |
 | **Scaling** | Manual | Single host | Auto-scaling parallel workers |
-| **Scheduling** | Manual/cron | Docker restart policy | EventBridge Scheduler |
+| **Scheduling** | Manual/cron | Docker restart policy | Cloud-native scheduler |
 | **Cost** | Lowest | Low | Scales with usage |
 | **Setup time** | 15 minutes | 30 minutes | 1-2 hours |
 | **Ideal repo count** | < 100 | 100-1000 | 1000+ |
@@ -282,7 +285,8 @@ RHEL 9 backported TLS 1.3 into JDK 8 and 11, but the backported `P11AEADCipher` 
 | Certificate mgmt| Per-JDK keytool                | System trust store (`update-ca-trust`)|
 | Package manager | apt-get                        | dnf                                   |
 
-> **Note:** For full kernel-level FIPS compliance, the host OS must also be running in FIPS mode. The container enforces FIPS-approved algorithms at the userspace level (OpenSSL, Java security providers) regardless of host configuration.
+> [!NOTE]
+> For full kernel-level FIPS compliance, the host OS must also be running in FIPS mode. The container enforces FIPS-approved algorithms at the userspace level (OpenSSL, Java security providers) regardless of host configuration.
 
 ## Generating repository lists
 
