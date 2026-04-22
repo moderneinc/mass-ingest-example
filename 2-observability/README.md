@@ -70,7 +70,7 @@ PUBLISH_PASSWORD=your-password
 ### 3. Start all services
 
 ```bash
-docker compose up -d
+docker-compose up -d
 ```
 
 This starts:
@@ -96,18 +96,18 @@ curl http://localhost:8080/prometheus
 ### 5. View logs
 
 ```bash
-docker compose logs -f mass-ingest
+docker-compose logs -f mass-ingest
 ```
 
 ### 6. Stop services
 
 ```bash
-docker compose down
+docker-compose down
 ```
 
 To also remove the data volume:
 ```bash
-docker compose down -v
+docker-compose down -v
 ```
 
 ## Configuration
@@ -322,7 +322,7 @@ For > 10,000 repositories or fully automated parallel processing, see **3-scalab
 
 ### Services won't start
 ```bash
-docker compose logs
+docker-compose logs
 ```
 
 Check:
@@ -343,14 +343,14 @@ docker volume inspect 2-observability_data
 
 Increase storage or clean up:
 ```bash
-docker compose down -v  # Removes data volume
+docker-compose down -v  # Removes data volume
 ```
 
 ### Build failures
 View detailed logs:
 ```bash
-docker compose exec mass-ingest ls /var/moderne/
-docker compose exec mass-ingest cat /var/moderne/log.zip
+docker-compose exec mass-ingest ls /var/moderne/
+docker-compose exec mass-ingest cat /var/moderne/log.zip
 ```
 
 ## Resource requirements
