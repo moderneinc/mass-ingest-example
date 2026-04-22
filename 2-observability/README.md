@@ -70,7 +70,7 @@ PUBLISH_PASSWORD=your-password
 ### 3. Start all services
 
 ```bash
-docker-compose up -d
+sudo docker-compose up -d
 ```
 
 This starts:
