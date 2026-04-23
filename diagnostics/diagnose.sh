@@ -3,9 +3,9 @@
 # Mass-ingest comprehensive diagnostics
 #
 # Usage:
-#   DIAGNOSE=true docker compose up     # Full diagnostics, no ingestion
-#   DIAGNOSE_ON_START=true ...          # Run diagnostics before ingestion
-#   ./diagnostics/diagnose.sh           # Run directly
+#   DIAGNOSE=true  sudo docker-compose up     # Full diagnostics, no ingestion
+#   DIAGNOSE_ON_START=true ...                # Run diagnostics before ingestion
+#   ./diagnostics/diagnose.sh                 # Run directly
 #
 # Exit codes:
 #   0 - All checks passed

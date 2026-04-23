@@ -96,18 +96,18 @@ curl http://localhost:8080/prometheus
 ### 5. View logs
 
 ```bash
-docker-compose logs -f mass-ingest
+sudo docker-compose logs -f mass-ingest
 ```
 
 ### 6. Stop services
 
 ```bash
-docker-compose down
+sudo docker-compose down
 ```
 
 To also remove the data volume:
 ```bash
-docker-compose down -v
+sudo docker-compose down -v
 ```
 
 ## Configuration
@@ -322,7 +322,7 @@ For > 10,000 repositories or fully automated parallel processing, see **3-scalab
 
 ### Services won't start
 ```bash
-docker-compose logs
+sudo docker-compose logs
 ```
 
 Check:
@@ -343,14 +343,14 @@ docker volume inspect 2-observability_data
 
 Increase storage or clean up:
 ```bash
-docker-compose down -v  # Removes data volume
+sudo docker-compose down -v  # Removes data volume
 ```
 
 ### Build failures
 View detailed logs:
 ```bash
-docker-compose exec mass-ingest ls /var/moderne/
-docker-compose exec mass-ingest cat /var/moderne/log.zip
+sudo docker-compose exec mass-ingest ls /var/moderne/
+sudo docker-compose exec mass-ingest cat /var/moderne/log.zip
 ```
 
 ## Resource requirements

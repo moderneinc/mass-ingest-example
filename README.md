@@ -302,7 +302,7 @@ The `diagnostics/` directory contains a comprehensive diagnostic system to valid
 Run comprehensive diagnostics without starting ingestion:
 
 ```bash
-DIAGNOSE=true docker compose up
+DIAGNOSE=true sudo docker-compose up
 ```
 
 This validates the entire setup and produces a detailed report:
