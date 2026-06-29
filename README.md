@@ -183,6 +183,8 @@ All stages share the same core configuration needs:
 - `MODERNE_TENANT` - Your Moderne tenant url (optional)
 - `MODERNE_TOKEN` - Moderne API token (optional)
 
+For AWS CodeArtifact, set `CODEARTIFACT_DOMAIN` (and `PUBLISH_URL` to the CodeArtifact Maven endpoint) instead of `PUBLISH_USER`/`PUBLISH_PASSWORD`. See [Using AWS CodeArtifact](#using-aws-codeartifact).
+
 ### Repository authentication
 
 For private repositories, credentials are mounted at runtime (never baked into images):
@@ -287,6 +289,60 @@ RHEL 9 backported TLS 1.3 into JDK 8 and 11, but the backported `P11AEADCipher` 
 
 > [!NOTE]
 > For full kernel-level FIPS compliance, the host OS must also be running in FIPS mode. The container enforces FIPS-approved algorithms at the userspace level (OpenSSL, Java security providers) regardless of host configuration.
+
+## Using AWS CodeArtifact
+
+AWS CodeArtifact is a standard Basic-auth Maven repository, but its password is a short-lived token (minted with `aws codeartifact get-authorization-token`, expires within 12h), not a static secret. The examples handle this by minting the token at runtime and refreshing it before every batch, so a long-running or scheduled ingest never goes stale. The same token is reused for dependency resolution during the build.
+
+### Authentication
+
+Authenticate with an IAM role attached to the compute (AWS Batch job role, ECS task role, or EC2 instance profile) rather than static access keys. The AWS CLI in the container picks up the role automatically. If you must use static keys, pass them as `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` environment variables.
+
+The IAM principal needs `codeartifact:GetAuthorizationToken`, `codeartifact:ReadFromRepository`, `codeartifact:PublishPackageVersion`, `codeartifact:PutPackageMetadata`, and `sts:GetServiceBearerToken`.
+
+### Image setup
+
+In the `Dockerfile`, uncomment the AWS CLI install block, then uncomment the lines in the "OPTIONAL: AWS CodeArtifact" section for the build tool(s) your repositories use:
+
+- Maven: `COPY maven/settings-codeartifact.xml /app/maven/settings-codeartifact.xml` (publish.sh registers it at runtime, only when CodeArtifact is selected, so the same image still builds Maven projects in S3/Artifactory runs)
+- Gradle: `COPY gradle/init-codeartifact.gradle /app/gradle/init-codeartifact.gradle` (+ the `mod config build gradle arguments edit` line; the init script no-ops when CodeArtifact is not in use)
+
+Gradle ignores `settings.xml` for credentials, so it needs the init script; Maven needs the settings file. Wire every build tool your portfolio uses: an un-wired tool silently resolves dependencies from public repositories instead of CodeArtifact. Both read the rotating token from the environment at build time. If you set `CODEARTIFACT_DOMAIN` but wire neither tool, publish.sh logs a warning. If you use the "Custom Maven Settings" Dockerfile section, merge the CodeArtifact `<server>`/`<mirror>` into your own settings.xml instead; publish.sh leaves an existing `/root/.m2/settings.xml` configuration untouched.
+
+For a wired tool, the catch-all `<mirror>` in `settings-codeartifact.xml` (and the Gradle repository) routes that tool's dependency resolution through CodeArtifact, so the domain must have an upstream connection for every external repository your builds need (e.g. Maven Central, Gradle Plugin Portal). Narrow the `<mirrorOf>` if you want only some repositories proxied.
+
+### Environment variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `PUBLISH_URL` | yes | CodeArtifact Maven HTTPS endpoint, e.g. `https://my-domain-111122223333.d.codeartifact.us-east-1.amazonaws.com/maven/my-repo/` |
+| `CODEARTIFACT_DOMAIN` | yes | CodeArtifact domain name. Setting this selects the CodeArtifact path. |
+| `CODEARTIFACT_DOMAIN_OWNER` | optional | AWS account ID that owns the domain. Derived from `PUBLISH_URL` when unset; set it explicitly if your endpoint host does not follow the standard format. |
+| `CODEARTIFACT_REGION` | optional | AWS region of the domain. Derived from `PUBLISH_URL` when unset. |
+| `CODEARTIFACT_TOKEN_DURATION` | optional | Token lifetime in seconds (default 12h; `0` ties it to the role session, which can be shorter than 12h under a capped assumed-role session). |
+
+Do not set `PUBLISH_USER`/`PUBLISH_PASSWORD` for CodeArtifact; the script authenticates the publish target with `aws` and the current token directly. Set `BATCH_SIZE` so each batch completes inside the token lifetime: the token is refreshed once per batch, so an unbatched run (the default) or org mode (`-o`) mints it only once and a build/publish that runs past the expiry will fail.
+
+### Known limitations
+
+- **Organization catalog updates fail after the first publish.** After publishing LSTs, `mod publish` maintains a central catalog CSV (`repos-lock.csv`) at a fixed Maven coordinate by downloading, merging, and re-uploading it. CodeArtifact package assets are immutable (re-publishing the same asset with different content returns HTTP 409), so from the second publish onward `mod publish` reports `Failed to update central effective repos-lock.csv` and the catalog stays at its first-publish contents. The LST JARs themselves publish at unique coordinates and are unaffected, but if your Moderne tenant reads its organization structure from this catalog (`moderne.organization.sources.*`), repos from later batches or runs will not appear in it until CodeArtifact supports overwriting the asset or the CLI handles it natively. Workaround: delete the `repos-lock` package version in CodeArtifact (`aws codeartifact delete-package-versions`) before a re-ingest so the first publish of the run recreates the catalog; note that in a batched run only that first publish succeeds in writing it, so a complete catalog requires an unbatched or org-mode run.
+- **Build logs are not stored in CodeArtifact.** Its Maven endpoint rejects non-Maven log artifact paths, so publish.sh skips the log upload (the logs remain in the local `log.zip`/`syncs.zip`).
+- **Package versions show as "Unfinished" in the CodeArtifact console.** The CLI uploads artifacts directly without a `maven-metadata.xml`, which CodeArtifact uses to mark versions "Published". Unfinished versions are excluded from version listings but remain downloadable at their direct URLs, which is how the platform consumes them.
+- This CodeArtifact path is implemented in `publish.sh` (bash) only; the PowerShell `publish.ps1` entrypoint does not include it.
+
+### Example
+
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  -v $(pwd)/data:/var/moderne \
+  -e PUBLISH_URL=https://my-domain-111122223333.d.codeartifact.us-east-1.amazonaws.com/maven/my-repo/ \
+  -e CODEARTIFACT_DOMAIN=my-domain \
+  -e CODEARTIFACT_DOMAIN_OWNER=111122223333 \
+  -e CODEARTIFACT_REGION=us-east-1 \
+  -e BATCH_SIZE=50 \
+  mass-ingest
+```
 
 ## Generating repository lists
 

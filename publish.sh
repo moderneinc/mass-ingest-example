@@ -99,6 +99,7 @@ ingest_repos() {
     mod git sync csv "$clone_dir" "$csv_file" --organization "$ORGANIZATION" --with-sources
     mod log syncs add "$clone_dir" "$DATA_DIR/syncs.zip" --last-sync
     mod git pull "$clone_dir"
+    refresh_codeartifact_token || info "Token refresh failed; continuing with the existing token"
     mod build "$clone_dir" --no-download
     mod publish "$clone_dir"
     mod log builds add "$clone_dir" "$DATA_DIR/log.zip" --last-build
@@ -152,6 +153,12 @@ run_startup_diagnostics() {
 configure_credentials() {
   info "Configuring credentials"
 
+  # BATCH_SIZE is consumed as a number by every publish path (split_into_batches); a
+  # non-numeric value would otherwise surface as an opaque bash arithmetic error.
+  if [ -n "${BATCH_SIZE:-}" ] && ! [[ "${BATCH_SIZE}" =~ ^[0-9]+$ ]]; then
+    die "BATCH_SIZE must be a non-negative integer, not '${BATCH_SIZE}'"
+  fi
+
   # Configure Moderne tenant if token provided
   if [ -n "${MODERNE_TOKEN:-}" ] && [ -n "${MODERNE_TENANT:-}" ]; then
     info "Configuring Moderne tenant: ${MODERNE_TENANT}"
@@ -169,8 +176,11 @@ configure_credentials() {
   fi
 
   # Configure artifact repository
+  # AWS CodeArtifact (Maven repo with a short-lived, rotating auth token)
+  if [ -n "${CODEARTIFACT_DOMAIN:-}" ]; then
+    configure_codeartifact
   # S3 configuration (S3 bucket URL should start with s3://)
-  if [[ "${PUBLISH_URL:-}" == "s3://"* ]]; then
+  elif [[ "${PUBLISH_URL:-}" == "s3://"* ]]; then
     info "Configuring S3 artifact repository: ${PUBLISH_URL}"
 
     # Build the command with proper quoting
@@ -205,6 +215,94 @@ configure_credentials() {
   else
     die "PUBLISH_URL must be supplied via environment variable. For S3, use s3:// URL format. For Maven/Artifactory, also provide PUBLISH_USER/PUBLISH_PASSWORD or PUBLISH_TOKEN"
   fi
+}
+
+# CodeArtifact's Basic-auth token expires within 12h, so it is minted at runtime and
+# refreshed before every batch; the same token reaches the build through
+# maven/settings-codeartifact.xml and gradle/init-codeartifact.gradle, which both read
+# ${CODEARTIFACT_AUTH_TOKEN}.
+configure_codeartifact() {
+  if [ -z "${PUBLISH_URL:-}" ]; then
+    die "PUBLISH_URL must point at the CodeArtifact Maven endpoint when CODEARTIFACT_DOMAIN is set (e.g. https://<domain>-<owner>.d.codeartifact.<region>.amazonaws.com/maven/<repository>/)"
+  fi
+  if [[ "${PUBLISH_URL}" != "https://"* && "${PUBLISH_URL}" != "http://"* ]]; then
+    die "PUBLISH_URL must be the CodeArtifact Maven HTTPS endpoint, not '${PUBLISH_URL}'. Unset CODEARTIFACT_DOMAIN to use S3/Artifactory instead."
+  fi
+  info "Configuring AWS CodeArtifact Maven repository: ${PUBLISH_URL}"
+
+  # The domain owner (12-digit account id) and region are embedded in the CodeArtifact
+  # host (<domain>-<owner>.d.codeartifact.<region>.amazonaws.com). Derive them so the
+  # token is always minted against the right account/region even when not set explicitly
+  # (the caller's default account/region is often wrong for a central artifacts account).
+  local host="${PUBLISH_URL#*://}"; host="${host%%/*}"
+  if [[ "$host" =~ -([0-9]{12})\.d\.codeartifact\.([a-z0-9-]+)\. ]]; then
+    export CODEARTIFACT_DOMAIN_OWNER="${CODEARTIFACT_DOMAIN_OWNER:-${BASH_REMATCH[1]}}"
+    export CODEARTIFACT_REGION="${CODEARTIFACT_REGION:-${BASH_REMATCH[2]}}"
+  fi
+
+  # Register the Maven settings at runtime, only when CodeArtifact is selected: its catch-all
+  # mirror reads ${env.PUBLISH_URL}, so baking it in would break Maven builds in a
+  # non-CodeArtifact run of the same image. A user-provided /root/.m2/settings.xml (the
+  # "Custom Maven Settings" Dockerfile section) takes precedence.
+  if [ ! -f /root/.m2/settings.xml ] && [ -f /app/maven/settings-codeartifact.xml ]; then
+    mod config build maven settings edit /app/maven/settings-codeartifact.xml
+  fi
+
+  if [ ! -f /root/.m2/settings.xml ] && [ ! -f /app/maven/settings-codeartifact.xml ] && [ ! -f /app/gradle/init-codeartifact.gradle ]; then
+    info "WARNING: CodeArtifact is configured for publishing, but no build dependency wiring was found. Uncomment the CodeArtifact build-tool lines in the Dockerfile so dependencies resolve from CodeArtifact rather than public repositories."
+  fi
+
+  # The token is refreshed per batch, so anything that does not batch (org mode, or the
+  # default single-batch run) mints it only once and risks a build/publish past its expiry.
+  if [ -n "${ORGANIZATION:-}" ]; then
+    info "WARNING: org mode mints the CodeArtifact token once for the whole org. A build/publish that runs past the token lifetime will fail; raise CODEARTIFACT_TOKEN_DURATION or split the org if it is large."
+  elif [[ "${BATCH_SIZE:-0}" -le 0 ]]; then
+    info "WARNING: CodeArtifact tokens expire within 12h and are refreshed once per batch. Set BATCH_SIZE so each batch completes inside the token lifetime for long runs."
+  fi
+
+  refresh_codeartifact_token || die "Unable to configure the CodeArtifact publish target"
+}
+
+# No-op when CodeArtifact is not in use, so it is safe to call unconditionally before each
+# batch. Returns non-zero rather than aborting, so a transient failure mid-run does not
+# discard the remaining batches.
+refresh_codeartifact_token() {
+  [ -n "${CODEARTIFACT_DOMAIN:-}" ] || return 0
+
+  info "Refreshing AWS CodeArtifact authorization token"
+
+  local get_token_cmd=(aws codeartifact get-authorization-token
+    --domain "${CODEARTIFACT_DOMAIN}"
+    --query authorizationToken --output text)
+  if [ -n "${CODEARTIFACT_DOMAIN_OWNER:-}" ]; then
+    get_token_cmd+=(--domain-owner "${CODEARTIFACT_DOMAIN_OWNER}")
+  fi
+  if [ -n "${CODEARTIFACT_REGION:-}" ]; then
+    get_token_cmd+=(--region "${CODEARTIFACT_REGION}")
+  fi
+  if [ -n "${CODEARTIFACT_TOKEN_DURATION:-}" ]; then
+    get_token_cmd+=(--duration-seconds "${CODEARTIFACT_TOKEN_DURATION}")
+  fi
+
+  local token
+  if ! token=$("${get_token_cmd[@]}"); then
+    info "Failed to obtain a CodeArtifact authorization token (check that the AWS CLI is installed and IAM permissions / CODEARTIFACT_* settings are correct)"
+    return 1
+  fi
+  if [ -z "$token" ] || [ "$token" = "None" ]; then
+    info "CodeArtifact returned an empty authorization token"
+    return 1
+  fi
+
+  # CodeArtifact's Basic-auth username is always "aws".
+  if ! mod config lsts artifacts maven edit "${PUBLISH_URL}" --user aws --password "$token"; then
+    info "Failed to apply the CodeArtifact token to the publish configuration"
+    return 1
+  fi
+
+  # Exported only after the publish config accepted the token, so the build and the publish
+  # step never end up on different tokens.
+  export CODEARTIFACT_AUTH_TOKEN="$token"
 }
 
 # Clean any existing files
@@ -295,6 +393,10 @@ build_and_upload_repos() {
   mod git sync csv "$clone_dir" "$partition_file" --with-sources
   mod log syncs add "$clone_dir" "$DATA_DIR/syncs.zip" --last-sync
 
+  # Refreshed after the (potentially long) clone and right before the build/publish that use
+  # it, so the token can't expire mid-batch.
+  refresh_codeartifact_token || info "Token refresh failed; continuing with the existing token"
+
   # kill a build if it takes too long assuming it's hung indefinitely
   # defaults to 2700 seconds (45 minutes)
   local build_timeout="${BUILD_TIMEOUT:-2700}"
@@ -312,6 +414,13 @@ build_and_upload_repos() {
 send_logs() {
   local index=$1
   local timestamp=$(date +"%Y%m%d%H%M")
+
+  # CodeArtifact's Maven endpoint rejects the non-Maven log artifact paths, so skip the
+  # upload rather than issue a PUT that always 400s. Logs stay in the local log.zip/syncs.zip.
+  if [ -n "${CODEARTIFACT_DOMAIN:-}" ]; then
+    info "Skipping build-log upload: AWS CodeArtifact does not accept non-Maven log artifacts"
+    return 0
+  fi
 
   # Upload logs to S3
   if [[ "${PUBLISH_URL:-}" == "s3://"* ]]; then
