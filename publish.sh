@@ -153,8 +153,6 @@ run_startup_diagnostics() {
 configure_credentials() {
   info "Configuring credentials"
 
-  # BATCH_SIZE is consumed as a number by every publish path (split_into_batches); a
-  # non-numeric value would otherwise surface as an opaque bash arithmetic error.
   if [ -n "${BATCH_SIZE:-}" ] && ! [[ "${BATCH_SIZE}" =~ ^[0-9]+$ ]]; then
     die "BATCH_SIZE must be a non-negative integer, not '${BATCH_SIZE}'"
   fi
@@ -176,10 +174,8 @@ configure_credentials() {
   fi
 
   # Configure artifact repository
-  # AWS CodeArtifact (Maven repo with a short-lived, rotating auth token)
   if [ -n "${CODEARTIFACT_DOMAIN:-}" ]; then
     configure_codeartifact
-  # S3 configuration (S3 bucket URL should start with s3://)
   elif [[ "${PUBLISH_URL:-}" == "s3://"* ]]; then
     info "Configuring S3 artifact repository: ${PUBLISH_URL}"
 
@@ -231,9 +227,7 @@ configure_codeartifact() {
   info "Configuring AWS CodeArtifact Maven repository: ${PUBLISH_URL}"
 
   # The domain owner (12-digit account id) and region are embedded in the CodeArtifact
-  # host (<domain>-<owner>.d.codeartifact.<region>.amazonaws.com). Derive them so the
-  # token is always minted against the right account/region even when not set explicitly
-  # (the caller's default account/region is often wrong for a central artifacts account).
+  # host (<domain>-<owner>.d.codeartifact.<region>.amazonaws.com).
   local host="${PUBLISH_URL#*://}"; host="${host%%/*}"
   if [[ "$host" =~ -([0-9]{12})\.d\.codeartifact\.([a-z0-9-]+)\. ]]; then
     export CODEARTIFACT_DOMAIN_OWNER="${CODEARTIFACT_DOMAIN_OWNER:-${BASH_REMATCH[1]}}"
@@ -252,8 +246,6 @@ configure_codeartifact() {
     info "WARNING: CodeArtifact is configured for publishing, but no build dependency wiring was found. Uncomment the CodeArtifact build-tool lines in the Dockerfile so dependencies resolve from CodeArtifact rather than public repositories."
   fi
 
-  # The token is refreshed per batch, so anything that does not batch (org mode, or the
-  # default single-batch run) mints it only once and risks a build/publish past its expiry.
   if [ -n "${ORGANIZATION:-}" ]; then
     info "WARNING: org mode mints the CodeArtifact token once for the whole org. A build/publish that runs past the token lifetime will fail; raise CODEARTIFACT_TOKEN_DURATION or split the org if it is large."
   elif [[ "${BATCH_SIZE:-0}" -le 0 ]]; then
@@ -263,9 +255,7 @@ configure_codeartifact() {
   refresh_codeartifact_token || die "Unable to configure the CodeArtifact publish target"
 }
 
-# No-op when CodeArtifact is not in use, so it is safe to call unconditionally before each
-# batch. Returns non-zero rather than aborting, so a transient failure mid-run does not
-# discard the remaining batches.
+# No-op when CodeArtifact is not in use. transient failure mid-run does not discard the remaining batches.
 refresh_codeartifact_token() {
   [ -n "${CODEARTIFACT_DOMAIN:-}" ] || return 0
 
@@ -294,14 +284,11 @@ refresh_codeartifact_token() {
     return 1
   fi
 
-  # CodeArtifact's Basic-auth username is always "aws".
   if ! mod config lsts artifacts maven edit "${PUBLISH_URL}" --user aws --password "$token"; then
     info "Failed to apply the CodeArtifact token to the publish configuration"
     return 1
   fi
 
-  # Exported only after the publish config accepted the token, so the build and the publish
-  # step never end up on different tokens.
   export CODEARTIFACT_AUTH_TOKEN="$token"
 }
 
@@ -393,8 +380,6 @@ build_and_upload_repos() {
   mod git sync csv "$clone_dir" "$partition_file" --with-sources
   mod log syncs add "$clone_dir" "$DATA_DIR/syncs.zip" --last-sync
 
-  # Refreshed after the (potentially long) clone and right before the build/publish that use
-  # it, so the token can't expire mid-batch.
   refresh_codeartifact_token || info "Token refresh failed; continuing with the existing token"
 
   # kill a build if it takes too long assuming it's hung indefinitely
@@ -415,8 +400,6 @@ send_logs() {
   local index=$1
   local timestamp=$(date +"%Y%m%d%H%M")
 
-  # CodeArtifact's Maven endpoint rejects the non-Maven log artifact paths, so skip the
-  # upload rather than issue a PUT that always 400s. Logs stay in the local log.zip/syncs.zip.
   if [ -n "${CODEARTIFACT_DOMAIN:-}" ]; then
     info "Skipping build-log upload: AWS CodeArtifact does not accept non-Maven log artifacts"
     return 0
