@@ -102,6 +102,7 @@ ingest_repos() {
     refresh_codeartifact_token || info "Token refresh failed; continuing with the existing token"
     mod build "$clone_dir" --no-download
     mod publish "$clone_dir"
+    finalize_codeartifact_versions "$csv_file" || info "Some CodeArtifact versions could not be finalized"
     mod log builds add "$clone_dir" "$DATA_DIR/log.zip" --last-build
     send_logs "org-$ORGANIZATION"
   else
@@ -243,7 +244,7 @@ configure_codeartifact() {
   fi
 
   if [ ! -f /root/.m2/settings.xml ] && [ ! -f /app/maven/settings-codeartifact.xml ] && [ ! -f /app/gradle/init-codeartifact.gradle ]; then
-    info "WARNING: CodeArtifact is configured for publishing, but no build dependency wiring was found. Uncomment the CodeArtifact build-tool lines in the Dockerfile so dependencies resolve from CodeArtifact rather than public repositories."
+    info "WARNING: CodeArtifact is configured for publishing, but no build dependency configuration was found. Uncomment the CodeArtifact build-tool lines in the Dockerfile so dependencies resolve from CodeArtifact rather than public repositories."
   fi
 
   if [ -n "${ORGANIZATION:-}" ]; then
@@ -284,12 +285,86 @@ refresh_codeartifact_token() {
     return 1
   fi
 
-  if ! mod config lsts artifacts maven edit "${PUBLISH_URL}" --user aws --password "$token"; then
+  if ! mod config lsts artifacts maven add "${PUBLISH_URL}" --user aws --password "$token"; then
     info "Failed to apply the CodeArtifact token to the publish configuration"
     return 1
   fi
 
   export CODEARTIFACT_AUTH_TOKEN="$token"
+}
+
+# CodeArtifact marks versions uploaded without a maven-metadata.xml as Unfinished, and its
+# Maven endpoint returns 404 for every asset of an Unfinished version.
+# see https://docs.aws.amazon.com/codeartifact/latest/ug/maven-curl.html
+# No-op when CodeArtifact is not in use; a failure leaves the versions hidden but recoverable
+# (rerun `aws codeartifact update-package-versions-status` manually), so callers only warn.
+finalize_codeartifact_versions() {
+  [ -n "${CODEARTIFACT_DOMAIN:-}" ] || return 0
+
+  local csv_file=$1
+  info "Finalizing CodeArtifact package versions to Published status"
+
+  # <domain>-<owner>.d.codeartifact.<region>.amazonaws.com/maven/<repository>/
+  local repository="${PUBLISH_URL##*/maven/}"
+  repository="${repository%%/*}"
+  if [ -z "$repository" ]; then
+    info "Could not derive the CodeArtifact repository name from PUBLISH_URL '${PUBLISH_URL}'"
+    return 1
+  fi
+
+  local aws_args=(--domain "${CODEARTIFACT_DOMAIN}" --repository "$repository" --format maven)
+  if [ -n "${CODEARTIFACT_DOMAIN_OWNER:-}" ]; then
+    aws_args+=(--domain-owner "${CODEARTIFACT_DOMAIN_OWNER}")
+  fi
+  if [ -n "${CODEARTIFACT_REGION:-}" ]; then
+    aws_args+=(--region "${CODEARTIFACT_REGION}")
+  fi
+
+  local path_column
+  path_column=$(head -n 1 "$csv_file" | tr -d '\r' | tr ',' '\n' | grep -n -x -i 'path' | cut -d: -f1)
+  if [ -z "$path_column" ]; then
+    info "No path column found in $csv_file; only finalizing the organization catalog packages"
+  fi
+
+  local coordinates
+  coordinates=$(
+    if [ -n "$path_column" ]; then
+      tail -n +2 "$csv_file" | cut -d, -f"$path_column" | tr -d '\r' | while IFS= read -r path; do
+        path="${path%/}"
+        if [[ "$path" == */* ]]; then
+          printf '%s %s\n' "$(dirname "$path" | tr '/' '.')" "$(basename "$path")"
+        fi
+      done
+    fi
+    # the organization catalog packages mod publish maintains alongside the LSTs
+    printf 'io.moderne.organization.sources repos\n'
+    printf 'io.moderne.organization.sources repos-lock\n'
+  )
+
+  local failed=0
+  local namespace package versions
+  while read -r namespace package; do
+    [ -n "$package" ] || continue
+    # a package is absent when its repository failed to build, or on the catalog packages
+    # before the first successful publish; both are expected, so a failed listing is skipped
+    versions=$(aws codeartifact list-package-versions "${aws_args[@]}" \
+      --namespace "$namespace" --package "$package" --status Unfinished \
+      --query 'versions[?origin.originType==`INTERNAL`].version' --output text 2>/dev/null) || continue
+    if [ -z "$versions" ] || [ "$versions" = "None" ]; then
+      continue
+    fi
+    # shellcheck disable=SC2086 # versions is a tab-separated list that must word-split
+    if aws codeartifact update-package-versions-status "${aws_args[@]}" \
+        --namespace "$namespace" --package "$package" --versions $versions \
+        --target-status Published > /dev/null; then
+      info "Published CodeArtifact version(s) of ${namespace}:${package}"
+    else
+      info "Failed to finalize ${namespace}:${package} version(s) ${versions}; they stay hidden from the Maven endpoint until published manually"
+      failed=1
+    fi
+  done <<< "$coordinates"
+
+  return $failed
 }
 
 # Clean any existing files
@@ -392,6 +467,7 @@ build_and_upload_repos() {
   fi
 
   mod publish "$clone_dir"
+  finalize_codeartifact_versions "$partition_file" || info "Some CodeArtifact versions could not be finalized"
   mod log builds add "$clone_dir" "$DATA_DIR/log.zip" --last-build
   return $ret
 }

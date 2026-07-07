@@ -328,7 +328,7 @@ RUN git config --global credential.helper "store --file=/root/.git-credentials"
 ################################################################################
 # Publish LSTs to and resolve build dependencies from AWS CodeArtifact.
 # CodeArtifact tokens are short-lived (max 12h), so publish.sh mints and refreshes
-# them at runtime; only the build wiring below is baked into the image.
+# them at runtime; only the build configuration below is baked into the image.
 #
 # 1. Uncomment the AWS CLI install block above (required to mint tokens).
 # 2. Uncomment the lines below for the build tool(s) your repositories use.
