@@ -99,8 +99,10 @@ ingest_repos() {
     mod git sync csv "$clone_dir" "$csv_file" --organization "$ORGANIZATION" --with-sources
     mod log syncs add "$clone_dir" "$DATA_DIR/syncs.zip" --last-sync
     mod git pull "$clone_dir"
+    refresh_codeartifact_token || info "Token refresh failed; continuing with the existing token"
     mod build "$clone_dir" --no-download
     mod publish "$clone_dir"
+    finalize_codeartifact_versions "$csv_file" || info "Some CodeArtifact versions could not be finalized"
     mod log builds add "$clone_dir" "$DATA_DIR/log.zip" --last-build
     send_logs "org-$ORGANIZATION"
   else
@@ -152,6 +154,10 @@ run_startup_diagnostics() {
 configure_credentials() {
   info "Configuring credentials"
 
+  if [ -n "${BATCH_SIZE:-}" ] && ! [[ "${BATCH_SIZE}" =~ ^[0-9]+$ ]]; then
+    die "BATCH_SIZE must be a non-negative integer, not '${BATCH_SIZE}'"
+  fi
+
   # Configure Moderne tenant if token provided
   if [ -n "${MODERNE_TOKEN:-}" ] && [ -n "${MODERNE_TENANT:-}" ]; then
     info "Configuring Moderne tenant: ${MODERNE_TENANT}"
@@ -169,8 +175,9 @@ configure_credentials() {
   fi
 
   # Configure artifact repository
-  # S3 configuration (S3 bucket URL should start with s3://)
-  if [[ "${PUBLISH_URL:-}" == "s3://"* ]]; then
+  if [ -n "${CODEARTIFACT_DOMAIN:-}" ]; then
+    configure_codeartifact
+  elif [[ "${PUBLISH_URL:-}" == "s3://"* ]]; then
     info "Configuring S3 artifact repository: ${PUBLISH_URL}"
 
     # Build the command with proper quoting
@@ -205,6 +212,159 @@ configure_credentials() {
   else
     die "PUBLISH_URL must be supplied via environment variable. For S3, use s3:// URL format. For Maven/Artifactory, also provide PUBLISH_USER/PUBLISH_PASSWORD or PUBLISH_TOKEN"
   fi
+}
+
+# CodeArtifact's Basic-auth token expires within 12h, so it is minted at runtime and
+# refreshed before every batch; the same token reaches the build through
+# maven/settings-codeartifact.xml and gradle/init-codeartifact.gradle, which both read
+# ${CODEARTIFACT_AUTH_TOKEN}.
+configure_codeartifact() {
+  if [ -z "${PUBLISH_URL:-}" ]; then
+    die "PUBLISH_URL must point at the CodeArtifact Maven endpoint when CODEARTIFACT_DOMAIN is set (e.g. https://<domain>-<owner>.d.codeartifact.<region>.amazonaws.com/maven/<repository>/)"
+  fi
+  if [[ "${PUBLISH_URL}" != "https://"* && "${PUBLISH_URL}" != "http://"* ]]; then
+    die "PUBLISH_URL must be the CodeArtifact Maven HTTPS endpoint, not '${PUBLISH_URL}'. Unset CODEARTIFACT_DOMAIN to use S3/Artifactory instead."
+  fi
+  info "Configuring AWS CodeArtifact Maven repository: ${PUBLISH_URL}"
+
+  # The domain owner (12-digit account id) and region are embedded in the CodeArtifact
+  # host (<domain>-<owner>.d.codeartifact.<region>.amazonaws.com).
+  local host="${PUBLISH_URL#*://}"; host="${host%%/*}"
+  if [[ "$host" =~ -([0-9]{12})\.d\.codeartifact\.([a-z0-9-]+)\. ]]; then
+    export CODEARTIFACT_DOMAIN_OWNER="${CODEARTIFACT_DOMAIN_OWNER:-${BASH_REMATCH[1]}}"
+    export CODEARTIFACT_REGION="${CODEARTIFACT_REGION:-${BASH_REMATCH[2]}}"
+  fi
+
+  # Register the Maven settings at runtime, only when CodeArtifact is selected: its catch-all
+  # mirror reads ${env.PUBLISH_URL}, so baking it in would break Maven builds in a
+  # non-CodeArtifact run of the same image. A user-provided /root/.m2/settings.xml (the
+  # "Custom Maven Settings" Dockerfile section) takes precedence.
+  if [ ! -f /root/.m2/settings.xml ] && [ -f /app/maven/settings-codeartifact.xml ]; then
+    mod config build maven settings edit /app/maven/settings-codeartifact.xml
+  fi
+
+  if [ ! -f /root/.m2/settings.xml ] && [ ! -f /app/maven/settings-codeartifact.xml ] && [ ! -f /app/gradle/init-codeartifact.gradle ]; then
+    info "WARNING: CodeArtifact is configured for publishing, but no build dependency configuration was found. Uncomment the CodeArtifact build-tool lines in the Dockerfile so dependencies resolve from CodeArtifact rather than public repositories."
+  fi
+
+  if [ -n "${ORGANIZATION:-}" ]; then
+    info "WARNING: org mode mints the CodeArtifact token once for the whole org. A build/publish that runs past the token lifetime will fail; raise CODEARTIFACT_TOKEN_DURATION or split the org if it is large."
+  elif [[ "${BATCH_SIZE:-0}" -le 0 ]]; then
+    info "WARNING: CodeArtifact tokens expire within 12h and are refreshed once per batch. Set BATCH_SIZE so each batch completes inside the token lifetime for long runs."
+  fi
+
+  refresh_codeartifact_token || die "Unable to configure the CodeArtifact publish target"
+}
+
+# No-op when CodeArtifact is not in use. transient failure mid-run does not discard the remaining batches.
+refresh_codeartifact_token() {
+  [ -n "${CODEARTIFACT_DOMAIN:-}" ] || return 0
+
+  info "Refreshing AWS CodeArtifact authorization token"
+
+  local get_token_cmd=(aws codeartifact get-authorization-token
+    --domain "${CODEARTIFACT_DOMAIN}"
+    --query authorizationToken --output text)
+  if [ -n "${CODEARTIFACT_DOMAIN_OWNER:-}" ]; then
+    get_token_cmd+=(--domain-owner "${CODEARTIFACT_DOMAIN_OWNER}")
+  fi
+  if [ -n "${CODEARTIFACT_REGION:-}" ]; then
+    get_token_cmd+=(--region "${CODEARTIFACT_REGION}")
+  fi
+  if [ -n "${CODEARTIFACT_TOKEN_DURATION:-}" ]; then
+    get_token_cmd+=(--duration-seconds "${CODEARTIFACT_TOKEN_DURATION}")
+  fi
+
+  local token
+  if ! token=$("${get_token_cmd[@]}"); then
+    info "Failed to obtain a CodeArtifact authorization token (check that the AWS CLI is installed and IAM permissions / CODEARTIFACT_* settings are correct)"
+    return 1
+  fi
+  if [ -z "$token" ] || [ "$token" = "None" ]; then
+    info "CodeArtifact returned an empty authorization token"
+    return 1
+  fi
+
+  if ! mod config lsts artifacts maven add "${PUBLISH_URL}" --user aws --password "$token"; then
+    info "Failed to apply the CodeArtifact token to the publish configuration"
+    return 1
+  fi
+
+  export CODEARTIFACT_AUTH_TOKEN="$token"
+}
+
+# CodeArtifact marks versions uploaded without a maven-metadata.xml as Unfinished, and its
+# Maven endpoint returns 404 for every asset of an Unfinished version.
+# see https://docs.aws.amazon.com/codeartifact/latest/ug/maven-curl.html
+# No-op when CodeArtifact is not in use; a failure leaves the versions hidden but recoverable
+# (rerun `aws codeartifact update-package-versions-status` manually), so callers only warn.
+finalize_codeartifact_versions() {
+  [ -n "${CODEARTIFACT_DOMAIN:-}" ] || return 0
+
+  local csv_file=$1
+  info "Finalizing CodeArtifact package versions to Published status"
+
+  # <domain>-<owner>.d.codeartifact.<region>.amazonaws.com/maven/<repository>/
+  local repository="${PUBLISH_URL##*/maven/}"
+  repository="${repository%%/*}"
+  if [ -z "$repository" ]; then
+    info "Could not derive the CodeArtifact repository name from PUBLISH_URL '${PUBLISH_URL}'"
+    return 1
+  fi
+
+  local aws_args=(--domain "${CODEARTIFACT_DOMAIN}" --repository "$repository" --format maven)
+  if [ -n "${CODEARTIFACT_DOMAIN_OWNER:-}" ]; then
+    aws_args+=(--domain-owner "${CODEARTIFACT_DOMAIN_OWNER}")
+  fi
+  if [ -n "${CODEARTIFACT_REGION:-}" ]; then
+    aws_args+=(--region "${CODEARTIFACT_REGION}")
+  fi
+
+  local path_column
+  path_column=$(head -n 1 "$csv_file" | tr -d '\r' | tr ',' '\n' | grep -n -x -i 'path' | cut -d: -f1)
+  if [ -z "$path_column" ]; then
+    info "No path column found in $csv_file; only finalizing the organization catalog packages"
+  fi
+
+  local coordinates
+  coordinates=$(
+    if [ -n "$path_column" ]; then
+      tail -n +2 "$csv_file" | cut -d, -f"$path_column" | tr -d '\r' | while IFS= read -r path; do
+        path="${path%/}"
+        if [[ "$path" == */* ]]; then
+          printf '%s %s\n' "$(dirname "$path" | tr '/' '.')" "$(basename "$path")"
+        fi
+      done
+    fi
+    # the organization catalog packages mod publish maintains alongside the LSTs
+    printf 'io.moderne.organization.sources repos\n'
+    printf 'io.moderne.organization.sources repos-lock\n'
+  )
+
+  local failed=0
+  local namespace package versions
+  while read -r namespace package; do
+    [ -n "$package" ] || continue
+    # a package is absent when its repository failed to build, or on the catalog packages
+    # before the first successful publish; both are expected, so a failed listing is skipped
+    versions=$(aws codeartifact list-package-versions "${aws_args[@]}" \
+      --namespace "$namespace" --package "$package" --status Unfinished \
+      --query 'versions[?origin.originType==`INTERNAL`].version' --output text 2>/dev/null) || continue
+    if [ -z "$versions" ] || [ "$versions" = "None" ]; then
+      continue
+    fi
+    # shellcheck disable=SC2086 # versions is a tab-separated list that must word-split
+    if aws codeartifact update-package-versions-status "${aws_args[@]}" \
+        --namespace "$namespace" --package "$package" --versions $versions \
+        --target-status Published > /dev/null; then
+      info "Published CodeArtifact version(s) of ${namespace}:${package}"
+    else
+      info "Failed to finalize ${namespace}:${package} version(s) ${versions}; they stay hidden from the Maven endpoint until published manually"
+      failed=1
+    fi
+  done <<< "$coordinates"
+
+  return $failed
 }
 
 # Clean any existing files
@@ -295,6 +455,8 @@ build_and_upload_repos() {
   mod git sync csv "$clone_dir" "$partition_file" --with-sources
   mod log syncs add "$clone_dir" "$DATA_DIR/syncs.zip" --last-sync
 
+  refresh_codeartifact_token || info "Token refresh failed; continuing with the existing token"
+
   # kill a build if it takes too long assuming it's hung indefinitely
   # defaults to 2700 seconds (45 minutes)
   local build_timeout="${BUILD_TIMEOUT:-2700}"
@@ -305,6 +467,7 @@ build_and_upload_repos() {
   fi
 
   mod publish "$clone_dir"
+  finalize_codeartifact_versions "$partition_file" || info "Some CodeArtifact versions could not be finalized"
   mod log builds add "$clone_dir" "$DATA_DIR/log.zip" --last-build
   return $ret
 }
@@ -312,6 +475,11 @@ build_and_upload_repos() {
 send_logs() {
   local index=$1
   local timestamp=$(date +"%Y%m%d%H%M")
+
+  if [ -n "${CODEARTIFACT_DOMAIN:-}" ]; then
+    info "Skipping build-log upload: AWS CodeArtifact does not accept non-Maven log artifacts"
+    return 0
+  fi
 
   # Upload logs to S3
   if [[ "${PUBLISH_URL:-}" == "s3://"* ]]; then

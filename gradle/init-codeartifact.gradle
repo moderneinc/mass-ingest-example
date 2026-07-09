@@ -1,0 +1,90 @@
+// Injects an AWS CodeArtifact Maven repository (with credentials) into every Gradle
+// build the Moderne CLI runs, so dependency and plugin resolution can reach CodeArtifact
+// without modifying each project. Registered via:
+//   mod config build gradle arguments edit --init-script=/app/gradle/init-codeartifact.gradle
+//
+// The endpoint comes from PUBLISH_URL and the token from CODEARTIFACT_AUTH_TOKEN, both
+// set by publish.sh. The token is short-lived and refreshed before every build, so the
+// build always sees a valid token.
+def codeartifactUrl = System.getenv("PUBLISH_URL")
+def codeartifactToken = System.getenv("CODEARTIFACT_AUTH_TOKEN")
+
+if (codeartifactUrl && codeartifactToken) {
+    def applyRepo = { repositories ->
+        // Don't clash with a repository the target project already named "codeartifact".
+        if (repositories.findByName("codeartifact") == null) {
+            repositories.maven {
+                name = "codeartifact"
+                url = uri(codeartifactUrl)
+                credentials {
+                    username = "aws"
+                    password = codeartifactToken
+                }
+            }
+        }
+    }
+
+    // Fully qualified: GradleVersion is not in the default script imports before ~7.1,
+    // and an unresolvable reference here would fail every build on exactly the older
+    // Gradle versions the gates below exist for.
+    def current = org.gradle.util.GradleVersion.current()
+    def hasBeforeSettings = current >= org.gradle.util.GradleVersion.version("6.0")  // Gradle.beforeSettings
+    def hasCentralRepos = current >= org.gradle.util.GradleVersion.version("6.8")    // dependencyResolutionManagement
+
+    // Plugin resolution (and the settings script's own buildscript classpath): both must be
+    // in place before the settings script is evaluated.
+    if (hasBeforeSettings) {
+        beforeSettings { settings ->
+            applyRepo(settings.pluginManagement.repositories)
+            applyRepo(settings.buildscript.repositories)
+        }
+    } else {
+        // Too late for the settings buildscript classpath (already resolved), but still in
+        // time for plugin resolution in project scripts.
+        settingsEvaluated { settings ->
+            applyRepo(settings.pluginManagement.repositories)
+        }
+    }
+
+    if (hasCentralRepos) {
+        // Dependency resolution on 6.8+. Add CodeArtifact to the settings-level (centralized)
+        // repositories after the settings script has declared its own, so the existing
+        // repositories keep priority. This covers PREFER_SETTINGS, FAIL_ON_PROJECT_REPOS, and
+        // PREFER_PROJECT projects that declare no project repositories of their own.
+        def preferProject = false
+        settingsEvaluated { settings ->
+            applyRepo(settings.dependencyResolutionManagement.repositories)
+            preferProject = settings.dependencyResolutionManagement.repositoriesMode.get() ==
+                    org.gradle.api.initialization.resolve.RepositoriesMode.PREFER_PROJECT
+        }
+        // Under PREFER_PROJECT a project that declares its own repositories ignores the
+        // settings repositories, so CodeArtifact must also be added at project level — but
+        // ONLY for those projects. Adding it to a project that relies solely on settings
+        // repositories would introduce its first project repository and thereby flip it off
+        // the settings repositories (dropping e.g. mavenCentral). Checked after evaluation so
+        // the project's own declarations are visible, and appended so they keep priority.
+        // buildscript repositories are never governed by repositoriesMode, so they are always
+        // safe to add for legacy plugin classpaths.
+        allprojects { project ->
+            project.buildscript {
+                applyRepo(repositories)
+            }
+            if (preferProject) {
+                project.afterEvaluate { p ->
+                    if (!p.repositories.isEmpty()) {
+                        applyRepo(p.repositories)
+                    }
+                }
+            }
+        }
+    } else {
+        // Pre-6.8 Gradle has no centralized repositories; project repositories are the only
+        // mechanism and are purely additive, so CodeArtifact can always be added there.
+        allprojects { project ->
+            project.buildscript {
+                applyRepo(repositories)
+            }
+            applyRepo(project.repositories)
+        }
+    }
+}
