@@ -159,13 +159,13 @@ configure_credentials() {
   fi
 
   if [ -n "${GIT_CREDENTIALS:-}" ]; then
-    echo -e "${GIT_CREDENTIALS}" > /root/.git-credentials
+    echo -e "${GIT_CREDENTIALS}" > "$HOME/.git-credentials"
   fi
 
   if [ -n "${GIT_SSH_CREDENTIALS:-}" ]; then
-    mkdir -p /root/.ssh
-    echo -e "${GIT_SSH_CREDENTIALS}" > /root/.ssh/private-key
-    chmod 600 /root/.ssh/private-key
+    mkdir -p "$HOME/.ssh"
+    echo -e "${GIT_SSH_CREDENTIALS}" > "$HOME/.ssh/private-key"
+    chmod 600 "$HOME/.ssh/private-key"
   fi
 
   # Configure artifact repository

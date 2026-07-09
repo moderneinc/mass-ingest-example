@@ -47,7 +47,7 @@ if [[ -n "$GIT_CREDS_FILE" ]]; then
         detect_container
         if [[ "$IN_CONTAINER" == true ]]; then
             info "In container, mount the file as read-only:"
-            info "  -v /path/.git-credentials:/root/.git-credentials:ro"
+            info "  -v /path/.git-credentials:/home/moderne/.git-credentials:ro"
         else
             info "Consider: chmod 400 ~/.git-credentials"
         fi

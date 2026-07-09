@@ -15,9 +15,9 @@ services:
       - data:/var/moderne
       - ../repos.csv:/app/repos.csv
       # Uncomment to mount git credentials for private repositories
-      # - ./.git-credentials:/root/.git-credentials:ro
+      # - ./.git-credentials:/home/moderne/.git-credentials:ro
       # Or mount SSH keys instead:
-      # - ./.ssh:/root/.ssh:ro
+      # - ./.ssh:/home/moderne/.ssh:ro
     networks:
       - monitoring
 
