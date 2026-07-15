@@ -578,7 +578,7 @@ Generated: 2025-01-20 14:32 UTC
 
 === SCM credentials ===
 [PASS] .git-credentials: found 2 credential(s)
-[PASS] .git-credentials: file is read-only (mode 400)
+[PASS] credential.helper: get-only wrapper (erase requests ignored)
 
 === Publish latency ===
        Testing PUBLISH_URL (10 sequential requests)...
