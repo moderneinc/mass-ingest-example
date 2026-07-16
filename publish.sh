@@ -101,8 +101,12 @@ ingest_repos() {
     mod git pull "$clone_dir"
     refresh_codeartifact_token || info "Token refresh failed; continuing with the existing token"
     mod build "$clone_dir" --no-download
-    mod publish "$clone_dir"
-    finalize_codeartifact_versions "$csv_file" || info "Some CodeArtifact versions could not be finalized"
+    if [ "${SKIP_PUBLISH:-}" = "true" ]; then
+      info "SKIP_PUBLISH=true: skipping publish for organization $ORGANIZATION"
+    else
+      mod publish "$clone_dir"
+      finalize_codeartifact_versions "$csv_file" || info "Some CodeArtifact versions could not be finalized"
+    fi
     mod log builds add "$clone_dir" "$DATA_DIR/log.zip" --last-build
     send_logs "org-$ORGANIZATION"
   else
@@ -175,7 +179,10 @@ configure_credentials() {
   fi
 
   # Configure artifact repository
-  if [ -n "${CODEARTIFACT_DOMAIN:-}" ]; then
+  # Build-only mode: skip the publish target entirely (LSTs are built but not published)
+  if [ "${SKIP_PUBLISH:-}" = "true" ]; then
+    info "SKIP_PUBLISH=true: build-only mode, no publish target configured (LSTs will be built but not published)"
+  elif [ -n "${CODEARTIFACT_DOMAIN:-}" ]; then
     configure_codeartifact
   elif [[ "${PUBLISH_URL:-}" == "s3://"* ]]; then
     info "Configuring S3 artifact repository: ${PUBLISH_URL}"
@@ -466,8 +473,12 @@ build_and_upload_repos() {
     printf "\n* Build timed out after %s seconds\n\n" "$build_timeout"
   fi
 
-  mod publish "$clone_dir"
-  finalize_codeartifact_versions "$partition_file" || info "Some CodeArtifact versions could not be finalized"
+  if [ "${SKIP_PUBLISH:-}" = "true" ]; then
+    info "SKIP_PUBLISH=true: skipping publish for $1"
+  else
+    mod publish "$clone_dir"
+    finalize_codeartifact_versions "$partition_file" || info "Some CodeArtifact versions could not be finalized"
+  fi
   mod log builds add "$clone_dir" "$DATA_DIR/log.zip" --last-build
   return $ret
 }
@@ -475,6 +486,11 @@ build_and_upload_repos() {
 send_logs() {
   local index=$1
   local timestamp=$(date +"%Y%m%d%H%M")
+
+  if [ "${SKIP_PUBLISH:-}" = "true" ]; then
+    info "SKIP_PUBLISH=true: skipping log upload"
+    return 0
+  fi
 
   if [ -n "${CODEARTIFACT_DOMAIN:-}" ]; then
     info "Skipping build-log upload: AWS CodeArtifact does not accept non-Maven log artifacts"
