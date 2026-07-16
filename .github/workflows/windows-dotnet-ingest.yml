@@ -1,0 +1,88 @@
+name: Windows .NET mass-ingest
+
+on:
+  workflow_dispatch:
+    inputs:
+      repos_csv:
+        description: "repos.csv to ingest (defaults to the bundled .NET sample)"
+        required: false
+        default: test/windows-dotnet-repos.csv
+
+concurrency:
+  group: windows-dotnet-ingest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ingest:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      REPOS_CSV: ${{ github.event.inputs.repos_csv || 'test/windows-dotnet-repos.csv' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Moderne's dotnet build step needs .NET SDK 10.0+ and the NuGet CLI on PATH.
+      # windows-latest already ships MSBuild / VS Build Tools (needed for .NET Framework
+      # target frameworks); no Mono is required on Windows.
+      - name: Set up .NET SDK 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Set up NuGet CLI
+        uses: nuget/setup-nuget@v2
+
+      - name: Install the Moderne CLI
+        shell: pwsh
+        run: |
+          irm https://app.moderne.io/cli/windows | iex
+          mod --version
+
+      - name: Report the .NET build toolchain
+        shell: pwsh
+        run: |
+          dotnet --info
+          Write-Host "nuget: $((Get-Command nuget).Source)"
+          nuget help | Select-Object -First 1
+
+      - name: Sync and build .NET LSTs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $clone = "$env:RUNNER_TEMP\moderne\repos"
+          New-Item -Type Directory $clone -Force | Out-Null
+
+          mod git sync csv $clone $env:REPOS_CSV --with-sources
+          mod build $clone --no-download
+          "CLONE_DIR=$clone" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # Baseline assertion: at least one non-empty LST artifact was produced. Without this
+      # a build that quietly parsed nothing would still "pass".
+      # TODO(stronger): assert type attribution is present on the C# LSTs. `FindMissingTypes`
+      # is Java-only; confirm a rewrite-csharp diagnostic (or a typed-node data table) exists
+      # and fail the job when C# LSTs come back un-attributed.
+      - name: Assert LSTs were produced
+        shell: pwsh
+        run: |
+          $lsts = Get-ChildItem -Path $env:CLONE_DIR -Recurse -Filter *.ast* -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Length -gt 0 }
+          if (-not $lsts) {
+            $lsts = Get-ChildItem -Path $env:CLONE_DIR -Recurse -Include *.jar -ErrorAction SilentlyContinue |
+                    Where-Object { $_.FullName -match '\.moderne' -and $_.Length -gt 0 }
+          }
+          if (-not $lsts) {
+            Write-Error "No LST artifacts were produced under $env:CLONE_DIR"
+            exit 1
+          }
+          Write-Host "Produced $($lsts.Count) LST artifact(s):"
+          $lsts | ForEach-Object { Write-Host "  $($_.FullName) ($($_.Length) bytes)" }
+
+      - name: Upload build logs and LSTs for inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-dotnet-lsts
+          path: |
+            ${{ env.CLONE_DIR }}/**/.moderne/**
+          if-no-files-found: warn
+          retention-days: 7

@@ -84,7 +84,7 @@ mass-ingest-example/
 ├── Dockerfile            # Container image definition (used by all stages)
 ├── Dockerfile.fips       # FIPS 140-2/140-3 compliant variant (UBI 9)
 ├── publish.sh            # Main ingestion script
-├── publish.ps1           # PowerShell version
+├── publish.ps1           # PowerShell version (native Windows, no Docker — see "Windows / PowerShell")
 ├── repos.csv             # Example repository list
 │
 ├── 1-quickstart/         # Single container deployment
@@ -343,9 +343,9 @@ Do not set `PUBLISH_USER`/`PUBLISH_PASSWORD` for CodeArtifact; the script authen
 ### Known limitations
 
 - **Only the first publish updates the organization catalog.** `mod publish` maintains the `repos-lock.csv` catalog at a fixed coordinate by re-uploading it, but CodeArtifact assets are immutable, so every publish after the first returns HTTP 409 and the catalog keeps only the first publish's repos. LST JARs use unique coordinates and are unaffected. If your tenant reads its org structure from this catalog (`moderne.organization.sources.*`), do a single unbatched or org-mode run, and delete the `repos-lock` version (`aws codeartifact delete-package-versions`) before re-ingesting.
-- **Build logs are not stored in CodeArtifact.** Its Maven endpoint rejects non-Maven log artifact paths, so publish.sh skips the log upload (the logs remain in the local `log.zip`/`syncs.zip`).
+- **Build logs are not stored in CodeArtifact.** Its Maven endpoint rejects non-Maven log artifact paths, so the ingest scripts skip the log upload (the logs remain in the local `log.zip`/`syncs.zip`).
 - **The platform must read the published catalog directly, not poll the repository.** CodeArtifact provides neither a Maven Indexer index nor an Artifactory-style query API, so the connector cannot discover LSTs by polling it. The tenant's artifact source must be configured without a `poll:` block ("lock mode"), so it reads the `repos-lock.csv` this ingest publishes.
-- This CodeArtifact path is implemented in `publish.sh` (bash) only; the PowerShell `publish.ps1` entrypoint does not include it.
+- This CodeArtifact path is implemented in both `publish.sh` (bash) and `publish.ps1` (PowerShell). On Windows, register the Maven settings/Gradle init wiring so build dependencies resolve from CodeArtifact (the script looks for `maven/settings-codeartifact.xml` and `gradle/init-codeartifact.gradle` next to `publish.ps1`, and skips a user-provided `%USERPROFILE%\.m2\settings.xml`).
 
 ### Example
 
@@ -360,6 +360,73 @@ docker run --rm \
   -e BATCH_SIZE=50 \
   mass-ingest
 ```
+
+## Windows / PowerShell
+
+The Docker stages above run the bash `publish.sh`. `publish.ps1` is a PowerShell port of the
+same ingest flow that runs **directly on a Windows host, without Docker**. The most common
+reason to use it is building **.NET (C#) repositories**: on Windows these build natively with
+just the NuGet CLI (no Mono), so a single host can produce both .NET Framework and .NET Core
+LSTs cleanly.
+
+`publish.ps1` mirrors `publish.sh` — configure credentials, sync repos, build LSTs
+(`mod build`), publish, and upload logs — including CSV batching, per-batch build timeouts,
+S3 / Maven / Artifactory / AWS CodeArtifact publish targets, and CSV sources from a local
+path, `s3://`, or `http(s)://`.
+
+### Prerequisites
+
+- **Windows** with PowerShell 5.1+ (or PowerShell 7+).
+- **Moderne CLI** (`mod`) on `PATH`. Building .NET requires CLI **4.1.9+**. See the
+  [CLI install guide](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro).
+- **Java toolchain** for the JVM repos you build — one or more JDKs (registered with the
+  `mod config java jdk` commands) plus Maven/Gradle as needed.
+- **AWS CLI** if you publish to S3 or CodeArtifact, or read a `repos.csv` from `s3://`.
+- **For .NET builds:** .NET SDK **10.0+** and the NuGet CLI (`nuget.exe`) on `PATH` — that is
+  all Windows needs (no Mono). Keep the `dotnet` build step in `moderne.yml` (enabled by
+  default). See the ".NET / C# builds" notes in `.env.example` and the private-feed template
+  in `nuget/nuget.config`.
+
+### Configuration
+
+`publish.ps1` reads the same environment variables as the bash flow, set as PowerShell env
+vars before running. `DATA_DIR` (the working directory for clones, logs, and artifacts) is
+required; the rest match [Environment variables](#environment-variables),
+[Repository authentication](#repository-authentication) (`GIT_CREDENTIALS` /
+`GIT_SSH_CREDENTIALS`), the S3/CodeArtifact settings, and the tuning knobs (`BATCH_SIZE`,
+`BUILD_TIMEOUT`). One is specific to the .NET build path:
+
+- `NUGET_CONFIG_FILE` — path to a `nuget.config` applied to `%APPDATA%\NuGet\NuGet.Config`
+  so a private feed is used during restore (template in `nuget/nuget.config`). Building .NET
+  itself needs no flag — it is driven by the `dotnet` step in `moderne.yml`.
+
+### Running
+
+```powershell
+$env:DATA_DIR = "C:\moderne\data"
+$env:PUBLISH_URL = "https://artifactory.example.com/artifactory/moderne-ingest/"
+$env:PUBLISH_USER = "your-username"
+$env:PUBLISH_PASSWORD = "your-password"
+
+# Build and publish every repository in repos.csv
+.\publish.ps1 -SourceCsv repos.csv
+
+# Process a slice of the CSV (1-based, inclusive) — useful for splitting work across hosts
+.\publish.ps1 -SourceCsv repos.csv -StartIndex 1 -EndIndex 100
+
+# Ingest a single organization
+.\publish.ps1 -SourceCsv repos.csv -Organization my-org
+```
+
+For long runs, set `$env:BATCH_SIZE` so each batch completes inside your credential/token
+lifetime (required for CodeArtifact — see [Using AWS CodeArtifact](#using-aws-codeartifact)).
+
+### Differences from the Docker/bash flow
+
+- **No container.** The script runs on the host, so you install and register the toolchain
+  yourself (JDKs, Maven/Gradle, .NET SDK, NuGet CLI) rather than through the Dockerfile.
+- **Diagnostics are bash-only.** `DIAGNOSE` / `DIAGNOSE_ON_START` and the `diagnostics/`
+  system have no PowerShell port yet; run them from the Docker/bash flow.
 
 ## Generating repository lists
 
