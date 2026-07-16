@@ -7,6 +7,17 @@ on:
         description: "repos.csv to ingest (defaults to the bundled .NET sample)"
         required: false
         default: test/windows-dotnet-repos.csv
+  # TEMPORARY: validate the Windows .NET path on the PR before this workflow lands on
+  # main (workflow_dispatch is not dispatchable until then). Revert to on-demand-only
+  # before merge.
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'publish.ps1'
+      - 'moderne.yml'
+      - 'nuget/**'
+      - 'test/windows-dotnet-repos.csv'
+      - '.github/workflows/windows-dotnet-ingest.yml'
 
 concurrency:
   group: windows-dotnet-ingest-${{ github.ref }}
