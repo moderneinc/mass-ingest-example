@@ -19,18 +19,18 @@ jobs:
     env:
       REPOS_CSV: ${{ github.event.inputs.repos_csv || 'test/windows-dotnet-repos.csv' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Moderne's dotnet build step needs .NET SDK 10.0+ and the NuGet CLI on PATH.
       # windows-latest already ships MSBuild / VS Build Tools (needed for .NET Framework
       # target frameworks); no Mono is required on Windows.
       - name: Set up .NET SDK 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "10.0.x"
 
       - name: Set up NuGet CLI
-        uses: nuget/setup-nuget@v2
+        uses: nuget/setup-nuget@v3
 
       - name: Install the Moderne CLI
         shell: pwsh
@@ -86,7 +86,7 @@ jobs:
 
       - name: Upload build logs and LSTs for inspection
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-dotnet-lsts
           path: ${{ env.LST_OUT }}/**/.moderne/**
