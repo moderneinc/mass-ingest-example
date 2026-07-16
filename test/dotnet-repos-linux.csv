@@ -1,2 +1,2 @@
-cloneUrl,branch,origin,path
-https://github.com/JamesNK/Newtonsoft.Json,master,github.com,JamesNK/Newtonsoft.Json
+cloneUrl,branch,origin,path,notes
+https://github.com/JamesNK/Newtonsoft.Json,master,github.com,JamesNK/Newtonsoft.Json,SDK-style (PackageReference) library; multi-targets .NET Framework (net45/net462) and modern .NET/.NET Standard; cross-platform; builds under Mono/Linux; packages restored via dotnet restore

@@ -22,7 +22,7 @@ jobs:
           # Windows builds the full sample, including the classic packages.config /
           # WPF desktop app. No Mono is needed on Windows.
           - os: windows-latest
-            repos_csv: test/dotnet-repos.csv
+            repos_csv: test/dotnet-repos-windows.csv
           # Linux builds the cross-platform subset. The WPF/packages.config desktop app
           # cannot build under Mono (WPF is Windows-only), so it is excluded here.
           - os: ubuntu-latest
