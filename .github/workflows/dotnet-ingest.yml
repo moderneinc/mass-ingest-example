@@ -1,0 +1,130 @@
+name: .NET mass-ingest
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch: {}
+  schedule:
+    - cron: 0 17 * * 1
+
+concurrency:
+  group: dotnet-ingest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ingest:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows builds the full sample, including the classic packages.config /
+          # WPF desktop app. No Mono is needed on Windows.
+          - os: windows-latest
+            repos_csv: test/dotnet-repos.csv
+          # Linux builds the cross-platform subset. The WPF/packages.config desktop app
+          # cannot build under Mono (WPF is Windows-only), so it is excluded here.
+          - os: ubuntu-latest
+            repos_csv: test/dotnet-repos-linux.csv
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      REPOS_CSV: ${{ matrix.repos_csv }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # Moderne's dotnet build step needs .NET SDK 10.0+ on PATH (both OSes).
+      - name: Set up .NET SDK 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      # Windows ships MSBuild / VS Build Tools and needs no Mono; setup-nuget puts nuget.exe on PATH.
+      - name: Set up NuGet CLI (Windows)
+        if: runner.os == 'Windows'
+        uses: nuget/setup-nuget@v3
+
+      # Linux: restoring .NET Framework (packages.config) needs the NuGet CLI run under Mono.
+      # Install Mono, drop nuget.exe on PATH, and add a `nuget` shim that execs it via Mono.
+      - name: Set up Mono + NuGet CLI (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mono-complete
+          mono --version
+          sudo curl -fsSL -o /usr/local/bin/nuget.exe https://dist.nuget.org/win-x86-commandline/latest/nuget.exe
+          printf '#!/bin/sh\nexec mono /usr/local/bin/nuget.exe "$@"\n' | sudo tee /usr/local/bin/nuget > /dev/null
+          sudo chmod +x /usr/local/bin/nuget
+          nuget help | head -1
+
+      # Each step runs in a fresh shell, so persist the CLI's bin directory via $GITHUB_PATH.
+      - name: Install the Moderne CLI (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          irm https://app.moderne.io/cli/windows | iex
+          mod --version
+          Split-Path (Get-Command mod).Source | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Install the Moderne CLI (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          curl -fsSL https://app.moderne.io/cli | bash
+          echo "$HOME/.moderne/cli/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.moderne/cli/bin:$PATH"
+          mod --version
+
+      - name: Report the .NET build toolchain
+        shell: pwsh
+        run: |
+          dotnet --info
+          Write-Host "nuget: $((Get-Command nuget -ErrorAction SilentlyContinue).Source)"
+          if ($env:RUNNER_OS -ne 'Windows') { mono --version | Select-Object -First 1 }
+
+      # Runs from the checkout root, where this repo's moderne.yml (with the `dotnet`
+      # build step) sits — `mod build` reads the build steps from the working directory.
+      - name: Sync and build .NET LSTs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $clone = Join-Path (Join-Path $env:RUNNER_TEMP 'moderne') 'repos'
+          New-Item -ItemType Directory -Path $clone -Force | Out-Null
+
+          mod git sync csv $clone $env:REPOS_CSV --with-sources
+          mod build $clone --no-download
+          "CLONE_DIR=$clone" | Out-File -FilePath $env:GITHUB_ENV -Append
+          # Forward-slash copy for actions/upload-artifact (its globbing rejects backslashes)
+          "LST_OUT=$($clone -replace '\\','/')" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # Assert the build produced real LST output, not a silent no-op. Prints the .moderne
+      # tree so the exact artifact layout is visible in the run log.
+      # TODO(stronger): assert type attribution is present on the C# LSTs. `FindMissingTypes`
+      # is Java-only; confirm a rewrite-csharp diagnostic (or a typed-node data table) exists
+      # and fail the job when C# LSTs come back un-attributed.
+      - name: Assert LSTs were produced
+        shell: pwsh
+        run: |
+          Write-Host "== .moderne tree under $env:CLONE_DIR =="
+          $moderne = Get-ChildItem -Path $env:CLONE_DIR -Recurse -Force -File -ErrorAction SilentlyContinue |
+                     Where-Object { $_.FullName -match '\.moderne' }
+          $moderne | ForEach-Object { Write-Host ("{0,12}  {1}" -f $_.Length, $_.FullName) }
+
+          # LSTs are written as *.lst under .moderne/build/<timestamp>/_root_/. Require at
+          # least one non-empty .lst so a build that parsed nothing cannot pass silently.
+          $lsts = $moderne | Where-Object { $_.Extension -eq '.lst' -and $_.Length -gt 0 }
+          if (-not $lsts) {
+            Write-Error "No .lst LST artifacts found under $env:CLONE_DIR (build produced no LSTs)"
+            exit 1
+          }
+          $bytes = ($lsts | Measure-Object Length -Sum).Sum
+          Write-Host "Produced $($lsts.Count) LST file(s), $bytes bytes total."
+
+      - name: Upload build logs and LSTs for inspection
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dotnet-lsts-${{ matrix.os }}
+          path: ${{ env.LST_OUT }}/**/.moderne/**
+          if-no-files-found: warn
+          retention-days: 7
