@@ -48,6 +48,9 @@ jobs:
         run: |
           irm https://app.moderne.io/cli/windows | iex
           mod --version
+          # Each workflow step runs in a fresh shell, so the installer's PATH update is not
+          # visible to later steps. Persist the CLI's bin directory via $GITHUB_PATH.
+          Split-Path (Get-Command mod).Source | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Report the .NET build toolchain
         shell: pwsh
