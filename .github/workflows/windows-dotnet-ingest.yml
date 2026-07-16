@@ -69,34 +69,39 @@ jobs:
           mod git sync csv $clone $env:REPOS_CSV --with-sources
           mod build $clone --no-download
           "CLONE_DIR=$clone" | Out-File -FilePath $env:GITHUB_ENV -Append
+          # Forward-slash copy for actions/upload-artifact (its globbing rejects backslashes)
+          "LST_OUT=$($clone -replace '\\','/')" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      # Baseline assertion: at least one non-empty LST artifact was produced. Without this
-      # a build that quietly parsed nothing would still "pass".
+      # Assert the build produced real LST build output, not a silent no-op. Also prints
+      # the .moderne tree so the exact artifact layout is visible in the run log.
       # TODO(stronger): assert type attribution is present on the C# LSTs. `FindMissingTypes`
       # is Java-only; confirm a rewrite-csharp diagnostic (or a typed-node data table) exists
       # and fail the job when C# LSTs come back un-attributed.
       - name: Assert LSTs were produced
         shell: pwsh
         run: |
-          $lsts = Get-ChildItem -Path $env:CLONE_DIR -Recurse -Filter *.ast* -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Length -gt 0 }
-          if (-not $lsts) {
-            $lsts = Get-ChildItem -Path $env:CLONE_DIR -Recurse -Include *.jar -ErrorAction SilentlyContinue |
-                    Where-Object { $_.FullName -match '\.moderne' -and $_.Length -gt 0 }
+          Write-Host "== .moderne tree under $env:CLONE_DIR =="
+          $moderne = Get-ChildItem -Path $env:CLONE_DIR -Recurse -Force -File -ErrorAction SilentlyContinue |
+                     Where-Object { $_.FullName -match '\\\.moderne\\' }
+          $moderne | ForEach-Object { Write-Host ("{0,12}  {1}" -f $_.Length, $_.FullName) }
+
+          # A successful .NET build writes a build.log plus LST artifacts under
+          # .moderne\build\<timestamp>\; require at least one non-empty artifact there
+          # that is not the log itself.
+          $artifacts = $moderne | Where-Object {
+            $_.FullName -match '\\\.moderne\\build\\' -and $_.Name -ne 'build.log' -and $_.Length -gt 0
           }
-          if (-not $lsts) {
-            Write-Error "No LST artifacts were produced under $env:CLONE_DIR"
+          if (-not $artifacts) {
+            Write-Error "No LST build artifacts found under $env:CLONE_DIR (build produced no LSTs)"
             exit 1
           }
-          Write-Host "Produced $($lsts.Count) LST artifact(s):"
-          $lsts | ForEach-Object { Write-Host "  $($_.FullName) ($($_.Length) bytes)" }
+          Write-Host "Produced $($artifacts.Count) LST build artifact(s)."
 
       - name: Upload build logs and LSTs for inspection
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: windows-dotnet-lsts
-          path: |
-            ${{ env.CLONE_DIR }}/**/.moderne/**
+          path: ${{ env.LST_OUT }}/**/.moderne/**
           if-no-files-found: warn
           retention-days: 7
