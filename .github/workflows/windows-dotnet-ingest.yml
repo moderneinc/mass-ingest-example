@@ -2,7 +2,12 @@ name: Windows .NET mass-ingest
 
 on:
   push:
+    branches: [ "main" ]
   pull_request:
+    branches: [ "main" ]
+  workflow_dispatch: {}
+  schedule:
+    - cron: 0 17 * * 1
 
 concurrency:
   group: windows-dotnet-ingest-${{ github.ref }}
