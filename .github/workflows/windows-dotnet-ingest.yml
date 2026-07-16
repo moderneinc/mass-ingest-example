@@ -1,12 +1,8 @@
 name: Windows .NET mass-ingest
 
 on:
-  workflow_dispatch:
-    inputs:
-      repos_csv:
-        description: "repos.csv to ingest (defaults to the bundled .NET sample)"
-        required: false
-        default: test/windows-dotnet-repos.csv
+  push:
+  pull_request:
 
 concurrency:
   group: windows-dotnet-ingest-${{ github.ref }}
@@ -17,7 +13,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     env:
-      REPOS_CSV: ${{ github.event.inputs.repos_csv || 'test/windows-dotnet-repos.csv' }}
+      REPOS_CSV: test/windows-dotnet-repos.csv
     steps:
       - uses: actions/checkout@v5
 
