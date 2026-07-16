@@ -7,17 +7,6 @@ on:
         description: "repos.csv to ingest (defaults to the bundled .NET sample)"
         required: false
         default: test/windows-dotnet-repos.csv
-  # TEMPORARY: validate the Windows .NET path on the PR before this workflow lands on
-  # main (workflow_dispatch is not dispatchable until then). Revert to on-demand-only
-  # before merge.
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'publish.ps1'
-      - 'moderne.yml'
-      - 'nuget/**'
-      - 'test/windows-dotnet-repos.csv'
-      - '.github/workflows/windows-dotnet-ingest.yml'
 
 concurrency:
   group: windows-dotnet-ingest-${{ github.ref }}
@@ -85,17 +74,15 @@ jobs:
                      Where-Object { $_.FullName -match '\\\.moderne\\' }
           $moderne | ForEach-Object { Write-Host ("{0,12}  {1}" -f $_.Length, $_.FullName) }
 
-          # A successful .NET build writes a build.log plus LST artifacts under
-          # .moderne\build\<timestamp>\; require at least one non-empty artifact there
-          # that is not the log itself.
-          $artifacts = $moderne | Where-Object {
-            $_.FullName -match '\\\.moderne\\build\\' -and $_.Name -ne 'build.log' -and $_.Length -gt 0
-          }
-          if (-not $artifacts) {
-            Write-Error "No LST build artifacts found under $env:CLONE_DIR (build produced no LSTs)"
+          # LSTs are written as *.lst under .moderne\build\<timestamp>\_root_\. Require at
+          # least one non-empty .lst so a build that parsed nothing cannot pass silently.
+          $lsts = $moderne | Where-Object { $_.Extension -eq '.lst' -and $_.Length -gt 0 }
+          if (-not $lsts) {
+            Write-Error "No .lst LST artifacts found under $env:CLONE_DIR (build produced no LSTs)"
             exit 1
           }
-          Write-Host "Produced $($artifacts.Count) LST build artifact(s)."
+          $bytes = ($lsts | Measure-Object Length -Sum).Sum
+          Write-Host "Produced $($lsts.Count) LST file(s), $bytes bytes total."
 
       - name: Upload build logs and LSTs for inspection
         if: always()
