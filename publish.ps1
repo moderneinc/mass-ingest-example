@@ -100,12 +100,8 @@ function Ingest-Repos() {
     mod git pull "$CloneDir"
     if (-not (Refresh-CodeArtifactToken)) { Write-Info "Token refresh failed; continuing with the existing token" }
     mod build "$CloneDir" --no-download
-    if ($env:SKIP_PUBLISH -eq "true") {
-      Write-Info "SKIP_PUBLISH=true: skipping publish for organization $Organization"
-    } else {
-      mod publish "$CloneDir"
-      if (-not (Finalize-CodeArtifactVersions "$LocalCsv")) { Write-Info "Some CodeArtifact versions could not be finalized" }
-    }
+    mod publish "$CloneDir"
+    if (-not (Finalize-CodeArtifactVersions "$LocalCsv")) { Write-Info "Some CodeArtifact versions could not be finalized" }
     mod log builds add "$CloneDir" "$env:DATA_DIR\log.zip" --last-build
     Send-Logs "org-$Organization"
   } else {
@@ -187,12 +183,8 @@ function Configure-Credentials() {
   }
 
   # Configure artifact repository
-  # Build-only mode: skip the publish target entirely (LSTs are built but not published)
-  if ($env:SKIP_PUBLISH -eq "true") {
-    Write-Info "SKIP_PUBLISH=true: build-only mode, no publish target configured (LSTs will be built but not published)"
-  }
   # AWS CodeArtifact (Maven endpoint with a short-lived, rotating auth token)
-  elseif ($env:CODEARTIFACT_DOMAIN) {
+  if ($env:CODEARTIFACT_DOMAIN) {
     Configure-CodeArtifact
   }
   # S3 configuration (S3 bucket URL should start with s3://)
@@ -539,12 +531,8 @@ function Invoke-BuildAndUploadRepos {
     $BuildSuccess = $true
   }
 
-  if ($env:SKIP_PUBLISH -eq "true") {
-    Write-Info "SKIP_PUBLISH=true: skipping publish for $PartitionName"
-  } else {
-    mod publish "$CloneDir" | Write-Host
-    if (-not (Finalize-CodeArtifactVersions "$PartitionFile")) { Write-Info "Some CodeArtifact versions could not be finalized" }
-  }
+  mod publish "$CloneDir" | Write-Host
+  if (-not (Finalize-CodeArtifactVersions "$PartitionFile")) { Write-Info "Some CodeArtifact versions could not be finalized" }
   mod log builds add "$CloneDir" "$env:DATA_DIR\log.zip" --last-build | Write-Host
   return $BuildSuccess
 }
@@ -555,11 +543,6 @@ function Send-Logs() {
   )
 
   $Timestamp = Get-Date -Format "yyyyMMddHHmm"
-
-  if ($env:SKIP_PUBLISH -eq "true") {
-    Write-Info "SKIP_PUBLISH=true: skipping log upload"
-    return
-  }
 
   if ($env:CODEARTIFACT_DOMAIN) {
     Write-Info "Skipping build-log upload: AWS CodeArtifact does not accept non-Maven log artifacts"
