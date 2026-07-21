@@ -467,7 +467,9 @@ function Select-Repos() {
 
     $SelectedLines = (Import-Csv $CsvFile)[($StartIndex - 1)..($EndIndex - 1)]
 
-    Export-Csv -Path "$env:DATA_DIR\selected-repos.csv" -InputObject $SelectedLines -NoTypeInformation
+    # Pipe (not -InputObject): Export-Csv must enumerate the collection so each repo is a
+    # row. -InputObject would serialize the array object itself (Length, Rank, ...) instead.
+    $SelectedLines | Export-Csv -Path "$env:DATA_DIR\selected-repos.csv" -NoTypeInformation
   } else {
     Write-Info "Selected all repositories from $CsvFile"
 
