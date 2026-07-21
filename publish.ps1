@@ -174,12 +174,22 @@ function Configure-Credentials() {
   # Git credentials for cloning private repositories. `\n` escapes are expanded so
   # multi-line SSH keys can be passed through a single environment variable.
   if ($env:GIT_CREDENTIALS) {
-    Set-Content -Path "$env:USERPROFILE\.git-credentials" -Value ($env:GIT_CREDENTIALS -replace '\\n', "`n") -NoNewline
+    $GitCredFile = "$env:USERPROFILE\.git-credentials"
+    Set-Content -Path $GitCredFile -Value ($env:GIT_CREDENTIALS -replace '\\n', "`n") -NoNewline
+    # Windows git defaults to the credential manager, which ignores .git-credentials, so
+    # register the store helper explicitly and point it at the file just written.
+    git config --global credential.helper "store --file=$($GitCredFile -replace '\\','/')"
   }
 
   if ($env:GIT_SSH_CREDENTIALS) {
+    $SshKey = "$env:USERPROFILE\.ssh\private-key"
     New-Item -Type Directory "$env:USERPROFILE\.ssh" -Force | Out-Null
-    Set-Content -Path "$env:USERPROFILE\.ssh\private-key" -Value ($env:GIT_SSH_CREDENTIALS -replace '\\n', "`n") -NoNewline
+    Set-Content -Path $SshKey -Value ($env:GIT_SSH_CREDENTIALS -replace '\\n', "`n") -NoNewline
+    # OpenSSH refuses a key with loose ACLs; strip inheritance and grant only this user.
+    icacls $SshKey /inheritance:r /grant:r "$($env:USERNAME):F" | Out-Null
+    # Point git at the key (forward slashes so git's shell keeps the path intact) and
+    # accept unknown host keys so the clone does not block on a prompt.
+    git config --global core.sshCommand "ssh -i `"$($SshKey -replace '\\','/')`" -o StrictHostKeyChecking=accept-new"
   }
 
   # Configure artifact repository
