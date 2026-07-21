@@ -178,7 +178,7 @@ function Configure-Credentials() {
     Set-Content -Path $GitCredFile -Value ($env:GIT_CREDENTIALS -replace '\\n', "`n") -NoNewline
     # Windows git defaults to the credential manager, which ignores .git-credentials, so
     # register the store helper explicitly and point it at the file just written.
-    git config --global credential.helper "store --file=$($GitCredFile -replace '\\','/')"
+    git config --global credential.helper "store --file=`"$($GitCredFile -replace '\\','/')`""
   }
 
   if ($env:GIT_SSH_CREDENTIALS) {
