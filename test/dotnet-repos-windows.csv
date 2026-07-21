@@ -1,3 +1,0 @@
-cloneUrl,branch,origin,path,notes
-https://github.com/JamesNK/Newtonsoft.Json,master,github.com,JamesNK/Newtonsoft.Json,SDK-style (PackageReference) library; multi-targets .NET Framework (net45/net462) and modern .NET/.NET Standard; cross-platform; packages restored via dotnet restore (no Mono/nuget.exe)
-https://github.com/shadowsocks/shadowsocks-windows,v4,github.com,shadowsocks/shadowsocks-windows,Classic non-SDK .csproj + packages.config; .NET Framework 4.7.2/4.8 WPF desktop app; Windows-only (WPF does not build under Mono); packages restored via nuget.exe
