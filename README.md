@@ -383,7 +383,7 @@ path, `s3://`, or `http(s)://`.
   `mod config java jdk` commands) plus Maven/Gradle as needed.
 - **AWS CLI** if you publish to S3 or CodeArtifact, or read a `repos.csv` from `s3://`.
 - **For .NET builds:** .NET SDK **10.0+** and the NuGet CLI (`nuget.exe`) on `PATH` — that is
-  all Windows needs (no Mono). Keep the `dotnet` build step in `moderne.yml` (enabled by
+  all Windows needs. Keep the `dotnet` build step in `moderne.yml` (enabled by
   default). See the ".NET / C# builds" notes in `.env.example` and the private-feed template
   in `nuget/nuget.config`.
 
