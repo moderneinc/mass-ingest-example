@@ -166,12 +166,16 @@ configure_credentials() {
 
   if [ -n "${GIT_CREDENTIALS:-}" ]; then
     echo -e "${GIT_CREDENTIALS}" > /root/.git-credentials
+    # Register the store helper so git consults the file, independent of image-level config.
+    git config --global credential.helper "store --file=/root/.git-credentials"
   fi
 
   if [ -n "${GIT_SSH_CREDENTIALS:-}" ]; then
     mkdir -p /root/.ssh
     echo -e "${GIT_SSH_CREDENTIALS}" > /root/.ssh/private-key
     chmod 600 /root/.ssh/private-key
+    # Point git at the key and accept unknown host keys so the clone does not block.
+    git config --global core.sshCommand "ssh -i /root/.ssh/private-key -o StrictHostKeyChecking=accept-new"
   fi
 
   # Configure artifact repository

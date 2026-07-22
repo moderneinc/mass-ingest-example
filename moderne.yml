@@ -6,6 +6,7 @@ build:
     - type: bazel
     - type: javascript
     - type: python
+    - type: dotnet
     - type: resource
       inclusion: |-
         **/*
