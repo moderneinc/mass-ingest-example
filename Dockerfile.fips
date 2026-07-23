@@ -320,8 +320,12 @@ FROM language-support AS runner
 
 # Git authentication configuration
 # Git credentials are configured at runtime via volume mounts to avoid baking secrets into the image.
-# Configure git to use the credential store that will be mounted at runtime
-RUN git config --global credential.helper "store --file=/root/.git-credentials"
+# The helper only implements "get": when a server rejects a credential (HTTP 401), git asks its
+# helpers to erase it, and the standard store helper would wipe the /root/.git-credentials entry
+# for that whole host, breaking every remaining repository in the run. The trade-off is that a
+# revoked token keeps being offered (and rejected) once per remaining repository on that host,
+# which may count toward the SCM's failed-authentication lockout policy for the account.
+RUN git config --global credential.helper '!f() { if [ "$1" = "get" ]; then git credential-store --file=/root/.git-credentials get; fi; }; f'
 # Optionally disable SSL verification if needed
 # RUN git config --global http.sslVerify false
 

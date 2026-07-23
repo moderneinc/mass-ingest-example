@@ -3,7 +3,7 @@
 #
 # Validates the .git-credentials file for common issues:
 # - File exists and contains credentials
-# - File permissions (read-only recommended)
+# - Credential helper cannot erase the file on auth failure
 # - URL encoding issues in passwords
 #
 # Note: Actual SCM connectivity is tested by scm-repos.sh
@@ -35,25 +35,7 @@ if [[ -n "$GIT_CREDS_FILE" ]]; then
         pass ".git-credentials: found $CRED_LINES credential(s)"
     fi
 
-    # Check 2: Is file read-only? Git can wipe it on auth failure
-    # Note: -w always returns true for root, so check actual permissions
-    FILE_PERMS=$(stat -c '%a' "$GIT_CREDS_FILE" 2>/dev/null || stat -f '%Lp' "$GIT_CREDS_FILE" 2>/dev/null)
-    if [[ "$FILE_PERMS" =~ ^(400|440|444|000)$ ]]; then
-        pass ".git-credentials: file is read-only (mode $FILE_PERMS)"
-    else
-        warn ".git-credentials: file is writable (mode $FILE_PERMS)"
-        info "Git may clear credentials on authentication failure"
-        # Detect container and suggest appropriate fix (detect_container from core.sh)
-        detect_container
-        if [[ "$IN_CONTAINER" == true ]]; then
-            info "In container, mount the file as read-only:"
-            info "  -v /path/.git-credentials:/root/.git-credentials:ro"
-        else
-            info "Consider: chmod 400 ~/.git-credentials"
-        fi
-    fi
-
-    # Check 3: Do credentials contain characters that need URL escaping?
+    # Check 2: Do credentials contain characters that need URL escaping?
     # Common issue: Bitbucket PATs contain '/' which must be encoded as %2F
     NEEDS_ESCAPE=false
     while IFS= read -r line; do
@@ -94,4 +76,53 @@ if [[ -n "$GIT_CREDS_FILE" ]]; then
     fi
 else
     info ".git-credentials: file not found (may use other auth method)"
+fi
+
+# Credential helper check: can git erase the credentials on auth failure?
+# When a server rejects a credential (HTTP 401), git asks every configured helper to
+# erase it; a store helper then wipes the file's entry for that whole host, failing
+# every remaining repository on that host. A get-only helper ignores erase requests.
+# File permissions do not protect against this: store replaces the file via rename,
+# so only directory writability matters. This check runs even when the credentials
+# file does not exist yet (publish.sh writes it from GIT_CREDENTIALS after startup
+# diagnostics have already run).
+CRED_PATH="${GIT_CREDS_FILE:-$HOME/.git-credentials}"
+case "$CRED_PATH" in
+    /*) ;;
+    *) CRED_PATH="$(cd "$(dirname "$CRED_PATH")" && pwd)/$(basename "$CRED_PATH")" ;;
+esac
+# An empty helper entry resets the list accumulated so far, so only entries after the
+# last empty one are active.
+GIT_HELPERS=$(git config --get-all credential.helper 2>/dev/null | awk '{ if ($0 == "") out = ""; else out = out $0 "\n" } END { printf "%s", out }')
+HELPER_SAFE=false
+HELPER_UNSAFE=false
+while IFS= read -r helper; do
+    [[ -z "$helper" ]] && continue
+    if [[ "$helper" == *'if [ "$1" = "get" ]'* ]]; then
+        HELPER_SAFE=true
+    elif [[ "$helper" == store* || "$helper" == *credential-store* ]]; then
+        HELPER_UNSAFE=true
+    fi
+done <<< "$GIT_HELPERS"
+detect_container
+if [[ "$HELPER_UNSAFE" == true ]]; then
+    if [[ "$IN_CONTAINER" == true ]]; then
+        warn "credential.helper: a store helper is active, git erases credentials on auth failure"
+        info "One rejected clone (HTTP 401) wipes the host's entry from $CRED_PATH,"
+        info "failing every remaining repository on that host. Configure a get-only helper instead:"
+        info "  git config --global --replace-all credential.helper '!f() { if [ \"\$1\" = \"get\" ]; then git credential-store --file=$CRED_PATH get; fi; }; f'"
+    else
+        info "credential.helper: a store helper is active; a rejected clone (HTTP 401) erases that host's entry from $CRED_PATH"
+        info "This is normal on a workstation; the mass-ingest container image configures a get-only helper instead"
+    fi
+elif [[ "$HELPER_SAFE" == true ]]; then
+    pass "credential.helper: get-only wrapper (erase requests ignored)"
+elif [[ -z "$GIT_HELPERS" ]]; then
+    if [[ "$IN_CONTAINER" == true ]]; then
+        warn "credential.helper: not configured, git will not read $CRED_PATH"
+    else
+        info "credential.helper: not configured"
+    fi
+else
+    info "credential.helper: custom helper configured (not validated)"
 fi
