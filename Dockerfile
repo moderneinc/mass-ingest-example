@@ -119,11 +119,11 @@ ARG MAVEN_REPO_URL=https://repo1.maven.org/maven2
 ARG GRADLE_VERSION=8.14
 ARG GRADLE_EXTRA_VERSIONS=
 RUN mkdir -p /opt/gradle && \
-    wget --no-check-certificate ${GRADLE_DIST_URL}/gradle-${GRADLE_VERSION}-bin.zip -O gradle-${GRADLE_VERSION}-bin.zip && \
+    wget --no-check-certificate "${GRADLE_DIST_URL}/gradle-${GRADLE_VERSION}-bin.zip" -O gradle-${GRADLE_VERSION}-bin.zip && \
     unzip -d /opt/gradle gradle-${GRADLE_VERSION}-bin.zip && \
     rm gradle-${GRADLE_VERSION}-bin.zip && \
     for v in $(echo "${GRADLE_EXTRA_VERSIONS}" | tr ',' ' '); do \
-        wget --no-check-certificate ${GRADLE_DIST_URL}/gradle-${v}-bin.zip -O gradle-${v}-bin.zip && \
+        wget --no-check-certificate "${GRADLE_DIST_URL}/gradle-${v}-bin.zip" -O gradle-${v}-bin.zip && \
         unzip -d /opt/gradle gradle-${v}-bin.zip && \
         rm gradle-${v}-bin.zip; \
     done
@@ -136,7 +136,7 @@ ENV PATH="${PATH}:/opt/gradle/gradle-${GRADLE_VERSION}/bin"
 # NOTE: This version may be out of date as new versions are continually released. Check here for the latest version: https://repo1.maven.org/maven2/org/apache/maven/apache-maven/
 ARG MAVEN_VERSION=3.9.11
 ENV MAVEN_VERSION=${MAVEN_VERSION}
-RUN wget --no-check-certificate ${MAVEN_REPO_URL}/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz -O apache-maven-${MAVEN_VERSION}-bin.tar.gz && tar xzvf apache-maven-${MAVEN_VERSION}-bin.tar.gz && rm apache-maven-${MAVEN_VERSION}-bin.tar.gz
+RUN wget --no-check-certificate "${MAVEN_REPO_URL}/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz" -O apache-maven-${MAVEN_VERSION}-bin.tar.gz && tar xzvf apache-maven-${MAVEN_VERSION}-bin.tar.gz && rm apache-maven-${MAVEN_VERSION}-bin.tar.gz
 RUN mv apache-maven-${MAVEN_VERSION} /opt/apache-maven-${MAVEN_VERSION}
 RUN ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 
