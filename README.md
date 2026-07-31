@@ -224,10 +224,32 @@ See `dependency-repos.csv.example` for a template.
 ### Build arguments
 
 All Dockerfiles support:
-- `MODERNE_CLI_VERSION` - Specific CLI version (defaults to latest release)
-- `MODERNE_CLI_STAGE` - `release` (default) for latest release from Maven Central, `snapshot` for latest snapshot
-- `MODERNE_CLI_RELEASES_REPO` - Maven repository for release CLI artifacts (defaults to `https://repo1.maven.org/maven2`)
-- `MODERNE_CLI_SNAPSHOTS_REPO` - Maven repository for snapshot CLI artifacts (defaults to `https://central.sonatype.com/repository/maven-snapshots`)
+
+| Argument                     | Default                                                     | Description                                                       |
+|------------------------------|-------------------------------------------------------------|-------------------------------------------------------------------|
+| `MODERNE_CLI_VERSION`        | *(latest release)*                                          | Specific CLI version                                              |
+| `MODERNE_CLI_STAGE`          | `release`                                                   | `release` for latest release, `snapshot` for latest snapshot      |
+| `MODERNE_CLI_RELEASES_REPO`  | `https://repo1.maven.org/maven2`                            | Maven repository for release CLI artifacts                        |
+| `MODERNE_CLI_SNAPSHOTS_REPO` | `https://central.sonatype.com/repository/maven-snapshots`   | Maven repository for snapshot CLI artifacts                       |
+| `MAVEN_REPO_URL`             | `https://repo1.maven.org/maven2`                            | Maven repository the Maven distribution is downloaded from        |
+| `GRADLE_DIST_URL`            | `https://services.gradle.org/distributions`                 | Gradle distribution download URL                                  |
+| `GRADLE_VERSION`             | `8.14`                                                      | Primary Gradle version to install                                 |
+| `GRADLE_EXTRA_VERSIONS`      | *(empty)*                                                   | Comma-separated additional Gradle versions (e.g., `6.9.4,5.6.4`)  |
+| `MAVEN_VERSION`              | `3.9.11`                                                    | Maven version to install                                          |
+
+**Using internal mirrors:**
+
+In an egress-blocked environment, point every download at internal mirrors instead of editing the Dockerfile. The Gradle distributions and the Maven distribution come from `GRADLE_DIST_URL` and `MAVEN_REPO_URL`; the CLI itself comes from `MODERNE_CLI_RELEASES_REPO` (or `MODERNE_CLI_SNAPSHOTS_REPO`):
+
+```bash
+docker build \
+  --build-arg GRADLE_DIST_URL=https://artifactory.internal/artifactory/data-local/gradle \
+  --build-arg MAVEN_REPO_URL=https://artifactory.internal/artifactory/maven-central \
+  --build-arg MODERNE_CLI_RELEASES_REPO=https://artifactory.internal/artifactory/maven-central \
+  -t mass-ingest .
+```
+
+`GRADLE_DIST_URL` is used as `${GRADLE_DIST_URL}/gradle-<version>-bin.zip`, and `MAVEN_REPO_URL` as `${MAVEN_REPO_URL}/org/apache/maven/apache-maven/<version>/apache-maven-<version>-bin.tar.gz`, so the mirror must serve those layouts. The base images (`eclipse-temurin`, or `registry.access.redhat.com/ubi9/ubi` for FIPS) are pulled by the Docker daemon, so mirror those through your registry configuration rather than a build argument.
 
 ### FIPS-compliant image
 
@@ -238,15 +260,7 @@ A separate `Dockerfile.fips` is provided for environments that require FIPS 140-
 docker build -f Dockerfile.fips -t mass-ingest:fips .
 ```
 
-**Build arguments** (in addition to `MODERNE_CLI_VERSION`):
-
-| Argument             | Default                                      | Description                            |
-|----------------------|----------------------------------------------|----------------------------------------|
-| `MAVEN_REPO_URL`    | `https://repo1.maven.org/maven2`             | Maven repository for CLI and Maven     |
-| `GRADLE_DIST_URL`   | `https://services.gradle.org/distributions`  | Gradle distribution download URL       |
-| `GRADLE_VERSION`    | `8.14`                                       | Primary Gradle version to install      |
-| `GRADLE_EXTRA_VERSIONS` | *(empty)*                                | Comma-separated additional Gradle versions (e.g., `6.9.4,5.6.4`) |
-| `MAVEN_VERSION`     | `3.9.11`                                     | Maven version to install               |
+**Build arguments:** the same set as the standard image (see [Build arguments](#build-arguments) above).
 
 **Using internal mirrors:**
 
