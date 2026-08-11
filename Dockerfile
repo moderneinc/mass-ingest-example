@@ -20,17 +20,8 @@ FROM eclipse-temurin:25-jdk AS jdk25
 FROM jdk25 AS dependencies
 RUN apt-get -y update && apt-get install -y curl git git-lfs jq libxml2-utils unzip wget zip vim && git lfs install
 
-# Create the non-root user the container runs as. System-level installations
-# below still happen as root; the image drops privileges in the final stage
-# (see DROP PRIVILEGES) so the container never runs as root.
-#
-# The user's primary group is root (GID 0) and its writable directories are
-# group-writable, so the image also works on platforms that run containers
-# with an arbitrary UID and GID 0 (e.g. OpenShift).
-#
-# Ubuntu 24.04 base images ship a default `ubuntu` user; remove it so the
-# `moderne` user can take UID 1000, which matches the typical host user UID
-# and keeps volume-mounted files readable.
+# Create the non-root user the container runs as. 
+# Ubuntu 24.04 base images ship a default `ubuntu` user; remove it so the`moderne` user can take UID 1000.
 RUN userdel -r ubuntu 2>/dev/null; \
     useradd --uid 1000 --gid 0 --create-home --shell /bin/bash moderne && \
     chmod g=u /home/moderne && \
@@ -102,8 +93,6 @@ RUN if [ -n "${MODERNE_CLI_VERSION}" ]; then \
 RUN chmod +x /usr/local/bin/modw && ln -sf modw /usr/local/bin/mod
 
 # Write wrapper properties so modw knows the version policy at runtime.
-# These live in the moderne user's home because the CLI resolves its
-# configuration from the home directory of the user running it.
 RUN mkdir -p /home/moderne/.moderne/cli/dist && \
     if [ -n "${MODERNE_CLI_VERSION}" ]; then \
         echo "version=${MODERNE_CLI_VERSION}" > /home/moderne/.moderne/cli/dist/moderne-wrapper.properties; \
@@ -123,10 +112,6 @@ RUN mkdir -p /home/moderne/.moderne/cli/dist && \
 ################################################################################
 # Most projects use Maven/Gradle wrappers and don't need these installations.
 # Uncomment only if your repositories specifically require them.
-#
-# Everything in this stage installs system-level tooling and runs as root.
-# Commands that configure the Moderne CLI (`mod config ...`) live in the
-# CLI CONFIGURATION section further down, after the switch to the non-root user.
 
 FROM modcli AS language-support
 
@@ -139,7 +124,6 @@ ARG MAVEN_REPO_URL=https://repo1.maven.org/maven2
 # Install one or more Gradle versions for repos that lack a Gradle wrapper.
 # To add versions for repos with older build scripts, add them to GRADLE_EXTRA_VERSIONS (comma-separated).
 # Then use the `gradleVersion` column in repos.csv to select which version to use per repo.
-# The installations are registered with the CLI in the CLI CONFIGURATION section below.
 ARG GRADLE_VERSION=8.14
 ARG GRADLE_EXTRA_VERSIONS=
 RUN mkdir -p /opt/gradle && \
