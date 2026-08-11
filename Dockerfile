@@ -130,6 +130,11 @@ RUN mkdir -p /home/moderne/.moderne/cli/dist && \
 
 FROM modcli AS language-support
 
+# Artifact locations - override these to point at internal mirrors
+# (e.g. --build-arg GRADLE_DIST_URL=https://artifactory.internal/artifactory/data-local/gradle)
+ARG GRADLE_DIST_URL=https://services.gradle.org/distributions
+ARG MAVEN_REPO_URL=https://repo1.maven.org/maven2
+
 # Gradle (comment if projects don't use Gradle without a wrapper)
 # Install one or more Gradle versions for repos that lack a Gradle wrapper.
 # To add versions for repos with older build scripts, add them to GRADLE_EXTRA_VERSIONS (comma-separated).
@@ -138,11 +143,11 @@ FROM modcli AS language-support
 ARG GRADLE_VERSION=8.14
 ARG GRADLE_EXTRA_VERSIONS=
 RUN mkdir -p /opt/gradle && \
-    wget --no-check-certificate https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip && \
+    wget --no-check-certificate "${GRADLE_DIST_URL}/gradle-${GRADLE_VERSION}-bin.zip" -O gradle-${GRADLE_VERSION}-bin.zip && \
     unzip -d /opt/gradle gradle-${GRADLE_VERSION}-bin.zip && \
     rm gradle-${GRADLE_VERSION}-bin.zip && \
     for v in $(echo "${GRADLE_EXTRA_VERSIONS}" | tr ',' ' '); do \
-        wget --no-check-certificate https://services.gradle.org/distributions/gradle-${v}-bin.zip && \
+        wget --no-check-certificate "${GRADLE_DIST_URL}/gradle-${v}-bin.zip" -O gradle-${v}-bin.zip && \
         unzip -d /opt/gradle gradle-${v}-bin.zip && \
         rm gradle-${v}-bin.zip; \
     done
@@ -150,8 +155,9 @@ ENV PATH="${PATH}:/opt/gradle/gradle-${GRADLE_VERSION}/bin"
 
 # Maven (comment if projects don't use Maven without a wrapper)
 # NOTE: This version may be out of date as new versions are continually released. Check here for the latest version: https://repo1.maven.org/maven2/org/apache/maven/apache-maven/
-ENV MAVEN_VERSION=3.9.11
-RUN wget --no-check-certificate https://repo1.maven.org/maven2/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz && tar xzvf apache-maven-${MAVEN_VERSION}-bin.tar.gz && rm apache-maven-${MAVEN_VERSION}-bin.tar.gz
+ARG MAVEN_VERSION=3.9.11
+ENV MAVEN_VERSION=${MAVEN_VERSION}
+RUN wget --no-check-certificate "${MAVEN_REPO_URL}/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz" -O apache-maven-${MAVEN_VERSION}-bin.tar.gz && tar xzvf apache-maven-${MAVEN_VERSION}-bin.tar.gz && rm apache-maven-${MAVEN_VERSION}-bin.tar.gz
 RUN mv apache-maven-${MAVEN_VERSION} /opt/apache-maven-${MAVEN_VERSION}
 RUN ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 
@@ -276,8 +282,12 @@ FROM language-support AS runner
 # AWS CLI for S3 repos.csv support (~300MB)
 # Uncomment when using S3 URLs for repos.csv in AWS Batch deployments.
 # Also useful for 2-observability if fetching repos.csv from S3.
-# HTTP/HTTPS URLs work without this. Comment out if not needed:
-#RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+# Required for AWS CodeArtifact (publish.sh uses it to mint auth tokens).
+# HTTP/HTTPS URLs work without this. Comment out if not needed.
+# $(uname -m) resolves to x86_64 or aarch64 for the image's target platform (RUN steps
+# execute on the target platform, including under `docker buildx --platform`), so
+# Graviton/arm64 images get the right AWS CLI build automatically.
+#RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o "awscliv2.zip" && \
 #    unzip awscliv2.zip && \
 #    ./aws/install && \
 #    rm -rf awscliv2.zip aws/
@@ -319,6 +329,30 @@ RUN mod config build gradle installation edit $(find /opt/gradle -maxdepth 1 -mi
 # COPY --chown=1000:0 maven/settings-security.xml /home/moderne/.m2/settings-security.xml
 # RUN mod config build maven settings edit /home/moderne/.m2/settings.xml
 
+# AWS CodeArtifact (Maven repository with rotating auth token)
+# Publish LSTs to and resolve build dependencies from AWS CodeArtifact.
+# CodeArtifact tokens are short-lived (max 12h), so publish.sh mints and refreshes
+# them at runtime; only the build configuration below is baked into the image.
+#
+# 1. Uncomment the AWS CLI install block above (required to mint tokens).
+# 2. Uncomment the lines below for the build tool(s) your repositories use.
+# See the "Using AWS CodeArtifact" section in README.md for the runtime env vars.
+#
+# Maven dependency resolution via CodeArtifact (token read from ${env.CODEARTIFACT_AUTH_TOKEN}).
+# Only the COPY happens at build time; publish.sh registers the file with
+# `mod config build maven settings edit` at runtime, and only when CodeArtifact is
+# selected — its catch-all mirror would otherwise break Maven builds in non-CodeArtifact
+# runs of this image. If you also use the "Custom Maven settings" section above, merge
+# the mirror/server into that settings.xml instead of uncommenting this COPY; publish.sh
+# leaves an existing /home/moderne/.m2/settings.xml configuration untouched.
+# COPY --chown=1000:0 maven/settings-codeartifact.xml /app/maven/settings-codeartifact.xml
+#
+# Gradle dependency/plugin resolution via CodeArtifact (token read from ${CODEARTIFACT_AUTH_TOKEN}).
+# Note: `gradle arguments edit` replaces any previously configured Gradle arguments, so
+# list them all (the init script plus any others your repositories need) in one command:
+# COPY --chown=1000:0 gradle/init-codeartifact.gradle /app/gradle/init-codeartifact.gradle
+# RUN mod config build gradle arguments edit --init-script=/app/gradle/init-codeartifact.gradle
+
 # Custom NPM configuration (uncomment if your JavaScript/TypeScript projects
 # require a custom npm registry or authentication):
 # COPY --chown=1000:0 npm/.npmrc /home/moderne/.npmrc
@@ -342,8 +376,12 @@ RUN mod config java options edit "-Xmx4g -Xss3m"
 
 # Git authentication configuration
 # Git credentials are configured at runtime via volume mounts to avoid baking secrets into the image.
-# The `store` credential helper reads /home/moderne/.git-credentials.
-RUN git config --global credential.helper store
+# The helper only implements "get": when a server rejects a credential (HTTP 401), git asks its
+# helpers to erase it, and the standard store helper would wipe the /home/moderne/.git-credentials
+# entry for that whole host, breaking every remaining repository in the run. The trade-off is that a
+# revoked token keeps being offered (and rejected) once per remaining repository on that host,
+# which may count toward the SCM's failed-authentication lockout policy for the account.
+RUN git config --global credential.helper '!f() { if [ "$1" = "get" ]; then git credential-store --file=/home/moderne/.git-credentials get; fi; }; f'
 # Optionally disable SSL verification if needed
 # RUN git config --global http.sslVerify false
 

@@ -84,7 +84,7 @@ mass-ingest-example/
 ├── Dockerfile            # Container image definition (used by all stages)
 ├── Dockerfile.fips       # FIPS 140-2/140-3 compliant variant (UBI 9)
 ├── publish.sh            # Main ingestion script
-├── publish.ps1           # PowerShell version
+├── publish.ps1           # PowerShell version (native Windows, no Docker — see "Windows / PowerShell")
 ├── repos.csv             # Example repository list
 │
 ├── 1-quickstart/         # Single container deployment
@@ -183,6 +183,8 @@ All stages share the same core configuration needs:
 - `MODERNE_TENANT` - Your Moderne tenant url (optional)
 - `MODERNE_TOKEN` - Moderne API token (optional)
 
+For AWS CodeArtifact, set `CODEARTIFACT_DOMAIN` (and `PUBLISH_URL` to the CodeArtifact Maven endpoint) instead of `PUBLISH_USER`/`PUBLISH_PASSWORD`. See [Using AWS CodeArtifact](#using-aws-codeartifact).
+
 ### Repository authentication
 
 For private repositories, credentials are mounted at runtime (never baked into images):
@@ -230,10 +232,32 @@ See `dependency-repos.csv.example` for a template.
 ### Build arguments
 
 All Dockerfiles support:
-- `MODERNE_CLI_VERSION` - Specific CLI version (defaults to latest release)
-- `MODERNE_CLI_STAGE` - `release` (default) for latest release from Maven Central, `snapshot` for latest snapshot
-- `MODERNE_CLI_RELEASES_REPO` - Maven repository for release CLI artifacts (defaults to `https://repo1.maven.org/maven2`)
-- `MODERNE_CLI_SNAPSHOTS_REPO` - Maven repository for snapshot CLI artifacts (defaults to `https://central.sonatype.com/repository/maven-snapshots`)
+
+| Argument                     | Default                                                     | Description                                                       |
+|------------------------------|-------------------------------------------------------------|-------------------------------------------------------------------|
+| `MODERNE_CLI_VERSION`        | *(latest release)*                                          | Specific CLI version                                              |
+| `MODERNE_CLI_STAGE`          | `release`                                                   | `release` for latest release, `snapshot` for latest snapshot      |
+| `MODERNE_CLI_RELEASES_REPO`  | `https://repo1.maven.org/maven2`                            | Maven repository for release CLI artifacts                        |
+| `MODERNE_CLI_SNAPSHOTS_REPO` | `https://central.sonatype.com/repository/maven-snapshots`   | Maven repository for snapshot CLI artifacts                       |
+| `MAVEN_REPO_URL`             | `https://repo1.maven.org/maven2`                            | Maven repository the Maven distribution is downloaded from        |
+| `GRADLE_DIST_URL`            | `https://services.gradle.org/distributions`                 | Gradle distribution download URL                                  |
+| `GRADLE_VERSION`             | `8.14`                                                      | Primary Gradle version to install                                 |
+| `GRADLE_EXTRA_VERSIONS`      | *(empty)*                                                   | Comma-separated additional Gradle versions (e.g., `6.9.4,5.6.4`)  |
+| `MAVEN_VERSION`              | `3.9.11`                                                    | Maven version to install                                          |
+
+**Using internal mirrors:**
+
+In an egress-blocked environment, point every download at internal mirrors instead of editing the Dockerfile. The Gradle distributions and the Maven distribution come from `GRADLE_DIST_URL` and `MAVEN_REPO_URL`; the CLI itself comes from `MODERNE_CLI_RELEASES_REPO` (or `MODERNE_CLI_SNAPSHOTS_REPO`):
+
+```bash
+docker build \
+  --build-arg GRADLE_DIST_URL=https://artifactory.internal/artifactory/data-local/gradle \
+  --build-arg MAVEN_REPO_URL=https://artifactory.internal/artifactory/maven-central \
+  --build-arg MODERNE_CLI_RELEASES_REPO=https://artifactory.internal/artifactory/maven-central \
+  -t mass-ingest .
+```
+
+`GRADLE_DIST_URL` is used as `${GRADLE_DIST_URL}/gradle-<version>-bin.zip`, and `MAVEN_REPO_URL` as `${MAVEN_REPO_URL}/org/apache/maven/apache-maven/<version>/apache-maven-<version>-bin.tar.gz`, so the mirror must serve those layouts. The base images (`eclipse-temurin`, or `registry.access.redhat.com/ubi9/ubi` for FIPS) are pulled by the Docker daemon, so mirror those through your registry configuration rather than a build argument.
 
 ### FIPS-compliant image
 
@@ -244,15 +268,7 @@ A separate `Dockerfile.fips` is provided for environments that require FIPS 140-
 docker build -f Dockerfile.fips -t mass-ingest:fips .
 ```
 
-**Build arguments** (in addition to `MODERNE_CLI_VERSION`):
-
-| Argument             | Default                                      | Description                            |
-|----------------------|----------------------------------------------|----------------------------------------|
-| `MAVEN_REPO_URL`    | `https://repo1.maven.org/maven2`             | Maven repository for CLI and Maven     |
-| `GRADLE_DIST_URL`   | `https://services.gradle.org/distributions`  | Gradle distribution download URL       |
-| `GRADLE_VERSION`    | `8.14`                                       | Primary Gradle version to install      |
-| `GRADLE_EXTRA_VERSIONS` | *(empty)*                                | Comma-separated additional Gradle versions (e.g., `6.9.4,5.6.4`) |
-| `MAVEN_VERSION`     | `3.9.11`                                     | Maven version to install               |
+**Build arguments:** the same set as the standard image (see [Build arguments](#build-arguments) above).
 
 **Using internal mirrors:**
 
@@ -295,6 +311,144 @@ RHEL 9 backported TLS 1.3 into JDK 8 and 11, but the backported `P11AEADCipher` 
 
 > [!NOTE]
 > For full kernel-level FIPS compliance, the host OS must also be running in FIPS mode. The container enforces FIPS-approved algorithms at the userspace level (OpenSSL, Java security providers) regardless of host configuration.
+
+## Using AWS CodeArtifact
+
+AWS CodeArtifact is a standard Basic-auth Maven repository, but its password is a short-lived token (minted with `aws codeartifact get-authorization-token`, expires within 12h), not a static secret. The examples handle this by minting the token at runtime and refreshing it before every batch, so a long-running or scheduled ingest never goes stale. The same token is reused for dependency resolution during the build. After each publish, the uploaded package versions are finalized to `Published` status: CodeArtifact marks versions uploaded without a `maven-metadata.xml` as `Unfinished` and its Maven endpoint returns 404 for them, which would otherwise make the LSTs and the `repos-lock.csv` catalog invisible to the Moderne platform.
+
+### Authentication
+
+Authenticate with an IAM role attached to the compute (AWS Batch job role, ECS task role, or EC2 instance profile) rather than static access keys. The AWS CLI in the container picks up the role automatically. If you must use static keys, pass them as `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` environment variables.
+
+The IAM principal needs
+* `codeartifact:GetAuthorizationToken`
+* `codeartifact:ListPackageVersions`
+* `codeartifact:PublishPackageVersion`
+* `codeartifact:PutPackageMetadata`
+* `codeartifact:ReadFromRepository`
+* `codeartifact:UpdatePackageVersionsStatus`
+* `sts:GetServiceBearerToken`
+
+### Image setup
+
+In the `Dockerfile`, uncomment the AWS CLI install block, then uncomment the lines in the "OPTIONAL: AWS CodeArtifact" section for the build tool(s) your repositories use:
+
+- Maven: `COPY maven/settings-codeartifact.xml /app/maven/settings-codeartifact.xml` (publish.sh registers it at runtime, only when CodeArtifact is selected, so the same image still builds Maven projects in S3/Artifactory runs)
+- Gradle: `COPY gradle/init-codeartifact.gradle /app/gradle/init-codeartifact.gradle` (+ the `mod config build gradle arguments edit` line; the init script no-ops when CodeArtifact is not in use)
+
+Gradle ignores `settings.xml` for credentials, so it needs the init script; Maven needs the settings file. Configure CodeArtifact for every build tool your portfolio uses — an unconfigured tool cannot reach CodeArtifact and resolves entirely from public repositories. If you set `CODEARTIFACT_DOMAIN` but configure neither tool, publish.sh logs a warning.
+
+### Dependency resolution
+
+Both tools resolve only what CodeArtifact serves: `PUBLISH_URL` plus its upstream chain. Public repositories need an external connection, which must come from CodeArtifact's fixed, AWS-managed list (Maven Central, Google Android, Gradle Plugin Portal, CommonsWare, Clojars) — you cannot proxy an arbitrary remote (e.g. Sonatype snapshots) as you would in Nexus or Artifactory. Internal artifacts already in the domain resolve through the upstream chain with the same token; a different domain or account is out of reach, since the token is domain-scoped.
+
+#### Maven
+
+publish.sh registers `settings-codeartifact.xml` only on a CodeArtifact run, so the same image still builds S3/Artifactory runs. It ships with a catch-all mirror (`<mirrorOf>*</mirrorOf>`), so all Maven resolution goes through CodeArtifact and anything it cannot reach fails the build; narrow the `<mirrorOf>` to let those repositories resolve from their original source instead. A `/home/moderne/.m2/settings.xml` you supply yourself is left untouched — merge the `<server>`/`<mirror>` in.
+
+#### Gradle
+
+The init script adds CodeArtifact as an additional repository, so resolution stays additive: a Gradle build keeps its own repositories and falls back to them, and is correspondingly not forced through CodeArtifact. To isolate a Gradle build to CodeArtifact, remove the other repositories from the project.
+
+### Environment variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `PUBLISH_URL` | yes | CodeArtifact Maven HTTPS endpoint, e.g. `https://my-domain-111122223333.d.codeartifact.us-east-1.amazonaws.com/maven/my-repo/` |
+| `CODEARTIFACT_DOMAIN` | yes | CodeArtifact domain name. Setting this selects the CodeArtifact path. |
+| `CODEARTIFACT_DOMAIN_OWNER` | optional | AWS account ID that owns the domain. Derived from `PUBLISH_URL` when unset; set it explicitly if your endpoint host does not follow the standard format. |
+| `CODEARTIFACT_REGION` | optional | AWS region of the domain. Derived from `PUBLISH_URL` when unset. |
+| `CODEARTIFACT_TOKEN_DURATION` | optional | Token lifetime in seconds (default 12h; `0` ties it to the role session, which can be shorter than 12h under a capped assumed-role session). |
+
+Do not set `PUBLISH_USER`/`PUBLISH_PASSWORD` for CodeArtifact; the script authenticates the publish target with `aws` and the current token directly. Set `BATCH_SIZE` so each batch completes inside the token lifetime: the token is refreshed once per batch, so an unbatched run (the default) or org mode (`-o`) mints it only once and a build/publish that runs past the expiry will fail.
+
+### Known limitations
+
+- **Only the first publish updates the organization catalog.** `mod publish` maintains the `repos-lock.csv` catalog at a fixed coordinate by re-uploading it, but CodeArtifact assets are immutable, so every publish after the first returns HTTP 409 and the catalog keeps only the first publish's repos. LST JARs use unique coordinates and are unaffected. If your tenant reads its org structure from this catalog (`moderne.organization.sources.*`), do a single unbatched or org-mode run, and delete the `repos-lock` version (`aws codeartifact delete-package-versions`) before re-ingesting.
+- **Build logs are not stored in CodeArtifact.** Its Maven endpoint rejects non-Maven log artifact paths, so the ingest scripts skip the log upload (the logs remain in the local `log.zip`/`syncs.zip`).
+- **The platform must read the published catalog directly, not poll the repository.** CodeArtifact provides neither a Maven Indexer index nor an Artifactory-style query API, so the connector cannot discover LSTs by polling it. The tenant's artifact source must be configured without a `poll:` block ("lock mode"), so it reads the `repos-lock.csv` this ingest publishes.
+- This CodeArtifact path is implemented in both `publish.sh` (bash) and `publish.ps1` (PowerShell). On Windows, register the Maven settings/Gradle init wiring so build dependencies resolve from CodeArtifact (the script looks for `maven/settings-codeartifact.xml` and `gradle/init-codeartifact.gradle` next to `publish.ps1`, and skips a user-provided `%USERPROFILE%\.m2\settings.xml`).
+
+### Example
+
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  -v $(pwd)/data:/var/moderne \
+  -e PUBLISH_URL=https://my-domain-111122223333.d.codeartifact.us-east-1.amazonaws.com/maven/my-repo/ \
+  -e CODEARTIFACT_DOMAIN=my-domain \
+  -e CODEARTIFACT_DOMAIN_OWNER=111122223333 \
+  -e CODEARTIFACT_REGION=us-east-1 \
+  -e BATCH_SIZE=50 \
+  mass-ingest
+```
+
+## Windows / PowerShell
+
+The Docker stages above run the bash `publish.sh`. `publish.ps1` is a PowerShell port of the
+same ingest flow that runs **directly on a Windows host, without Docker**. The most common
+reason to use it is building **.NET (C#) repositories**: on Windows these build natively with
+just the NuGet CLI (no Mono), so a single host can produce both .NET Framework and .NET Core
+LSTs cleanly.
+
+`publish.ps1` mirrors `publish.sh` — configure credentials, sync repos, build LSTs
+(`mod build`), publish, and upload logs — including CSV batching, per-batch build timeouts,
+S3 / Maven / Artifactory / AWS CodeArtifact publish targets, and CSV sources from a local
+path, `s3://`, or `http(s)://`.
+
+### Prerequisites
+
+- **Windows** with PowerShell 5.1+ (or PowerShell 7+).
+- **Moderne CLI** (`mod`) on `PATH`. Building .NET requires CLI **4.1.9+**. See the
+  [CLI install guide](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro).
+- **Java toolchain** for the JVM repos you build — one or more JDKs (registered with the
+  `mod config java jdk` commands) plus Maven/Gradle as needed.
+- **AWS CLI** if you publish to S3 or CodeArtifact, or read a `repos.csv` from `s3://`.
+- **For .NET builds:** .NET SDK **10.0+** and the NuGet CLI (`nuget.exe`) on `PATH` — that is
+  all Windows needs. Keep the `dotnet` build step in `moderne.yml` (enabled by
+  default). See the ".NET / C# builds" notes in `.env.example` and the private-feed template
+  in `nuget/nuget.config`.
+
+### Configuration
+
+`publish.ps1` reads the same environment variables as the bash flow, set as PowerShell env
+vars before running. `DATA_DIR` (the working directory for clones, logs, and artifacts) is
+required; the rest match [Environment variables](#environment-variables),
+[Repository authentication](#repository-authentication) (`GIT_CREDENTIALS` /
+`GIT_SSH_CREDENTIALS`), the S3/CodeArtifact settings, and the tuning knobs (`BATCH_SIZE`,
+`BUILD_TIMEOUT`). One is specific to the .NET build path:
+
+- `NUGET_CONFIG_FILE` — path to a `nuget.config` applied to `%APPDATA%\NuGet\NuGet.Config`
+  so a private feed is used during restore (template in `nuget/nuget.config`). Building .NET
+  itself needs no flag — it is driven by the `dotnet` step in `moderne.yml`.
+
+### Running
+
+```powershell
+$env:DATA_DIR = "C:\moderne\data"
+$env:PUBLISH_URL = "https://artifactory.example.com/artifactory/moderne-ingest/"
+$env:PUBLISH_USER = "your-username"
+$env:PUBLISH_PASSWORD = "your-password"
+
+# Build and publish every repository in repos.csv
+.\publish.ps1 -SourceCsv repos.csv
+
+# Process a slice of the CSV (1-based, inclusive) — useful for splitting work across hosts
+.\publish.ps1 -SourceCsv repos.csv -StartIndex 1 -EndIndex 100
+
+# Ingest a single organization
+.\publish.ps1 -SourceCsv repos.csv -Organization my-org
+```
+
+For long runs, set `$env:BATCH_SIZE` so each batch completes inside your credential/token
+lifetime (required for CodeArtifact — see [Using AWS CodeArtifact](#using-aws-codeartifact)).
+
+### Differences from the Docker/bash flow
+
+- **No container.** The script runs on the host, so you install and register the toolchain
+  yourself (JDKs, Maven/Gradle, .NET SDK, NuGet CLI) rather than through the Dockerfile.
+- **Diagnostics are bash-only.** `DIAGNOSE` / `DIAGNOSE_ON_START` and the `diagnostics/`
+  system have no PowerShell port yet; run them from the Docker/bash flow.
 
 ## Generating repository lists
 
@@ -446,7 +600,7 @@ Generated: 2025-01-20 14:32 UTC
 
 === SCM credentials ===
 [PASS] .git-credentials: found 2 credential(s)
-[PASS] .git-credentials: file is read-only (mode 400)
+[PASS] credential.helper: get-only wrapper (erase requests ignored)
 
 === Publish latency ===
        Testing PUBLISH_URL (10 sequential requests)...
