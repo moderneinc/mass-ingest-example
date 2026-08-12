@@ -15,6 +15,9 @@ This example demonstrates the simplest way to run mass-ingest: a single Docker c
 ## Prerequisites
 
 - Docker installed
+- Code Genome Project credentials (username + download token) — the Moderne CLI is downloaded
+  from there during the build. See
+  [Accessing the Code Genome Project](https://docs.moderne.io/administrator-documentation/moderne-platform/how-to-guides/accessing-the-code-genome-project/)
 - Access to one of the following storage options:
   - Amazon S3 bucket or S3-compatible storage (MinIO, etc.)
   - Artifactory with Maven 2 format support
@@ -41,8 +44,18 @@ Required columns:
 
 ### 2. Build the Docker image
 
+The image downloads the Moderne CLI from the [Code Genome Project](https://docs.moderne.io/administrator-documentation/moderne-platform/how-to-guides/accessing-the-code-genome-project/),
+so the build needs the username and download token Moderne issued you. They are passed as
+BuildKit secrets and never land in the image:
+
 ```bash
-docker build -t mass-ingest:quickstart ..
+export CGP_USERNAME='you@example.com'
+export CGP_PASSWORD='<download token>'
+
+docker build \
+  --secret id=cgp_username,env=CGP_USERNAME \
+  --secret id=cgp_password,env=CGP_PASSWORD \
+  -t mass-ingest:quickstart ..
 ```
 
 Optional build arguments:
@@ -50,7 +63,11 @@ Optional build arguments:
 
 Example with specific CLI version:
 ```bash
-docker build -t mass-ingest:quickstart --build-arg MODERNE_CLI_VERSION=3.50.0 ..
+docker build \
+  --secret id=cgp_username,env=CGP_USERNAME \
+  --secret id=cgp_password,env=CGP_PASSWORD \
+  --build-arg MODERNE_CLI_VERSION=4.5.1 \
+  -t mass-ingest:quickstart ..
 ```
 
 ### 3. Run the container

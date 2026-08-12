@@ -2,10 +2,19 @@ services:
   mass-ingest:
     build:
       context: ..
+      # Valueless entries are taken from the environment Compose runs in, and left unset
+      # when absent — so the Dockerfile's own defaults (the Code Genome Project) apply.
       args:
-        MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION:-}
-        MODERNE_CLI_RELEASES_REPO: ${MODERNE_CLI_RELEASES_REPO:-}
-        MODERNE_CLI_SNAPSHOTS_REPO: ${MODERNE_CLI_SNAPSHOTS_REPO:-}
+        MODERNE_CLI_VERSION:
+        MODERNE_CLI_RELEASES_REPO:
+        MODERNE_CLI_SNAPSHOTS_REPO:
+      # The Moderne CLI is pulled from the Code Genome Project during the build, which needs
+      # the Moderne-supplied username and download token. Export CGP_USERNAME and CGP_PASSWORD
+      # before `docker compose build`, or swap the `environment:` sources at the bottom of this
+      # file for `file: ./cgp_username` / `file: ./cgp_password`.
+      secrets:
+        - cgp_username
+        - cgp_password
     env_file:
       - .env
     restart: unless-stopped
@@ -55,3 +64,9 @@ networks:
 
 volumes:
   data:
+
+secrets:
+  cgp_username:
+    environment: CGP_USERNAME
+  cgp_password:
+    environment: CGP_PASSWORD

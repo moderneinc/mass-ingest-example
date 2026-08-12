@@ -19,6 +19,19 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build the Docker image
+      # The image downloads the Moderne CLI from the Code Genome Project, which is
+      # credentialed. GitHub withholds secrets from fork pull requests, so skip the build
+      # there rather than fail on a 401 the contributor cannot fix.
+      env:
+        CGP_USERNAME: ${{ secrets.CGP_ARTIFACTS_MAVEN_USERNAME }}
+        CGP_PASSWORD: ${{ secrets.CGP_ARTIFACTS_MAVEN_TOKEN }}
       run: |
+        if [ -z "$CGP_PASSWORD" ]; then
+          echo "::notice::Code Genome Project credentials unavailable (fork PR); skipping the image build."
+          exit 0
+        fi
         touch repos.csv
-        docker build . --file Dockerfile --tag mass-ingest:$(date +%s)
+        docker build . --file Dockerfile \
+          --secret id=cgp_username,env=CGP_USERNAME \
+          --secret id=cgp_password,env=CGP_PASSWORD \
+          --tag mass-ingest:$(date +%s)

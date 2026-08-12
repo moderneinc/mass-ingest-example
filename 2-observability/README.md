@@ -117,10 +117,28 @@ docker compose down -v
 To use a specific CLI version, add it to your `.env` file:
 
 ```
-MODERNE_CLI_VERSION=3.50.0
+MODERNE_CLI_VERSION=4.5.1
 ```
 
 Environment variables and build arguments from `.env` are automatically loaded by `docker-compose.yml`.
+
+### Code Genome Project credentials
+
+The image downloads the Moderne CLI from the
+[Code Genome Project](https://docs.moderne.io/administrator-documentation/moderne-platform/how-to-guides/accessing-the-code-genome-project/),
+which requires the username and download token Moderne issued you. `docker-compose.yml` passes
+them through as BuildKit secrets, so export them in the shell that runs Compose:
+
+```bash
+export CGP_USERNAME='you@example.com'
+export CGP_PASSWORD='<download token>'
+
+docker compose up -d --build
+```
+
+Build secrets are read from the environment Compose runs in, not from `.env` — put the token in
+files and swap the `secrets:` sources at the bottom of `docker-compose.yml` for
+`file: ./cgp_username` / `file: ./cgp_password` if you would rather keep it off your shell.
 
 ### Repository authentication
 
@@ -238,7 +256,10 @@ services:
     build:
       context: ..
       args:
-        MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION:-}
+        MODERNE_CLI_VERSION:
+      secrets:
+        - cgp_username
+        - cgp_password
     env_file:
       - .env
     command: ["./publish.sh", "repos.csv", "--start", "1", "--end", "1000"]
@@ -255,7 +276,10 @@ services:
     build:
       context: ..
       args:
-        MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION:-}
+        MODERNE_CLI_VERSION:
+      secrets:
+        - cgp_username
+        - cgp_password
     env_file:
       - .env
     command: ["./publish.sh", "repos.csv", "--start", "1001", "--end", "2000"]
@@ -272,7 +296,10 @@ services:
     build:
       context: ..
       args:
-        MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION:-}
+        MODERNE_CLI_VERSION:
+      secrets:
+        - cgp_username
+        - cgp_password
     env_file:
       - .env
     command: ["./publish.sh", "repos.csv", "--start", "2001", "--end", "3000"]
@@ -296,6 +323,13 @@ volumes:
   data1:
   data2:
   data3:
+
+# Keep the CGP build secrets from the shipped docker-compose.yml
+secrets:
+  cgp_username:
+    environment: CGP_USERNAME
+  cgp_password:
+    environment: CGP_PASSWORD
 ```
 
 Update Prometheus configuration (`observability/prometheus/prometheus.yml`) to scrape all workers:

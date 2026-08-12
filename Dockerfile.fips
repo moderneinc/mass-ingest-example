@@ -35,57 +35,83 @@ FROM registry.access.redhat.com/ubi9/ubi AS downloader
 # Artifact locations - override these to point at internal mirrors
 ARG MAVEN_REPO_URL=https://repo1.maven.org/maven2
 ARG GRADLE_DIST_URL=https://services.gradle.org/distributions
-ARG MODERNE_CLI_RELEASES_REPO=https://repo1.maven.org/maven2
-ARG MODERNE_CLI_SNAPSHOTS_REPO=https://central.sonatype.com/repository/maven-snapshots
+# The Moderne CLI is published to the Code Genome Project (CGP), a single flat repository
+# that serves releases and snapshots side by side.
+ARG MODERNE_CLI_RELEASES_REPO=https://artifacts.codegenomeproject.org/maven
+ARG MODERNE_CLI_SNAPSHOTS_REPO=https://artifacts.codegenomeproject.org/maven
 
 # Moderne CLI version — defaults to latest release from maven-metadata.xml
 ARG MODERNE_CLI_VERSION
 ARG MODERNE_CLI_STAGE=release
 
-# Download modw wrapper script
-RUN CLI_VERSION="${MODERNE_CLI_VERSION}"; \
-    if [ -n "${CLI_VERSION}" ]; then \
-        if echo "${CLI_VERSION}" | grep -q '\-SNAPSHOT$'; then \
-            METADATA_URL="$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/$CLI_VERSION/maven-metadata.xml"; \
-            TIMESTAMP=$(curl -s "$METADATA_URL" | sed -n 's/.*<timestamp>\(.*\)<\/timestamp>.*/\1/p'); \
-            BUILD_NUM=$(curl -s "$METADATA_URL" | sed -n 's/.*<buildNumber>\(.*\)<\/buildNumber>.*/\1/p'); \
-            if [ -z "$TIMESTAMP" ] || [ -z "$BUILD_NUM" ]; then \
-                echo "Failed to resolve snapshot artifact version"; exit 1; \
-            fi; \
-            ARTIFACT_VERSION="$(echo "$CLI_VERSION" | sed 's/-SNAPSHOT$//')-$TIMESTAMP-$BUILD_NUM"; \
-            echo "Downloading modw for snapshot: $CLI_VERSION"; \
-            curl -fsSL -o /tmp/modw "$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/$CLI_VERSION/moderne-cli-$ARTIFACT_VERSION-modw.sh"; \
-        else \
-            echo "Downloading modw for version: $CLI_VERSION"; \
-            curl -fsSL -o /tmp/modw "${MODERNE_CLI_RELEASES_REPO}/io/moderne/moderne-cli/${CLI_VERSION}/moderne-cli-${CLI_VERSION}-modw.sh"; \
-        fi; \
-    elif [ "${MODERNE_CLI_STAGE}" = "snapshot" ]; then \
-        CLI_VERSION=$(curl -s "$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/maven-metadata.xml" | sed -n 's/.*<latest>\(.*\)<\/latest>.*/\1/p'); \
-        if [ -z "$CLI_VERSION" ]; then \
-            CLI_VERSION=$(curl -s "$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/maven-metadata.xml" | sed -n 's/.*<version>\(.*-SNAPSHOT\)<\/version>.*/\1/p' | tail -1); \
-        fi; \
-        if [ -z "$CLI_VERSION" ]; then \
-            echo "Failed to resolve latest snapshot version"; exit 1; \
-        fi; \
-        METADATA_URL="$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/$CLI_VERSION/maven-metadata.xml"; \
-        TIMESTAMP=$(curl -s "$METADATA_URL" | sed -n 's/.*<timestamp>\(.*\)<\/timestamp>.*/\1/p'); \
-        BUILD_NUM=$(curl -s "$METADATA_URL" | sed -n 's/.*<buildNumber>\(.*\)<\/buildNumber>.*/\1/p'); \
-        if [ -z "$TIMESTAMP" ] || [ -z "$BUILD_NUM" ]; then \
-            echo "Failed to resolve snapshot artifact version"; exit 1; \
-        fi; \
-        ARTIFACT_VERSION="$(echo "$CLI_VERSION" | sed 's/-SNAPSHOT$//')-$TIMESTAMP-$BUILD_NUM"; \
-        echo "Downloading latest snapshot modw: $CLI_VERSION"; \
-        curl -fsSL -o /tmp/modw "$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/$CLI_VERSION/moderne-cli-$ARTIFACT_VERSION-modw.sh"; \
+# Download the modw wrapper script and record the wrapper properties for the runtime stage.
+# The concrete version and a CGP `distributionUrl` are pinned here so modw never falls back
+# to its built-in Maven Central lookup for the CLI distribution.
+#
+# CGP is credentialed. Pass the Moderne-supplied username and download token as BuildKit
+# secrets so they stay out of the image layers and out of `docker history`:
+#
+#   docker build -f Dockerfile.fips \
+#     --secret id=cgp_username,env=CGP_USERNAME \
+#     --secret id=cgp_password,env=CGP_PASSWORD \
+#     -t mass-ingest-fips .
+#
+# (`src=<file>` works in place of `env=` on older buildx.) Omit both secrets only when the
+# MODERNE_CLI_*_REPO overrides point at a mirror that allows anonymous reads.
+RUN --mount=type=secret,id=cgp_username --mount=type=secret,id=cgp_password \
+    set -e; \
+    CGP_USERNAME="$(cat /run/secrets/cgp_username 2>/dev/null || true)"; \
+    CGP_PASSWORD="$(cat /run/secrets/cgp_password 2>/dev/null || true)"; \
+    if [ -n "$CGP_USERNAME" ] || [ -n "$CGP_PASSWORD" ]; then \
+        set -- --user "$CGP_USERNAME:$CGP_PASSWORD"; \
     else \
-        CLI_VERSION=$(curl -s "${MODERNE_CLI_RELEASES_REPO}/io/moderne/moderne-cli/maven-metadata.xml" \
-            | grep '<release>' | sed 's/.*<release>\(.*\)<\/release>.*/\1/'); \
+        set --; \
+    fi; \
+    if [ -n "${MODERNE_CLI_VERSION}" ]; then \
+        CLI_VERSION="${MODERNE_CLI_VERSION}"; \
+    elif [ "${MODERNE_CLI_STAGE}" = "snapshot" ]; then \
+        SNAPSHOT_INDEX=$(curl -fsSL "$@" "$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/maven-metadata.xml"); \
+        CLI_VERSION=$(echo "$SNAPSHOT_INDEX" | sed -n 's/.*<latest>\(.*\)<\/latest>.*/\1/p'); \
+        if [ -z "$CLI_VERSION" ]; then \
+            CLI_VERSION=$(echo "$SNAPSHOT_INDEX" | sed -n 's/.*<version>\(.*-SNAPSHOT\)<\/version>.*/\1/p' | tail -1); \
+        fi; \
+        if [ -z "$CLI_VERSION" ]; then \
+            echo "Failed to resolve latest snapshot version from $MODERNE_CLI_SNAPSHOTS_REPO"; exit 1; \
+        fi; \
+    else \
+        CLI_VERSION=$(curl -fsSL "$@" "${MODERNE_CLI_RELEASES_REPO}/io/moderne/moderne-cli/maven-metadata.xml" | sed -n 's/.*<release>\(.*\)<\/release>.*/\1/p'); \
         if [ -z "${CLI_VERSION}" ]; then \
             echo "Failed to resolve latest CLI version from ${MODERNE_CLI_RELEASES_REPO}"; \
             exit 1; \
         fi; \
-        echo "Downloading latest release modw: $CLI_VERSION"; \
-        curl -fsSL -o /tmp/modw "${MODERNE_CLI_RELEASES_REPO}/io/moderne/moderne-cli/${CLI_VERSION}/moderne-cli-${CLI_VERSION}-modw.sh"; \
-    fi
+    fi; \
+    case "$CLI_VERSION" in \
+        *-SNAPSHOT) \
+            echo "Downloading modw for snapshot: $CLI_VERSION"; \
+            METADATA_URL="$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/$CLI_VERSION/maven-metadata.xml"; \
+            SNAPSHOT_METADATA=$(curl -fsSL "$@" "$METADATA_URL"); \
+            TIMESTAMP=$(echo "$SNAPSHOT_METADATA" | sed -n 's/.*<timestamp>\(.*\)<\/timestamp>.*/\1/p'); \
+            BUILD_NUM=$(echo "$SNAPSHOT_METADATA" | sed -n 's/.*<buildNumber>\(.*\)<\/buildNumber>.*/\1/p'); \
+            if [ -z "$TIMESTAMP" ] || [ -z "$BUILD_NUM" ]; then \
+                echo "Failed to resolve snapshot artifact version"; exit 1; \
+            fi; \
+            ARTIFACT_VERSION="$(echo "$CLI_VERSION" | sed 's/-SNAPSHOT$//')-$TIMESTAMP-$BUILD_NUM"; \
+            curl -fsSL "$@" -o /tmp/modw "$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/$CLI_VERSION/moderne-cli-$ARTIFACT_VERSION-modw.sh"; \
+            printf 'version=%s\ndistributionUrlEarlyAccess=%s\n' "$CLI_VERSION" "$MODERNE_CLI_SNAPSHOTS_REPO" > /tmp/moderne-wrapper.properties; \
+            ;; \
+        *) \
+            echo "Downloading modw for release: $CLI_VERSION"; \
+            curl -fsSL "$@" -o /tmp/modw "${MODERNE_CLI_RELEASES_REPO}/io/moderne/moderne-cli/${CLI_VERSION}/moderne-cli-${CLI_VERSION}-modw.sh"; \
+            case "$(uname -m)" in \
+                x86_64|amd64) CLI_DIST=moderne-cli-linux-x64 ;; \
+                aarch64|arm64) CLI_DIST=moderne-cli-linux-aarch64 ;; \
+                *) echo "Unsupported architecture: $(uname -m)"; exit 1 ;; \
+            esac; \
+            printf 'version=%s\ndistributionUrl=%s/io/moderne/%s/${version}/%s-${version}.${extension}\n' \
+                "$CLI_VERSION" "$MODERNE_CLI_RELEASES_REPO" "$CLI_DIST" "$CLI_DIST" \
+                > /tmp/moderne-wrapper.properties; \
+            ;; \
+    esac
 
 # Download Gradle (comment if projects don't use Gradle without a wrapper)
 # To add versions for repos with older build scripts, add them to GRADLE_EXTRA_VERSIONS (comma-separated).
@@ -238,19 +264,26 @@ WORKDIR /app
 COPY --from=downloader /tmp/modw /usr/local/bin/modw
 RUN chmod +x /usr/local/bin/modw && ln -sf modw /usr/local/bin/mod
 
-# Write wrapper properties so modw knows the version policy at runtime.
-# These live in the moderne user's home because the CLI resolves its
-# configuration from the home directory of the user running it.
-ARG MODERNE_CLI_VERSION
-ARG MODERNE_CLI_STAGE=release
-RUN mkdir -p /home/moderne/.moderne/cli/dist && \
-    if [ -n "${MODERNE_CLI_VERSION}" ]; then \
-        echo "version=${MODERNE_CLI_VERSION}" > /home/moderne/.moderne/cli/dist/moderne-wrapper.properties; \
-    elif [ "${MODERNE_CLI_STAGE}" = "snapshot" ]; then \
-        echo "version=LATEST" > /home/moderne/.moderne/cli/dist/moderne-wrapper.properties; \
-    else \
-        echo "version=RELEASE" > /home/moderne/.moderne/cli/dist/moderne-wrapper.properties; \
-    fi && \
+# Wrapper properties resolved in the download stage: the concrete CLI version plus the Code
+# Genome Project URL modw pulls the distribution from. These live in the moderne user's home
+# because the CLI resolves its configuration from the home directory of the user running it.
+COPY --from=downloader /tmp/moderne-wrapper.properties /home/moderne/.moderne/cli/dist/moderne-wrapper.properties
+
+# Install the CLI distribution while the CGP credentials are mounted, so that the rest of the
+# build and the running container never need to reach the repository for it. A pinned release
+# version means modw finds it already installed and skips the network; the snapshot channel
+# re-resolves each run, so pass MODERNE_WRAPPER_DISTRIBUTION_USERNAME /
+# MODERNE_WRAPPER_DISTRIBUTION_PASSWORD at runtime there.
+#
+# Note: unlike the downloads above, this one runs under the FIPS crypto policy. If CGP (or your
+# mirror) cannot negotiate a FIPS-approved cipher suite, move this step into the downloader
+# stage with a pre-seeded MODERNE_CLI_HOME and copy the result in.
+RUN --mount=type=secret,id=cgp_username --mount=type=secret,id=cgp_password \
+    set -e; \
+    MODERNE_WRAPPER_DISTRIBUTION_USERNAME="$(cat /run/secrets/cgp_username 2>/dev/null || true)"; \
+    MODERNE_WRAPPER_DISTRIBUTION_PASSWORD="$(cat /run/secrets/cgp_password 2>/dev/null || true)"; \
+    export MODERNE_WRAPPER_DISTRIBUTION_USERNAME MODERNE_WRAPPER_DISTRIBUTION_PASSWORD; \
+    HOME=/home/moderne mod --version; \
     chown -R moderne:0 /home/moderne/.moderne && chmod -R g=u /home/moderne/.moderne
 
 # Gradle (comment if projects don't use Gradle without a wrapper)

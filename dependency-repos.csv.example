@@ -12,3 +12,7 @@ url,username,password,token
 https://nexus.example.com/repository/maven-releases,${NEXUS_USER},${NEXUS_PASSWORD},
 https://artifactory.example.com/artifactory/libs-release,,,${ARTIFACTORY_TOKEN}
 https://repo.spring.io/release,,,
+# The Code Genome Project, where org.openrewrite and io.moderne artifacts are published.
+# Include it if your builds resolve those coordinates directly from CGP rather than through
+# a virtual repository.
+https://artifacts.codegenomeproject.org/maven,${CGP_USERNAME},${CGP_PASSWORD},

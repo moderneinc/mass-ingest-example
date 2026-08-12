@@ -57,9 +57,19 @@ Required columns:
 
 ### 2. Build and push Docker image
 
+The build downloads the Moderne CLI from the [Code Genome Project](https://docs.moderne.io/administrator-documentation/moderne-platform/how-to-guides/accessing-the-code-genome-project/),
+so export your Moderne-issued credentials first — they are passed as BuildKit secrets and never
+land in the image or in `docker history`:
+
 ```bash
+export CGP_USERNAME='you@example.com'
+export CGP_PASSWORD='<download token>'
+
 # Build the image from repository root
-docker build -t mass-ingest:latest ../..
+docker build \
+  --secret id=cgp_username,env=CGP_USERNAME \
+  --secret id=cgp_password,env=CGP_PASSWORD \
+  -t mass-ingest:latest ../..
 
 # Tag for your registry
 docker tag mass-ingest:latest <your-registry>/mass-ingest:latest
@@ -72,7 +82,10 @@ For AWS ECR:
 ```bash
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <account-id>.dkr.ecr.us-east-1.amazonaws.com
 
-docker build -t mass-ingest:latest ../..
+docker build \
+  --secret id=cgp_username,env=CGP_USERNAME \
+  --secret id=cgp_password,env=CGP_PASSWORD \
+  -t mass-ingest:latest ../..
 docker tag mass-ingest:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/mass-ingest:latest
 docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/mass-ingest:latest
 ```
