@@ -139,7 +139,7 @@ services:
     volumes:
       - data:/var/moderne
       - ../repos.csv:/app/repos.csv
-      - ./.git-credentials:/root/.git-credentials:ro  # Uncomment this line
+      - ./.git-credentials:/home/moderne/.git-credentials:ro  # Uncomment this line
 ```
 
 Alternatively, use SSH keys by uncommenting the SSH volume mount:
@@ -149,7 +149,7 @@ services:
     volumes:
       - data:/var/moderne
       - ../repos.csv:/app/repos.csv
-      - ./.ssh:/root/.ssh:ro  # Uncomment this line
+      - ./.ssh:/home/moderne/.ssh:ro  # Uncomment this line
 ```
 
 ### Custom repos.csv location

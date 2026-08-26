@@ -193,6 +193,14 @@ For private repositories, credentials are mounted at runtime (never baked into i
 
 See each stage's README for specific mounting instructions.
 
+### Non-root user
+
+Both Dockerfiles produce images that run as a dedicated non-root user (`moderne`, UID 1000, GID 0), so no extra configuration is needed to satisfy policies that forbid root containers (for example Kubernetes `runAsNonRoot: true` pod security settings). CLI configuration and credentials live in `/home/moderne`, and the writable directories (`/home/moderne`, `/var/moderne`, `/app`) are group-writable by GID 0 so the images also work on platforms that assign an arbitrary UID at runtime (such as OpenShift).
+
+Two practical consequences:
+- Host directories bind-mounted at `/var/moderne` must be writable by UID 1000 (pre-create them as your regular user rather than letting Docker create them as root).
+- Credential files mounted into `/home/moderne` must be readable by UID 1000.
+
 ### Repository list format
 The `repos.csv` file columns:
 - `cloneUrl` (required) - Full git clone URL
@@ -336,7 +344,7 @@ Both tools resolve only what CodeArtifact serves: `PUBLISH_URL` plus its upstrea
 
 #### Maven
 
-publish.sh registers `settings-codeartifact.xml` only on a CodeArtifact run, so the same image still builds S3/Artifactory runs. It ships with a catch-all mirror (`<mirrorOf>*</mirrorOf>`), so all Maven resolution goes through CodeArtifact and anything it cannot reach fails the build; narrow the `<mirrorOf>` to let those repositories resolve from their original source instead. A `/root/.m2/settings.xml` you supply yourself is left untouched — merge the `<server>`/`<mirror>` in.
+publish.sh registers `settings-codeartifact.xml` only on a CodeArtifact run, so the same image still builds S3/Artifactory runs. It ships with a catch-all mirror (`<mirrorOf>*</mirrorOf>`), so all Maven resolution goes through CodeArtifact and anything it cannot reach fails the build; narrow the `<mirrorOf>` to let those repositories resolve from their original source instead. A `/home/moderne/.m2/settings.xml` you supply yourself is left untouched — merge the `<server>`/`<mirror>` in.
 
 #### Gradle
 
@@ -558,7 +566,7 @@ Generated: 2025-01-20 14:32 UTC
 [PASS] PUBLISH_URL: https://artifactory.company.com/moderne
 [PASS] Publish credentials: PUBLISH_USER/PASSWORD set
        Git credentials:
-[PASS] HTTPS credentials: /root/.git-credentials (2 entries)
+[PASS] HTTPS credentials: /home/moderne/.git-credentials (2 entries)
 
 === repos.csv ===
 [PASS] File: /app/repos.csv (exists)
@@ -603,7 +611,7 @@ Generated: 2025-01-20 14:32 UTC
 [PASS] PUBLISH_URL: parallel throughput 42ms/request
 
 === Maven repositories ===
-       Using: /root/.m2/settings.xml
+       Using: /home/moderne/.m2/settings.xml
        Testing central (10 sequential requests)...
        Sequential: min=38ms avg=42ms max=67ms
 [PASS] central: average latency 42ms

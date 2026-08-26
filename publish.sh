@@ -165,17 +165,17 @@ configure_credentials() {
   fi
 
   if [ -n "${GIT_CREDENTIALS:-}" ]; then
-    echo -e "${GIT_CREDENTIALS}" > /root/.git-credentials
+    echo -e "${GIT_CREDENTIALS}" > "$HOME/.git-credentials"
     # Register the store helper so git consults the file, independent of image-level config.
-    git config --global credential.helper "store --file=/root/.git-credentials"
+    git config --global credential.helper "store --file=$HOME/.git-credentials"
   fi
 
   if [ -n "${GIT_SSH_CREDENTIALS:-}" ]; then
-    mkdir -p /root/.ssh
-    echo -e "${GIT_SSH_CREDENTIALS}" > /root/.ssh/private-key
-    chmod 600 /root/.ssh/private-key
+    mkdir -p "$HOME/.ssh"
+    echo -e "${GIT_SSH_CREDENTIALS}" > "$HOME/.ssh/private-key"
+    chmod 600 "$HOME/.ssh/private-key"
     # Point git at the key and accept unknown host keys so the clone does not block.
-    git config --global core.sshCommand "ssh -i /root/.ssh/private-key -o StrictHostKeyChecking=accept-new"
+    git config --global core.sshCommand "ssh -i $HOME/.ssh/private-key -o StrictHostKeyChecking=accept-new"
   fi
 
   # Configure artifact repository
@@ -241,13 +241,13 @@ configure_codeartifact() {
 
   # Register the Maven settings at runtime, only when CodeArtifact is selected: its catch-all
   # mirror reads ${env.PUBLISH_URL}, so baking it in would break Maven builds in a
-  # non-CodeArtifact run of the same image. A user-provided /root/.m2/settings.xml (the
-  # "Custom Maven Settings" Dockerfile section) takes precedence.
-  if [ ! -f /root/.m2/settings.xml ] && [ -f /app/maven/settings-codeartifact.xml ]; then
+  # non-CodeArtifact run of the same image. A user-provided $HOME/.m2/settings.xml (the
+  # "Custom Maven settings" Dockerfile section) takes precedence.
+  if [ ! -f "$HOME/.m2/settings.xml" ] && [ -f /app/maven/settings-codeartifact.xml ]; then
     mod config build maven settings edit /app/maven/settings-codeartifact.xml
   fi
 
-  if [ ! -f /root/.m2/settings.xml ] && [ ! -f /app/maven/settings-codeartifact.xml ] && [ ! -f /app/gradle/init-codeartifact.gradle ]; then
+  if [ ! -f "$HOME/.m2/settings.xml" ] && [ ! -f /app/maven/settings-codeartifact.xml ] && [ ! -f /app/gradle/init-codeartifact.gradle ]; then
     info "WARNING: CodeArtifact is configured for publishing, but no build dependency configuration was found. Uncomment the CodeArtifact build-tool lines in the Dockerfile so dependencies resolve from CodeArtifact rather than public repositories."
   fi
 

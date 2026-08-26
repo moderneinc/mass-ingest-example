@@ -20,6 +20,13 @@ FROM eclipse-temurin:25-jdk AS jdk25
 FROM jdk25 AS dependencies
 RUN apt-get -y update && apt-get install -y curl git git-lfs jq libxml2-utils unzip wget zip vim && git lfs install
 
+# Create the non-root user the container runs as. 
+# Ubuntu 24.04 base images ship a default `ubuntu` user; remove it so the`moderne` user can take UID 1000.
+RUN userdel -r ubuntu 2>/dev/null; \
+    useradd --uid 1000 --gid 0 --create-home --shell /bin/bash moderne && \
+    chmod g=u /home/moderne && \
+    install -d -o moderne -g 0 -m 775 /app /var/moderne
+
 # Gather various JDK versions
 COPY --from=jdk8 /opt/java/openjdk /usr/lib/jvm/temurin-8-jdk
 COPY --from=jdk11 /opt/java/openjdk /usr/lib/jvm/temurin-11-jdk
@@ -85,15 +92,16 @@ RUN if [ -n "${MODERNE_CLI_VERSION}" ]; then \
 # Make modw executable and create mod symlink
 RUN chmod +x /usr/local/bin/modw && ln -sf modw /usr/local/bin/mod
 
-# Write wrapper properties so modw knows the version policy at runtime
-RUN mkdir -p /root/.moderne/cli/dist && \
+# Write wrapper properties so modw knows the version policy at runtime.
+RUN mkdir -p /home/moderne/.moderne/cli/dist && \
     if [ -n "${MODERNE_CLI_VERSION}" ]; then \
-        echo "version=${MODERNE_CLI_VERSION}" > /root/.moderne/cli/dist/moderne-wrapper.properties; \
+        echo "version=${MODERNE_CLI_VERSION}" > /home/moderne/.moderne/cli/dist/moderne-wrapper.properties; \
     elif [ "${MODERNE_CLI_STAGE}" = "snapshot" ]; then \
-        echo "version=LATEST" > /root/.moderne/cli/dist/moderne-wrapper.properties; \
+        echo "version=LATEST" > /home/moderne/.moderne/cli/dist/moderne-wrapper.properties; \
     else \
-        echo "version=RELEASE" > /root/.moderne/cli/dist/moderne-wrapper.properties; \
-    fi
+        echo "version=RELEASE" > /home/moderne/.moderne/cli/dist/moderne-wrapper.properties; \
+    fi && \
+    chown -R moderne:0 /home/moderne/.moderne && chmod -R g=u /home/moderne/.moderne
 
 # Credential configuration has been moved to runtime (publish.sh/publish.ps1) to avoid
 # baking sensitive credentials into Docker image layers. Credentials are now passed as
@@ -127,9 +135,6 @@ RUN mkdir -p /opt/gradle && \
         unzip -d /opt/gradle gradle-${v}-bin.zip && \
         rm gradle-${v}-bin.zip; \
     done
-
-# Register all Gradle installations so the CLI can select the right version per repo.
-RUN mod config build gradle installation edit $(find /opt/gradle -maxdepth 1 -mindepth 1 -type d | sort -V)
 ENV PATH="${PATH}:/opt/gradle/gradle-${GRADLE_VERSION}/bin"
 
 # Maven (comment if projects don't use Maven without a wrapper)
@@ -170,12 +175,12 @@ RUN ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 # RUN chmod +x /usr/local/bin/bazel
 
 # Node.js - multiple versions (uncomment for JavaScript/TypeScript projects)
-# Also uncomment the FROM node:XX lines near the top of this file
+# Also uncomment the FROM node:XX lines near the top of this file and the
+# `mod config node installation edit` line in the CLI CONFIGURATION section below.
 # COPY --from=node20 /usr/local /opt/node/node-20
 # COPY --from=node22 /usr/local /opt/node/node-22
 # COPY --from=node24 /usr/local /opt/node/node-24
 # ENV PATH="/opt/node/node-24/bin:${PATH}"
-# RUN mod config node installation edit /opt/node/node-20/bin/node /opt/node/node-22/bin/node # /opt/node/node-24/bin/node
 
 # Python 3.11 (uncomment for Python projects)
 # Install prerequisites and COPY the deadsnakes PPA
@@ -210,83 +215,22 @@ RUN ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
 # RUN apt-get install -y dotnet-sdk-8.0
 
 ################################################################################
-# OPTIONAL: Custom Maven Settings (uncomment if needed)
-################################################################################
-# Most projects don't need custom Maven settings. Only uncomment if your
-# projects require specific Maven configuration.
-
-# Configure Maven Settings if they are required to build (choose betwween a settings file withing this repo or the docker image variant):
-# COPY maven/settings.xml /root/.m2/settings.xml
-# RUN cp $MAVEN_CONFIG/settings.xml /root/.m2/settings.xml # For custom maven docker imagee
-# COPY maven/settings-security.xml /root/.m2/settings-security.xml
-# RUN mod config build maven settings edit /root/.m2/settings.xml
-
-################################################################################
-# OPTIONAL: Custom NPM Configuration (uncomment if needed)
-################################################################################
-# If your JavaScript/TypeScript projects require a custom npm registry or
-# authentication, uncomment the following to configure an .npmrc file.
-
-# COPY npm/.npmrc /root/.npmrc
-
-################################################################################
-# OPTIONAL: Custom Python/pip Configuration (uncomment if needed)
-################################################################################
-# If your Python projects require a private package index or authentication,
-# uncomment the following to configure pip.
-
-# RUN mkdir -p /root/.config/pip
-# COPY python/pip.conf /root/.config/pip/pip.conf
-
-################################################################################
-# OPTIONAL: Custom build steps (uncomment if needed)
-################################################################################
-# If your repositories include JavaScript or Python projects, uncomment the
-# following to configure the Moderne CLI to parse those languages.
-
-# RUN mkdir -p /root/.moderne/cli
-# COPY moderne.yml /root/.moderne/cli/moderne.yml
-
-################################################################################
 # RUNTIME CONFIGURATION
 ################################################################################
 
 FROM language-support AS runner
-
-# Git authentication configuration
-# Git credentials are configured at runtime via volume mounts to avoid baking secrets into the image.
-# The helper only implements "get": when a server rejects a credential (HTTP 401), git asks its
-# helpers to erase it, and the standard store helper would wipe the /root/.git-credentials entry
-# for that whole host, breaking every remaining repository in the run. The trade-off is that a
-# revoked token keeps being offered (and rejected) once per remaining repository on that host,
-# which may count toward the SCM's failed-authentication lockout policy for the account.
-RUN git config --global credential.helper '!f() { if [ "$1" = "get" ]; then git credential-store --file=/root/.git-credentials get; fi; }; f'
-# Optionally disable SSL verification if needed
-# RUN git config --global http.sslVerify false
-
-# Mount git credentials at runtime with:
-# docker run -v $(pwd)/.git-credentials:/root/.git-credentials:ro ...
-#
-# .git-credentials format (one line per host):
-# https://<username>:<password>@github.com
-# https://<token-name>:<token>@gitlab.com
-
-# SSH keys for git authentication (if needed instead of https credentials)
-# Mount at runtime to avoid baking secrets into the image:
-# docker run -v $(pwd)/.ssh:/root/.ssh:ro ...
-#
-# Ensure your .ssh directory contains:
-# - id_rsa (private key with 600 permissions)
-# - known_hosts (with 644 permissions)
 
 ################################################################################
 # OPTIONAL: Self-signed Certificates (uncomment if needed)
 ################################################################################
 # Only needed if your artifact repository, source control, or Moderne tenant
 # uses self-signed certificates.
+#
+# This section modifies JDK trust stores, so it must stay above the
+# DROP PRIVILEGES switch below (it runs as root).
 
 # Place all .crt files in a certs/ directory next to the Dockerfile, then uncomment:
-# COPY certs/ /root/certs/
+# COPY certs/ /opt/certs/
 #
 # Edit this list to match the JDKs installed above:
 # ENV CACERTS_PATHS="\
@@ -296,7 +240,7 @@ RUN git config --global credential.helper '!f() { if [ "$1" = "get" ]; then git 
 #   /usr/lib/jvm/temurin-21-jdk/lib/security/cacerts \
 #   /usr/lib/jvm/temurin-25-jdk/lib/security/cacerts"
 #
-# RUN for cert in /root/certs/*.crt; do \
+# RUN for cert in /opt/certs/*.crt; do \
 #       alias=$(basename "$cert" .crt); \
 #       for cacerts in $CACERTS_PATHS; do \
 #           keytool -import -noprompt -trustcacerts \
@@ -306,12 +250,14 @@ RUN git config --global credential.helper '!f() { if [ "$1" = "get" ]; then git 
 #             -keystore "$cacerts"; \
 #       done; \
 #     done
-# RUN mod config http trust-store edit java-home
+#
+# Also uncomment the `mod config http trust-store edit java-home` line in the
+# CLI CONFIGURATION section below.
 
 # mvnw scripts in maven projects may attempt to download maven-wrapper jars using wget.
 # If using self-signed certs, UNCOMMENT the following to concatenate them for wget:
-# RUN cat /root/certs/*.crt > /root/ca-bundle.crt
-# RUN echo "ca_certificate = /root/ca-bundle.crt" > /root/.wgetrc
+# RUN cat /opt/certs/*.crt > /opt/certs/ca-bundle.crt
+# RUN echo "ca_certificate = /opt/certs/ca-bundle.crt" >> /etc/wgetrc
 
 ################################################################################
 # OPTIONAL: 3-scalability (AWS Batch) setup
@@ -327,15 +273,47 @@ RUN git config --global credential.helper '!f() { if [ "$1" = "get" ]; then git 
 # Graviton/arm64 images get the right AWS CLI build automatically.
 #RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o "awscliv2.zip" && \
 #    unzip awscliv2.zip && \
-#    ./aws/install
+#    ./aws/install && \
+#    rm -rf awscliv2.zip aws/
 
 # Chunk script for AWS Batch parallel processing
 # Uncomment to include the chunk.sh script for 3-scalability:
 # COPY --chmod=755 3-scalability/chunk.sh chunk.sh
 
 ################################################################################
-# OPTIONAL: AWS CodeArtifact (Maven repository with rotating auth token)
+# DROP PRIVILEGES
 ################################################################################
+# Everything from here on runs as the non-root `moderne` user, and the
+# container itself runs as that user. `mod config ...` commands write to
+# $HOME/.moderne, so they must come after this switch.
+#
+# The numeric UID (rather than the user name) lets Kubernetes verify
+# `runAsNonRoot: true` without additional pod configuration.
+
+USER 1000
+ENV HOME=/home/moderne
+
+################################################################################
+# CLI CONFIGURATION
+################################################################################
+# CLI configuration is stored in the moderne user's home directory, so these
+# commands run after the switch to the non-root user.
+
+# Register all Gradle installations so the CLI can select the right version per repo.
+RUN mod config build gradle installation edit $(find /opt/gradle -maxdepth 1 -mindepth 1 -type d | sort -V)
+
+# Node.js (uncomment for JavaScript/TypeScript projects, along with the
+# installation in the Language Support section above)
+# RUN mod config node installation edit /opt/node/node-20/bin/node /opt/node/node-22/bin/node # /opt/node/node-24/bin/node
+
+# Custom Maven settings (uncomment if your projects require specific Maven
+# configuration; choose between a settings file within this repo or the docker image variant):
+# COPY --chown=1000:0 maven/settings.xml /home/moderne/.m2/settings.xml
+# RUN cp $MAVEN_CONFIG/settings.xml /home/moderne/.m2/settings.xml # For custom maven docker image
+# COPY --chown=1000:0 maven/settings-security.xml /home/moderne/.m2/settings-security.xml
+# RUN mod config build maven settings edit /home/moderne/.m2/settings.xml
+
+# AWS CodeArtifact (Maven repository with rotating auth token)
 # Publish LSTs to and resolve build dependencies from AWS CodeArtifact.
 # CodeArtifact tokens are short-lived (max 12h), so publish.sh mints and refreshes
 # them at runtime; only the build configuration below is baked into the image.
@@ -343,31 +321,72 @@ RUN git config --global credential.helper '!f() { if [ "$1" = "get" ]; then git 
 # 1. Uncomment the AWS CLI install block above (required to mint tokens).
 # 2. Uncomment the lines below for the build tool(s) your repositories use.
 # See the "Using AWS CodeArtifact" section in README.md for the runtime env vars.
-
+#
 # Maven dependency resolution via CodeArtifact (token read from ${env.CODEARTIFACT_AUTH_TOKEN}).
 # Only the COPY happens at build time; publish.sh registers the file with
 # `mod config build maven settings edit` at runtime, and only when CodeArtifact is
 # selected — its catch-all mirror would otherwise break Maven builds in non-CodeArtifact
-# runs of this image. If you also use the "Custom Maven Settings" section above, merge
+# runs of this image. If you also use the "Custom Maven settings" section above, merge
 # the mirror/server into that settings.xml instead of uncommenting this COPY; publish.sh
-# leaves an existing /root/.m2/settings.xml configuration untouched.
-# COPY maven/settings-codeartifact.xml /app/maven/settings-codeartifact.xml
-
+# leaves an existing /home/moderne/.m2/settings.xml configuration untouched.
+# COPY --chown=1000:0 maven/settings-codeartifact.xml /app/maven/settings-codeartifact.xml
+#
 # Gradle dependency/plugin resolution via CodeArtifact (token read from ${CODEARTIFACT_AUTH_TOKEN}).
 # Note: `gradle arguments edit` replaces any previously configured Gradle arguments, so
 # list them all (the init script plus any others your repositories need) in one command:
-# COPY gradle/init-codeartifact.gradle /app/gradle/init-codeartifact.gradle
+# COPY --chown=1000:0 gradle/init-codeartifact.gradle /app/gradle/init-codeartifact.gradle
 # RUN mod config build gradle arguments edit --init-script=/app/gradle/init-codeartifact.gradle
 
-################################################################################
-# FINAL SETUP
-################################################################################
+# Custom NPM configuration (uncomment if your JavaScript/TypeScript projects
+# require a custom npm registry or authentication):
+# COPY --chown=1000:0 npm/.npmrc /home/moderne/.npmrc
+
+# Custom Python/pip configuration (uncomment if your Python projects require
+# a private package index or authentication):
+# COPY --chown=1000:0 python/pip.conf /home/moderne/.config/pip/pip.conf
+
+# Custom build steps (uncomment if your repositories include JavaScript or
+# Python projects, so the Moderne CLI parses those languages):
+# COPY --chown=1000:0 moderne.yml /home/moderne/.moderne/cli/moderne.yml
+
+# Self-signed certificates (uncomment along with the certificate section above):
+# RUN mod config http trust-store edit java-home
 
 # OPTIONAL - Customize JVM options
 RUN mod config java options edit "-Xmx4g -Xss3m"
 
 # Disable Maven Central if your environment blocks access to repo.maven.apache.org
 # RUN mod config features no-maven-central
+
+# Git authentication configuration
+# Git credentials are configured at runtime via volume mounts to avoid baking secrets into the image.
+# The helper only implements "get": when a server rejects a credential (HTTP 401), git asks its
+# helpers to erase it, and the standard store helper would wipe the /home/moderne/.git-credentials
+# entry for that whole host, breaking every remaining repository in the run. The trade-off is that a
+# revoked token keeps being offered (and rejected) once per remaining repository on that host,
+# which may count toward the SCM's failed-authentication lockout policy for the account.
+RUN git config --global credential.helper '!f() { if [ "$1" = "get" ]; then git credential-store --file=/home/moderne/.git-credentials get; fi; }; f'
+# Optionally disable SSL verification if needed
+# RUN git config --global http.sslVerify false
+
+# Mount git credentials at runtime with:
+# docker run -v $(pwd)/.git-credentials:/home/moderne/.git-credentials:ro ...
+#
+# .git-credentials format (one line per host):
+# https://<username>:<password>@github.com
+# https://<token-name>:<token>@gitlab.com
+
+# SSH keys for git authentication (if needed instead of https credentials)
+# Mount at runtime to avoid baking secrets into the image:
+# docker run -v $(pwd)/.ssh:/home/moderne/.ssh:ro ...
+#
+# Ensure your .ssh directory contains:
+# - id_rsa (private key with 600 permissions, owned by UID 1000)
+# - known_hosts (with 644 permissions)
+
+################################################################################
+# FINAL SETUP
+################################################################################
 
 # Available ports
 # 8080 - mod CLI monitor
@@ -377,13 +396,15 @@ EXPOSE 8080
 ENV CUSTOM_CI=true
 
 # Set the data directory for the publish script
+# NOTE: when bind-mounting a host directory here, ensure it is writable by
+# UID 1000 (e.g. `mkdir data` as your regular user before `docker run`).
 ENV DATA_DIR=/var/moderne
 
 # Copy scripts
-COPY --chmod=755 publish.sh publish.sh
-COPY --chmod=755 diagnostics/ diagnostics/
+COPY --chown=1000:0 --chmod=755 publish.sh publish.sh
+COPY --chown=1000:0 --chmod=755 diagnostics/ diagnostics/
 
 # Optional: mount from host
-COPY repos.csv repos.csv
+COPY --chown=1000:0 repos.csv repos.csv
 
 CMD ["./publish.sh", "repos.csv"]

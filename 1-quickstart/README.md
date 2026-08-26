@@ -92,7 +92,7 @@ docker run --rm \
 docker run --rm \
   -p 8080:8080 \
   -v $(pwd)/data:/var/moderne \
-  -v ~/.aws:/root/.aws:ro \
+  -v ~/.aws:/home/moderne/.aws:ro \
   -e PUBLISH_URL=s3://your-bucket \
   -e S3_PROFILE=your-profile \
   mass-ingest:quickstart
@@ -107,7 +107,7 @@ aws sso login --profile your-profile
 docker run --rm \
   -p 8080:8080 \
   -v $(pwd)/data:/var/moderne \
-  -v ~/.aws:/root/.aws:ro \
+  -v ~/.aws:/home/moderne/.aws:ro \
   -e PUBLISH_URL=s3://your-bucket \
   -e S3_PROFILE=your-profile \
   mass-ingest:quickstart
@@ -231,7 +231,7 @@ Mount it when running the container:
 docker run --rm \
   -p 8080:8080 \
   -v $(pwd)/data:/var/moderne \
-  -v $(pwd)/.git-credentials:/root/.git-credentials:ro \
+  -v $(pwd)/.git-credentials:/home/moderne/.git-credentials:ro \
   -e PUBLISH_URL=https://your-artifactory.com/artifactory/moderne-ingest/ \
   -e PUBLISH_USER=your-username \
   -e PUBLISH_PASSWORD=your-password \
@@ -243,7 +243,7 @@ Alternatively, use SSH keys by mounting your `.ssh` directory:
 docker run --rm \
   -p 8080:8080 \
   -v $(pwd)/data:/var/moderne \
-  -v $(pwd)/.ssh:/root/.ssh:ro \
+  -v $(pwd)/.ssh:/home/moderne/.ssh:ro \
   -e PUBLISH_URL=https://your-artifactory.com/artifactory/moderne-ingest/ \
   -e PUBLISH_USER=your-username \
   -e PUBLISH_PASSWORD=your-password \
@@ -255,20 +255,24 @@ docker run --rm \
 If your artifact repository or source control uses self-signed certificates:
 
 ```dockerfile
-COPY mycert.crt /root/mycert.crt
-RUN /usr/lib/jvm/temurin-21-jdk/bin/keytool -import -file /root/mycert.crt \
+COPY mycert.crt /opt/certs/mycert.crt
+RUN /usr/lib/jvm/temurin-21-jdk/bin/keytool -import -file /opt/certs/mycert.crt \
     -keystore /usr/lib/jvm/temurin-21-jdk/lib/security/cacerts
 RUN mod config http trust-store edit java-home
 ```
+
+The keytool import modifies the JDK trust store and must run as root, so keep it above the `USER 1000` switch in the Dockerfile. The `mod config` command must run as the non-root user, so place it in the CLI CONFIGURATION section below the switch.
 
 ### Maven settings
 
 If your projects require custom Maven settings:
 
 ```dockerfile
-COPY maven/settings.xml /root/.m2/settings.xml
-RUN mod config build maven settings edit /root/.m2/settings.xml
+COPY --chown=1000:0 maven/settings.xml /home/moderne/.m2/settings.xml
+RUN mod config build maven settings edit /home/moderne/.m2/settings.xml
 ```
+
+Place these in the CLI CONFIGURATION section of the Dockerfile (below the `USER 1000` switch) so the settings land in the non-root user's home directory.
 
 ### Additional language support
 
@@ -306,6 +310,13 @@ docker run --rm \
 - Larger batches are faster but require more disk space
 
 For parallel processing across multiple containers, see [3-scalability](../3-scalability/).
+
+## Non-root user
+
+The container runs as a non-root user (`moderne`, UID 1000) rather than root. This matters in two places:
+
+- **Bind mounts for data**: a host directory mounted at `/var/moderne` must be writable by UID 1000. On Linux, create the directory as your regular user (`mkdir data`) before running the container; if Docker auto-creates it, it will be owned by root and the container cannot write to it.
+- **Mounted credentials**: files mounted into `/home/moderne` (`.git-credentials`, `.ssh`, `.aws`) must be readable by UID 1000. SSH private keys are typically mode 600, so on Linux they must be owned by UID 1000 on the host.
 
 ## Storage requirements
 
