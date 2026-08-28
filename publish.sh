@@ -46,7 +46,17 @@ main() {
   # read the first positional argument as the source csv file
   csv_file=$1
   if [[ "$csv_file" == "s3://"* ]]; then
-    aws s3 cp "$csv_file" "repos.csv"
+    S3_CP_CMD=(aws s3 cp "$csv_file" "repos.csv")
+    if [ -n "${S3_PROFILE:-}" ]; then
+      S3_CP_CMD+=(--profile "${S3_PROFILE}")
+    fi
+    if [ -n "${S3_REGION:-}" ]; then
+      S3_CP_CMD+=(--region "${S3_REGION}")
+    fi
+    if [ -n "${S3_ENDPOINT:-}" ]; then
+      S3_CP_CMD+=(--endpoint-url "${S3_ENDPOINT}")
+    fi
+    "${S3_CP_CMD[@]}" || die "Could not download '$csv_file'"
     local_csv_file="repos.csv"
   elif [[ "$csv_file" == "http://"* || "$csv_file" == "https://"* ]]; then
     curl "$csv_file" -o "repos.csv"
@@ -189,7 +199,7 @@ configure_credentials() {
 
     # Add endpoint if provided (for S3-compatible services)
     if [ -n "${S3_ENDPOINT:-}" ]; then
-      S3_CONFIG_CMD+=(--endpoint "${S3_ENDPOINT}")
+      S3_CONFIG_CMD+=(--endpoint-url "${S3_ENDPOINT}")
     fi
 
     # Add AWS profile if provided
@@ -204,7 +214,7 @@ configure_credentials() {
 
     # Execute the command
     info "Running: ${S3_CONFIG_CMD[*]}"
-    "${S3_CONFIG_CMD[@]}"
+    "${S3_CONFIG_CMD[@]}" || die "Failed to configure the S3 artifact repository; publishing would fall through to whatever was configured before"
   # Maven repository configuration
   elif [ -n "${PUBLISH_URL:-}" ] && [ -n "${PUBLISH_USER:-}" ] && [ -n "${PUBLISH_PASSWORD:-}" ]; then
     info "Configuring Maven artifact repository with username/password"
