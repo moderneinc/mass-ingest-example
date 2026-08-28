@@ -211,6 +211,18 @@ The `repos.csv` file columns:
 
 See [repos.csv documentation](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv) for advanced options.
 
+### Publishing to S3: keep `repos.csv` in the bucket
+
+When `PUBLISH_URL` is S3, `mod publish` rebuilds the platform's repository catalog
+(`$PUBLISH_URL/repos-lock.csv`) from the list at `$PUBLISH_URL/repos.csv`; without that file,
+catalog updates are additive only and removed repositories never disappear from the platform.
+Maintain your full list there and pass that URI as the `publish.sh` argument (a subset csv is
+fine for partial re-runs). The script fails fast when the file is missing.
+For Maven/Artifactory targets the connector usually discovers LSTs by polling and no such file
+is needed, so the script only warns when it is absent from the location `mod publish` reads
+(the repository root for Artifactory token setups, the
+`io/moderne/organization/sources/repos` Maven coordinate for user/password setups).
+
 ### Dependency repositories (optional)
 
 Create `dependency-repos.csv` to test connectivity to Maven/Gradle dependency repositories during diagnostics:

@@ -46,7 +46,17 @@ main() {
   # read the first positional argument as the source csv file
   csv_file=$1
   if [[ "$csv_file" == "s3://"* ]]; then
-    aws s3 cp "$csv_file" "repos.csv"
+    S3_CP_CMD=(aws s3 cp "$csv_file" "repos.csv")
+    if [ -n "${S3_PROFILE:-}" ]; then
+      S3_CP_CMD+=(--profile "${S3_PROFILE}")
+    fi
+    if [ -n "${S3_REGION:-}" ]; then
+      S3_CP_CMD+=(--region "${S3_REGION}")
+    fi
+    if [ -n "${S3_ENDPOINT:-}" ]; then
+      S3_CP_CMD+=(--endpoint-url "${S3_ENDPOINT}")
+    fi
+    "${S3_CP_CMD[@]}" || die "Could not download '$csv_file'"
     local_csv_file="repos.csv"
   elif [[ "$csv_file" == "http://"* || "$csv_file" == "https://"* ]]; then
     curl "$csv_file" -o "repos.csv"
@@ -82,8 +92,79 @@ main() {
     shift 2
   done
 
+  verify_central_repos_csv "$csv_file"
+
   # build/ingest all repos
   ingest_repos "$local_csv_file"
+}
+
+# When publishing to blob storage (s3://), the Moderne platform reads the repository catalog
+# from $PUBLISH_URL/repos-lock.csv, and `mod publish` only removes entries from that catalog
+# when the full intended repository list is present at $PUBLISH_URL/repos.csv. Without that
+# file, catalog updates are additive: repositories added to the ingest appear on the platform,
+# but repositories removed from the ingest never disappear. Fail fast on setups where that
+# would happen, instead of letting removals silently stop propagating.
+verify_central_repos_csv() {
+  local csv_arg=$1  # the csv argument as supplied (local path, s3:// or http(s):// URI)
+
+  if [[ "${PUBLISH_URL:-}" != "s3://"* ]]; then
+    warn_central_repos_csv_maven
+    return 0
+  fi
+
+  local central_uri="${PUBLISH_URL%/}/repos.csv"
+  if [ "${csv_arg%/}" = "$central_uri" ]; then
+    # canonical setup: the ingest list and the catalog's source of truth are the same object
+    return 0
+  fi
+
+  local s3_cmd=(aws s3 cp "$central_uri" -)
+  if [ -n "${S3_PROFILE:-}" ]; then
+    s3_cmd+=(--profile "${S3_PROFILE}")
+  fi
+  if [ -n "${S3_REGION:-}" ]; then
+    s3_cmd+=(--region "${S3_REGION}")
+  fi
+  if [ -n "${S3_ENDPOINT:-}" ]; then
+    s3_cmd+=(--endpoint-url "${S3_ENDPOINT}")
+  fi
+  local cp_err
+  if ! cp_err=$("${s3_cmd[@]}" 2>&1 > /dev/null); then
+    if grep -q -i -e "NoSuchKey" -e "(404)" -e "does not exist" -e "Not Found" <<< "$cp_err"; then
+      die "No repository list found at $central_uri.
+When publishing to blob storage, the platform reads the repository catalog from ${PUBLISH_URL%/}/repos-lock.csv, and repositories are only removed from that catalog when the full intended repository list is present at $central_uri. Without it, repositories removed from '$csv_arg' would keep appearing on the platform indefinitely.
+Fix: upload your full repository list to $central_uri and keep maintaining it there. The simplest setup is to pass $central_uri as the argument to this script. To ingest a subset of that list, keep $central_uri complete and pass the subset csv as the argument."
+    fi
+    die "Could not read $central_uri, which must exist and stay maintained as the full repository list: repositories are only removed from the platform catalog (${PUBLISH_URL%/}/repos-lock.csv) when they are removed from it.
+$cp_err"
+  fi
+}
+
+# Maven/Artifactory publish targets may still serve a lock-mode connector (an organization
+# source without a poll: block), and then the same repos.csv requirement applies, but poll-mode
+# tenants do not need the file and the connector's mode is not knowable from here. So for these
+# targets only warn when the central repos.csv is absent, at the location `mod publish` reads
+# for the configured store type: the repository root for Artifactory (PUBLISH_TOKEN), a
+# synthetic Maven coordinate for Maven repositories (PUBLISH_USER/PUBLISH_PASSWORD).
+# CodeArtifact is excluded: its immutable assets need the re-ingest workflow described in the
+# README's Known limitations instead.
+warn_central_repos_csv_maven() {
+  local curl_cmd central_uri
+  if [ -z "${PUBLISH_URL:-}" ] || [ -n "${CODEARTIFACT_DOMAIN:-}" ]; then
+    return 0
+  elif [ -n "${PUBLISH_USER:-}" ] && [ -n "${PUBLISH_PASSWORD:-}" ]; then
+    central_uri="${PUBLISH_URL%/}/io/moderne/organization/sources/repos/1.0.0/repos-1.0.0.csv"
+    curl_cmd=(curl -s -f --insecure -o /dev/null -u "$PUBLISH_USER:$PUBLISH_PASSWORD" "$central_uri")
+  elif [ -n "${PUBLISH_TOKEN:-}" ]; then
+    central_uri="${PUBLISH_URL%/}/repos.csv"
+    curl_cmd=(curl -s -f --insecure -o /dev/null -H "Authorization: Bearer $PUBLISH_TOKEN" "$central_uri")
+  else
+    return 0
+  fi
+
+  if ! "${curl_cmd[@]}"; then
+    info "WARNING: no repository list found at $central_uri. If the Moderne connector reads this repository's catalog in lock mode (an organization source without a poll: block), repositories removed from the ingest csv will never disappear from the platform until the full intended repository list is maintained at that location. Poll-mode tenants can ignore this."
+  fi
 }
 
 ingest_repos() {
@@ -189,7 +270,7 @@ configure_credentials() {
 
     # Add endpoint if provided (for S3-compatible services)
     if [ -n "${S3_ENDPOINT:-}" ]; then
-      S3_CONFIG_CMD+=(--endpoint "${S3_ENDPOINT}")
+      S3_CONFIG_CMD+=(--endpoint-url "${S3_ENDPOINT}")
     fi
 
     # Add AWS profile if provided
@@ -204,7 +285,7 @@ configure_credentials() {
 
     # Execute the command
     info "Running: ${S3_CONFIG_CMD[*]}"
-    "${S3_CONFIG_CMD[@]}"
+    "${S3_CONFIG_CMD[@]}" || die "Failed to configure the S3 artifact repository; publishing would fall through to whatever was configured before"
   # Maven repository configuration
   elif [ -n "${PUBLISH_URL:-}" ] && [ -n "${PUBLISH_USER:-}" ] && [ -n "${PUBLISH_PASSWORD:-}" ]; then
     info "Configuring Maven artifact repository with username/password"
