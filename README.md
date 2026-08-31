@@ -241,6 +241,29 @@ https://repo.spring.io/release,,,
 
 See `dependency-repos.csv.example` for a template.
 
+### Code Genome Project
+
+The Moderne CLI is published to the [Code Genome Project](https://docs.moderne.io/administrator-documentation/moderne-platform/how-to-guides/accessing-the-code-genome-project/)
+(CGP) Maven repository at `https://artifacts.codegenomeproject.org/maven`, which is where these
+images download it from: both the `modw` wrapper and the CLI distribution it installs. CGP serves
+the CLI anonymously, so the build needs no credentials.
+
+The build resolves a concrete CLI version and pins it in `moderne-wrapper.properties`, together
+with the URL the distribution came from, so the running container does not re-resolve the CLI.
+Rebuild the image to pick up a new release. Two things follow from that:
+
+- **Snapshots (`MODERNE_CLI_STAGE=snapshot`) re-resolve on every run**, because the newest
+  snapshot build changes. Snapshots are served anonymously too.
+- **CGP serves only `org.openrewrite` and `io.moderne`.** Anything else 404s, which is by
+  design: place CGP below your internal repositories and above Maven Central in a virtual
+  repository so foreign coordinates fall through cheaply. The Maven and Gradle distributions
+  installed by these images still come from their own upstreams (`MAVEN_REPO_URL`,
+  `GRADLE_DIST_URL`), as do the dependencies of the repositories you ingest.
+
+Anonymous access covers the CLI only. Recipe artifacts and the other `io.moderne` coordinates
+still need the username and download token Moderne issued you, which is what the CGP row in
+`dependency-repos.csv.example` is for.
+
 ### Build arguments
 
 All Dockerfiles support:
@@ -249,8 +272,8 @@ All Dockerfiles support:
 |------------------------------|-------------------------------------------------------------|-------------------------------------------------------------------|
 | `MODERNE_CLI_VERSION`        | *(latest release)*                                          | Specific CLI version                                              |
 | `MODERNE_CLI_STAGE`          | `release`                                                   | `release` for latest release, `snapshot` for latest snapshot      |
-| `MODERNE_CLI_RELEASES_REPO`  | `https://repo1.maven.org/maven2`                            | Maven repository for release CLI artifacts                        |
-| `MODERNE_CLI_SNAPSHOTS_REPO` | `https://central.sonatype.com/repository/maven-snapshots`   | Maven repository for snapshot CLI artifacts                       |
+| `MODERNE_CLI_RELEASES_REPO`  | `https://artifacts.codegenomeproject.org/maven`             | Maven repository for release CLI artifacts                        |
+| `MODERNE_CLI_SNAPSHOTS_REPO` | `https://artifacts.codegenomeproject.org/maven`             | Maven repository for snapshot CLI artifacts                       |
 | `MAVEN_REPO_URL`             | `https://repo1.maven.org/maven2`                            | Maven repository the Maven distribution is downloaded from        |
 | `GRADLE_DIST_URL`            | `https://services.gradle.org/distributions`                 | Gradle distribution download URL                                  |
 | `GRADLE_VERSION`             | `8.14`                                                      | Primary Gradle version to install                                 |
@@ -259,13 +282,13 @@ All Dockerfiles support:
 
 **Using internal mirrors:**
 
-In an egress-blocked environment, point every download at internal mirrors instead of editing the Dockerfile. The Gradle distributions and the Maven distribution come from `GRADLE_DIST_URL` and `MAVEN_REPO_URL`; the CLI itself comes from `MODERNE_CLI_RELEASES_REPO` (or `MODERNE_CLI_SNAPSHOTS_REPO`):
+In an egress-blocked environment, point every download at internal mirrors instead of editing the Dockerfile. The Gradle distributions and the Maven distribution come from `GRADLE_DIST_URL` and `MAVEN_REPO_URL`; the CLI itself comes from `MODERNE_CLI_RELEASES_REPO` (or `MODERNE_CLI_SNAPSHOTS_REPO`), which by default is the Code Genome Project. Mirror `io.moderne:moderne-cli` and the `moderne-cli-linux-{x64,aarch64}` distributions into your own repository manager and point the build at that instead:
 
 ```bash
 docker build \
   --build-arg GRADLE_DIST_URL=https://artifactory.internal/artifactory/data-local/gradle \
   --build-arg MAVEN_REPO_URL=https://artifactory.internal/artifactory/maven-central \
-  --build-arg MODERNE_CLI_RELEASES_REPO=https://artifactory.internal/artifactory/maven-central \
+  --build-arg MODERNE_CLI_RELEASES_REPO=https://artifactory.internal/artifactory/moderne \
   -t mass-ingest .
 ```
 
@@ -284,7 +307,7 @@ docker build -f Dockerfile.fips -t mass-ingest:fips .
 
 **Using internal mirrors:**
 
-Public download servers (Maven Central, Gradle services) may not support FIPS-compliant TLS cipher suites. The Dockerfile uses a separate download stage without FIPS restrictions to handle this. To make the entire build FIPS-compliant end to end, point the download URLs at internal mirrors that support FIPS-compliant TLS:
+Public download servers (the Code Genome Project, Gradle services, Maven Central) may not support FIPS-compliant TLS cipher suites. The Dockerfile uses a separate download stage without FIPS restrictions to handle this, with one exception: `modw` downloads the CLI distribution from the FIPS-enabled stage, so that download negotiates under the FIPS crypto policy. To make the entire build FIPS-compliant end to end, point the download URLs at internal mirrors that support FIPS-compliant TLS:
 
 ```bash
 docker build -f Dockerfile.fips \

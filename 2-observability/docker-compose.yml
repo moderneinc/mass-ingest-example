@@ -2,10 +2,12 @@ services:
   mass-ingest:
     build:
       context: ..
+      # Valueless entries are taken from the environment Compose runs in, and left unset
+      # when absent, so the Dockerfile's own defaults (the Code Genome Project) apply.
       args:
-        MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION:-}
-        MODERNE_CLI_RELEASES_REPO: ${MODERNE_CLI_RELEASES_REPO:-}
-        MODERNE_CLI_SNAPSHOTS_REPO: ${MODERNE_CLI_SNAPSHOTS_REPO:-}
+        MODERNE_CLI_VERSION:
+        MODERNE_CLI_RELEASES_REPO:
+        MODERNE_CLI_SNAPSHOTS_REPO:
     env_file:
       - .env
     restart: unless-stopped

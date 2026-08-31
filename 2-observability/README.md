@@ -117,7 +117,7 @@ docker compose down -v
 To use a specific CLI version, add it to your `.env` file:
 
 ```
-MODERNE_CLI_VERSION=3.50.0
+MODERNE_CLI_VERSION=4.5.1
 ```
 
 Environment variables and build arguments from `.env` are automatically loaded by `docker-compose.yml`.
@@ -238,7 +238,7 @@ services:
     build:
       context: ..
       args:
-        MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION:-}
+        MODERNE_CLI_VERSION:
     env_file:
       - .env
     command: ["./publish.sh", "repos.csv", "--start", "1", "--end", "1000"]
@@ -255,7 +255,7 @@ services:
     build:
       context: ..
       args:
-        MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION:-}
+        MODERNE_CLI_VERSION:
     env_file:
       - .env
     command: ["./publish.sh", "repos.csv", "--start", "1001", "--end", "2000"]
@@ -272,7 +272,7 @@ services:
     build:
       context: ..
       args:
-        MODERNE_CLI_VERSION: ${MODERNE_CLI_VERSION:-}
+        MODERNE_CLI_VERSION:
     env_file:
       - .env
     command: ["./publish.sh", "repos.csv", "--start", "2001", "--end", "3000"]

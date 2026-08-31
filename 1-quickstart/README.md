@@ -50,7 +50,7 @@ Optional build arguments:
 
 Example with specific CLI version:
 ```bash
-docker build -t mass-ingest:quickstart --build-arg MODERNE_CLI_VERSION=3.50.0 ..
+docker build -t mass-ingest:quickstart --build-arg MODERNE_CLI_VERSION=4.5.1 ..
 ```
 
 ### 3. Run the container
