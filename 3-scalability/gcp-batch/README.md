@@ -63,22 +63,12 @@ Set `ingest_csv_file` to the URL (e.g., `https://storage.googleapis.com/your-buc
 
 ### 2. Build and push Docker image
 
-The build downloads the Moderne CLI from the [Code Genome Project](https://docs.moderne.io/administrator-documentation/moderne-platform/how-to-guides/accessing-the-code-genome-project/),
-so export your Moderne-issued credentials first — they are passed as BuildKit secrets and never
-land in the image or in `docker history`:
-
 ```bash
 # Configure Docker for Artifact Registry
 gcloud auth configure-docker us-docker.pkg.dev
 
-export CGP_USERNAME='you@example.com'
-export CGP_PASSWORD='<download token>'
-
 # Build the image from repository root
-docker build \
-  --secret id=cgp_username,env=CGP_USERNAME \
-  --secret id=cgp_password,env=CGP_PASSWORD \
-  -t mass-ingest:latest ../..
+docker build -t mass-ingest:latest ../..
 
 # Tag for Artifact Registry
 docker tag mass-ingest:latest us-docker.pkg.dev/your-project/mass-ingest/mass-ingest:latest
