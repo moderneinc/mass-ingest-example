@@ -13,6 +13,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# TODO pin MODERNE_CLI_VERSION (a build-arg of both Dockerfiles) to the first CLI release
+# that ships `mod publish --sync-csv` and `mod doctor`; the smoke job fails on older releases.
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -24,7 +27,6 @@ jobs:
       uses: ludeeus/action-shellcheck@2.0.0
       with:
         scandir: .
-        ignore_paths: diagnostics
 
   build:
     runs-on: ubuntu-latest
@@ -48,3 +50,22 @@ jobs:
         push: false
         cache-from: type=gha,scope=${{ matrix.tag }}
         cache-to: type=gha,scope=${{ matrix.tag }},mode=max
+
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: docker/setup-buildx-action@v3
+    - name: Load the image from the build job's cache
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: Dockerfile
+        tags: mass-ingest:ci
+        load: true
+        cache-from: type=gha,scope=mass-ingest
+    - name: mod doctor in a bare container
+      run: |
+        docker run --rm mass-ingest:ci mod doctor /var/moderne --skip-remote --json > doctor.json
+        python3 -m json.tool doctor.json
