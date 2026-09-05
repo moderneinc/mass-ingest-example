@@ -14,10 +14,6 @@ A row is skipped when its `repos-lock.csv` entry already has the remote HEAD as 
 
 The CLI flushes `repos-lock.csv` every 25 repositories, every 10 minutes and from a shutdown hook on SIGTERM. `docker stop`, a Batch timeout and Ctrl+C all deliver SIGTERM and wait for the flush; SIGKILL (`docker kill`, the OOM killer, a VM preemption) does not, and up to 25 repositories of results are then rebuilt on the next run, which is cheap because their LSTs were already published and only the rows are missing. If runs are killed regularly, give the container more memory or lower `PARALLEL`.
 
-### CodeArtifact: builds or uploads fail with 401 after hours of running
-
-The token expires within 12 hours. publish.sh refreshes it in the background at three quarters of `CODEARTIFACT_TOKEN_DURATION` and retries every 5 minutes on failure; look for `Refreshing AWS CodeArtifact authorization token` in the log. A refresh fails when the job role lost `codeartifact:GetAuthorizationToken` or `sts:GetServiceBearerToken`, or when `CODEARTIFACT_TOKEN_DURATION=0` ties the token to a role session shorter than the refresher's 15 minute assumption.
-
 ### S3: `Unable to contact EC2 metadata service`
 
 Raise the IMDSv2 hop limit to 2 on the instance ([why](../docs/s3.md#ec2-instance-roles-raise-the-imdsv2-hop-limit)). The AWS Batch Terraform already does.

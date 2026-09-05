@@ -7,12 +7,11 @@ The Docker image runs the bash `publish.sh`. `publish.ps1` is a PowerShell port 
 - Windows with PowerShell 5.1+ (or PowerShell 7+).
 - The Moderne CLI (`mod`) on `PATH`, from a release that ships `mod publish --sync-csv` and `mod doctor`. See the [CLI install guide](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro).
 - JDKs for the JVM repositories you build (registered with `mod config java jdk`), plus Maven and Gradle as needed.
-- The AWS CLI if you publish to CodeArtifact.
 - For .NET builds: .NET SDK 10.0+ and the NuGet CLI (`nuget.exe`) on `PATH`. Keep the `dotnet` build step in `moderne.yml` (enabled by default); `nuget/nuget.config` is a template for a private feed.
 
 ## Running
 
-`publish.ps1` reads the same environment variables as the bash flow. `DATA_DIR` (the working directory) is required; the rest are those in the [README](../README.md), the [S3](s3.md) and [CodeArtifact](codeartifact.md) settings, and
+`publish.ps1` reads the same environment variables as the bash flow. `DATA_DIR` (the working directory) is required; the rest are those in the [README](../README.md), the [S3](s3.md) settings, and
 
 - `NUGET_CONFIG_FILE`: a `nuget.config` applied to `%APPDATA%\NuGet\NuGet.Config` before the run so restores use a private feed.
 
@@ -27,7 +26,7 @@ $env:ORGANIZATION = "Claims"; .\publish.ps1    # one organization
 $env:DIAGNOSE = "true"; .\publish.ps1          # mod doctor only
 ```
 
-Ctrl+C reaches the CLI as well as the script, so the central `repos-lock.csv` is flushed before it exits. The CodeArtifact token refresher runs as a background PowerShell job; its output is printed when the run ends.
+Ctrl+C reaches the CLI as well as the script, so the central `repos-lock.csv` is flushed before it exits.
 
 ## Differences from the Docker flow
 

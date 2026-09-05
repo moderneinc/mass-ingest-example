@@ -46,7 +46,6 @@ The Dockerfile is organized as commented sections to uncomment:
 - **Self-signed certificates**: a `certs/` directory imported into every JDK trust store. The import runs as root, so it stays above the `USER 1000` switch; the matching `mod config http trust-store edit java-home` runs below it.
 - **Maven settings**: `COPY maven/settings.xml /home/moderne/.m2/settings.xml` plus `mod config build maven settings edit`, in the CLI CONFIGURATION section so it lands in the non-root user's home. `npm/.npmrc` and `python/pip.conf` follow the same pattern.
 - **JVM options**: `mod config java options edit "-Xmx4g -Xss3m"`; raise `-Xmx` if builds run out of memory.
-- **AWS CodeArtifact**: see [codeartifact.md](codeartifact.md).
 - **GCP Batch**: `COPY 3-scalability/gcp-batch/task.sh task.sh`.
 
 ## FIPS image

@@ -262,21 +262,6 @@ FROM language-support AS runner
 # RUN echo "ca_certificate = /opt/certs/ca-bundle.crt" >> /etc/wgetrc
 
 ################################################################################
-# OPTIONAL: AWS CodeArtifact
-################################################################################
-
-# AWS CLI (~300MB), needed only for AWS CodeArtifact: publish.sh mints and refreshes the
-# auth token with it and finalizes package versions. Publishing to S3 does not need it;
-# the CLI reaches S3 through its own AWS SDK.
-# $(uname -m) resolves to x86_64 or aarch64 for the image's target platform (RUN steps
-# execute on the target platform, including under `docker buildx --platform`), so
-# Graviton/arm64 images get the right AWS CLI build automatically.
-#RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o "awscliv2.zip" && \
-#    unzip awscliv2.zip && \
-#    ./aws/install && \
-#    rm -rf awscliv2.zip aws/
-
-################################################################################
 # DROP PRIVILEGES
 ################################################################################
 # Everything from here on runs as the non-root `moderne` user, and the
@@ -312,32 +297,6 @@ RUN ln -s /var/moderne/.types /home/moderne/.moderne/cli/types
 # RUN cp $MAVEN_CONFIG/settings.xml /home/moderne/.m2/settings.xml # For custom maven docker image
 # COPY --chown=1000:0 maven/settings-security.xml /home/moderne/.m2/settings-security.xml
 # RUN mod config build maven settings edit /home/moderne/.m2/settings.xml
-
-# AWS CodeArtifact (Maven repository with rotating auth token)
-# Publish LSTs to and resolve build dependencies from AWS CodeArtifact.
-# CodeArtifact tokens are short-lived (max 12h), so publish.sh mints one at startup and
-# refreshes it in the background; only the build configuration below is baked into the image.
-#
-# 1. Uncomment the AWS CLI install block above (required to mint tokens).
-# 2. Uncomment the lines below for the build tool(s) your repositories use.
-# See docs/codeartifact.md for the runtime env vars.
-#
-# Maven dependency resolution via CodeArtifact. Only the COPY happens at build time;
-# publish.sh renders the template with the current token into
-# /home/moderne/.m2/settings-codeartifact.xml and registers that file with
-# `mod config build maven settings edit`, and only when CodeArtifact is selected — its
-# catch-all mirror would otherwise break Maven builds in non-CodeArtifact runs of this
-# image. If you also use the "Custom Maven settings" section above, merge the
-# mirror/server into that settings.xml instead of uncommenting this COPY; publish.sh
-# leaves an existing /home/moderne/.m2/settings.xml configuration untouched.
-# COPY --chown=1000:0 maven/settings-codeartifact.xml /app/maven/settings-codeartifact.xml
-#
-# Gradle dependency/plugin resolution via CodeArtifact (the init script reads the token
-# publish.sh keeps current in /home/moderne/.codeartifact-token).
-# Note: `gradle arguments edit` replaces any previously configured Gradle arguments, so
-# list them all (the init script plus any others your repositories need) in one command:
-# COPY --chown=1000:0 gradle/init-codeartifact.gradle /app/gradle/init-codeartifact.gradle
-# RUN mod config build gradle arguments edit --init-script=/app/gradle/init-codeartifact.gradle
 
 # Custom NPM configuration (uncomment if your JavaScript/TypeScript projects
 # require a custom npm registry or authentication):

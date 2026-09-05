@@ -109,9 +109,6 @@ RUN curl -fsSL -o /tmp/gradle-${GRADLE_VERSION}-bin.zip "${GRADLE_DIST_URL}/grad
 ARG MAVEN_VERSION=3.9.11
 RUN curl -fsSL -o /tmp/apache-maven-${MAVEN_VERSION}-bin.tar.gz "${MAVEN_REPO_URL}/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz"
 
-# Download AWS CLI (uncomment for AWS CodeArtifact)
-#RUN curl -fsSL -o /tmp/awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip"
-
 ################################################################################
 # CORE SETUP (Required for all stages)
 ################################################################################
@@ -350,17 +347,6 @@ FROM language-support AS runner
 # mvnw scripts in maven projects may attempt to download maven-wrapper jars using wget.
 # UNCOMMENT the following to set wget's CA certificate
 # RUN echo "ca_certificate = /opt/certs/mycert.crt" >> /etc/wgetrc
-
-################################################################################
-# OPTIONAL: AWS CodeArtifact
-################################################################################
-
-# AWS CLI (~300MB), needed only for AWS CodeArtifact: publish.sh mints and refreshes the
-# auth token with it and finalizes package versions. Publishing to S3 does not need it;
-# the CLI reaches S3 through its own AWS SDK.
-# To use: uncomment the download in the downloader stage AND uncomment below:
-#COPY --from=downloader /tmp/awscliv2.zip awscliv2.zip
-#RUN unzip awscliv2.zip && ./aws/install && rm -rf awscliv2.zip aws/
 
 ################################################################################
 # DROP PRIVILEGES

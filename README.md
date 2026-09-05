@@ -64,7 +64,6 @@ docker run --rm -e GIT_SSH_CREDENTIALS="$(cat ~/.ssh/id_ed25519)" ... mass-inges
 ## Going further
 
 - [Publishing to S3](docs/s3.md): credential providers, the IMDSv2 hop limit on EC2, S3-compatible stores.
-- [AWS CodeArtifact](docs/codeartifact.md): publishing with a rotating token.
 - [2-observability](2-observability/): Docker Compose with Prometheus and Grafana, one service per organization.
 - [3-scalability](3-scalability/): AWS Batch or GCP Batch from Terraform, one scheduled job per organization.
 - [Windows](docs/windows.md): `publish.ps1` runs the same flow on a Windows host without Docker, .NET builds included.
