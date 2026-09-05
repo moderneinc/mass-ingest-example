@@ -10,6 +10,9 @@ services:
         MODERNE_CLI_SNAPSHOTS_REPO:
     env_file:
       - .env
+    environment:
+      # Ingest a single organization from repos.csv; unset ingests everything.
+      ORGANIZATION: ${ORGANIZATION:-}
     restart: unless-stopped
     ports:
       - "8080:8080"

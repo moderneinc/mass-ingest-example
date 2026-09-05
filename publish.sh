@@ -200,7 +200,7 @@ ingest_repos() {
         info "Successfully built and uploaded repositories from $partition_name"
       fi
 
-      rm -rf "$DATA_DIR/$partition_name"
+      rm -rf "${DATA_DIR:?}/${partition_name:?}"
     done
     rm -rf "$DATA_DIR/batches"
 
@@ -217,7 +217,8 @@ ingest_repos() {
 # Initialize instance if running on AWS EC2 (batch mode)
 initialize_instance_metadata() {
   TOKEN=$(curl --connect-timeout 2 -sf -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null)
-  export INSTANCE_ID=$(curl --connect-timeout 2 -sf -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "localhost")
+  INSTANCE_ID=$(curl --connect-timeout 2 -sf -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "localhost")
+  export INSTANCE_ID
 }
 
 # Run startup diagnostics if enabled
@@ -289,11 +290,11 @@ configure_credentials() {
   # Maven repository configuration
   elif [ -n "${PUBLISH_URL:-}" ] && [ -n "${PUBLISH_USER:-}" ] && [ -n "${PUBLISH_PASSWORD:-}" ]; then
     info "Configuring Maven artifact repository with username/password"
-    mod config lsts artifacts maven edit "${PUBLISH_URL}" --user "${PUBLISH_USER}" --password "${PUBLISH_PASSWORD}"
+    mod config lsts artifacts maven add "${PUBLISH_URL}" --user "${PUBLISH_USER}" --password "${PUBLISH_PASSWORD}"
   # Artifactory configuration
   elif [ -n "${PUBLISH_URL:-}" ] && [ -n "${PUBLISH_TOKEN:-}" ]; then
     info "Configuring Artifactory artifact repository with API token"
-    mod config lsts artifacts artifactory edit "${PUBLISH_URL}" --jfrog-api-token "${PUBLISH_TOKEN}"
+    mod config lsts artifacts artifactory add "${PUBLISH_URL}" --jfrog-api-token "${PUBLISH_TOKEN}"
   else
     die "PUBLISH_URL must be supplied via environment variable. For S3, use s3:// URL format. For Maven/Artifactory, also provide PUBLISH_USER/PUBLISH_PASSWORD or PUBLISH_TOKEN"
   fi
@@ -432,6 +433,7 @@ finalize_codeartifact_versions() {
     [ -n "$package" ] || continue
     # a package is absent when its repository failed to build, or on the catalog packages
     # before the first successful publish; both are expected, so a failed listing is skipped
+    # shellcheck disable=SC2016 # backticks are JMESPath literals, not command substitution
     versions=$(aws codeartifact list-package-versions "${aws_args[@]}" \
       --namespace "$namespace" --package "$package" --status Unfinished \
       --query 'versions[?origin.originType==`INTERNAL`].version' --output text 2>/dev/null) || continue
@@ -470,7 +472,7 @@ start_monitoring() {
 stop_monitoring() {
   info "Cleaning up monitoring"
   if [ -f "$DATA_DIR/monitor.pid" ]; then
-    kill -9 $(cat "$DATA_DIR/monitor.pid")
+    kill -9 "$(cat "$DATA_DIR/monitor.pid")"
     rm "$DATA_DIR/monitor.pid"
   fi
 }
@@ -521,7 +523,7 @@ split_into_batches() {
     done
 
     local batch_count
-    batch_count=$(ls "$batch_dir"/*.csv | wc -l | tr -d ' ')
+    batch_count=$(find "$batch_dir" -maxdepth 1 -name '*.csv' | wc -l | tr -d ' ')
     info "Split $(( $(wc -l < "$csv_file") - 1 )) repositories into $batch_count batches of $batch_size"
   else
     cp "$csv_file" "$batch_dir/all.csv"
@@ -559,7 +561,8 @@ build_and_upload_repos() {
 
 send_logs() {
   local index=$1
-  local timestamp=$(date +"%Y%m%d%H%M")
+  local timestamp
+  timestamp=$(date +"%Y%m%d%H%M")
 
   if [ -n "${CODEARTIFACT_DOMAIN:-}" ]; then
     info "Skipping build-log upload: AWS CodeArtifact does not accept non-Maven log artifacts"

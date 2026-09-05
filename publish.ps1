@@ -206,7 +206,7 @@ function Configure-Credentials() {
 
     # Add endpoint if provided (for S3-compatible services)
     if ($env:S3_ENDPOINT) {
-      $S3ConfigCmd += "--endpoint"
+      $S3ConfigCmd += "--endpoint-url"
       $S3ConfigCmd += $env:S3_ENDPOINT
     }
 
@@ -229,12 +229,12 @@ function Configure-Credentials() {
   # Maven repository configuration
   elseif ($env:PUBLISH_URL -and $env:PUBLISH_USER -and $env:PUBLISH_PASSWORD) {
     Write-Info "Configuring Maven artifact repository with username/password"
-    mod config lsts artifacts maven edit "$env:PUBLISH_URL" --user "$env:PUBLISH_USER" --password "$env:PUBLISH_PASSWORD"
+    mod config lsts artifacts maven add "$env:PUBLISH_URL" --user "$env:PUBLISH_USER" --password "$env:PUBLISH_PASSWORD"
   }
   # Artifactory configuration
   elseif ($env:PUBLISH_URL -and $env:PUBLISH_TOKEN) {
     Write-Info "Configuring Artifactory artifact repository with API token"
-    mod config lsts artifacts artifactory edit "$env:PUBLISH_URL" --jfrog-api-token "$env:PUBLISH_TOKEN"
+    mod config lsts artifacts artifactory add "$env:PUBLISH_URL" --jfrog-api-token "$env:PUBLISH_TOKEN"
   } else {
     Write-Fatal "PUBLISH_URL must be supplied via environment variable. For S3, use s3:// URL format. For Maven/Artifactory, also provide PUBLISH_USER/PUBLISH_PASSWORD or PUBLISH_TOKEN"
   }

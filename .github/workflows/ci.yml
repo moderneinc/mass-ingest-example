@@ -1,4 +1,4 @@
-name: Docker Image CI
+name: CI
 
 on:
   push:
@@ -14,11 +14,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  lint:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: Build the Docker image
-      run: |
-        touch repos.csv
-        docker build . --file Dockerfile --tag mass-ingest:$(date +%s)
+    - name: Syntax check shell scripts
+      run: bash -n publish.sh 3-scalability/aws-batch/chunk.sh 3-scalability/gcp-batch/task.sh
+    - name: shellcheck
+      uses: ludeeus/action-shellcheck@2.0.0
+      with:
+        scandir: .
+        ignore_paths: diagnostics
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dockerfile: Dockerfile
+            tag: mass-ingest
+          - dockerfile: Dockerfile.fips
+            tag: mass-ingest-fips
+    steps:
+    - uses: actions/checkout@v4
+    - uses: docker/setup-buildx-action@v3
+    - name: Build ${{ matrix.dockerfile }}
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: ${{ matrix.dockerfile }}
+        tags: ${{ matrix.tag }}:ci
+        push: false
+        cache-from: type=gha,scope=${{ matrix.tag }}
+        cache-to: type=gha,scope=${{ matrix.tag }},mode=max

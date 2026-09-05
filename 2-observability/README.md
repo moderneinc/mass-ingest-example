@@ -38,16 +38,17 @@ https://github.com/org/repo2,main,github.com,org/repo2
 
 Required columns:
 - `cloneUrl` - Full HTTPS clone URL
-- `branch` - Branch to build
 - `origin` - Source control host (e.g., github.com)
 - `path` - Repository path (e.g., org/repo)
+
+Optional: `branch` - Branch to build (the remote's default branch when omitted)
 
 ### 2. Configure environment variables
 
 Copy the example environment file:
 
 ```bash
-cp .env.example .env
+cp ../.env.example .env
 ```
 
 Edit `.env` with your credentials. Choose one of the storage options:
@@ -195,10 +196,8 @@ Access at: http://localhost:3000/dashboards
 
 Key metrics available:
 
-- `mod_build_duration_seconds` - Build duration per repository
-- `mod_build_total` - Total builds (success/failure)
-- `mod_publish_total` - LST publish count
-- `mod_clone_duration_seconds` - Clone time per repository
+- `moderne_cli_build_seconds_{count,sum,max}` - Build duration per repository, tagged by `build_tool` and `outcome`
+- `moderne_cli_buildstep_seconds_{count,sum,max}` - Duration per build step, tagged by `build_tool_name` and `outcome`
 - `jvm_*` - JVM metrics (heap, GC, threads)
 - `process_*` - Process metrics (CPU, memory)
 

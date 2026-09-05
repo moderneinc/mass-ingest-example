@@ -51,9 +51,10 @@ https://github.com/org/repo2,main,github.com,org/repo2
 
 Required columns:
 - `cloneUrl` - Full HTTPS clone URL
-- `branch` - Branch to build
 - `origin` - Source control host (e.g., github.com)
 - `path` - Repository path (e.g., org/repo)
+
+Optional: `branch` - Branch to build (the remote's default branch when omitted)
 
 ### 2. Build and push Docker image
 
