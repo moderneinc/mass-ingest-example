@@ -27,8 +27,9 @@ moderne_s3_bucket_name = "your-bucket"
 # moderne_ssh_credentials = "arn:aws:secretsmanager:<region>:<account>:secret:mass-ingest/ssh-private-key"
 
 # Ingestion settings
-# ingest_csv_file     = "repos.csv"
-# ingest_chunk_size   = 10
+# organizations       = ["Payments", "Claims"]  # one scheduled job each; empty = one job for everything
+# parallel            = 2                       # repositories in flight per job
+# job_timeout_seconds = 86400
 # instance_type       = "m6a.xlarge"
 # schedule_expression = "cron(0 0 * * ? *)"
 

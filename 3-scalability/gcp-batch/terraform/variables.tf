@@ -103,25 +103,22 @@ variable "s3_region" {
   description = "S3 region for GCS interop (e.g., auto)"
 }
 
-variable "ingest_csv_file" {
-  type        = string
-  description = "Path or URL to the repos.csv file. HTTP/HTTPS URLs are fetched at runtime (must be publicly readable); local paths reference a file baked into the container image."
-
-  validation {
-    condition     = var.ingest_csv_file != ""
-    error_message = "ingest_csv_file must be set to a URL (https://...) or a local file path baked into the container image."
-  }
+variable "organizations" {
+  type        = list(string)
+  default     = []
+  description = "Organizations from the store's repos.csv to ingest, one Batch task each. Empty ingests the whole file in one task."
 }
 
-variable "total_repos" {
+variable "parallel" {
   type        = number
   default     = 0
-  description = "Total number of repositories (excluding header). Required when csv_file is a local path. When 0 (default) and csv_file is a URL, the workflow counts lines automatically."
+  description = "Repositories a task works through at once (mod publish --parallel). 0 keeps the CLI default of 1."
 }
 
-variable "ingest_chunk_size" {
-  type    = number
-  default = 10
+variable "max_run_duration_seconds" {
+  type        = number
+  default     = 86400
+  description = "Batch task timeout. A run publishes as it goes and flushes the central repos-lock.csv when terminated, so a timed-out run loses only the repository in flight."
 }
 
 variable "max_retry_count" {

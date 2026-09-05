@@ -86,14 +86,22 @@ variable "moderne_s3_bucket_name" {
   description = "S3 bucket name for LST storage (optional, only needed if using S3 for artifact storage)"
 }
 
-variable "ingest_csv_file" {
-  type = string
-  default = "repos.csv"
+variable "organizations" {
+  type        = list(string)
+  default     = []
+  description = "Organizations from the store's repos.csv to ingest, one scheduled job each. Empty ingests the whole file in one job."
 }
 
-variable "ingest_chunk_size" {
-  type = number
-  default = 10
+variable "parallel" {
+  type        = number
+  default     = 0
+  description = "Repositories a job works through at once (mod publish --parallel). 0 keeps the CLI default of 1."
+}
+
+variable "job_timeout_seconds" {
+  type        = number
+  default     = 86400
+  description = "AWS Batch attempt timeout. A run publishes as it goes and flushes the central repos-lock.csv when terminated, so a timed-out run loses only the repository in flight."
 }
 
 variable "instance_type" {

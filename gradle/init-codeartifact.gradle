@@ -3,11 +3,12 @@
 // without modifying each project. Registered via:
 //   mod config build gradle arguments edit --init-script=/app/gradle/init-codeartifact.gradle
 //
-// The endpoint comes from PUBLISH_URL and the token from CODEARTIFACT_AUTH_TOKEN, both
-// set by publish.sh. The token is short-lived and refreshed before every build, so the
-// build always sees a valid token.
+// The endpoint comes from PUBLISH_URL. The token is short-lived and publish.sh refreshes it
+// in the background while the CLI runs; a changed environment variable cannot reach that
+// process, so the current token is read from a file, with the variable as a fallback.
 def codeartifactUrl = System.getenv("PUBLISH_URL")
-def codeartifactToken = System.getenv("CODEARTIFACT_AUTH_TOKEN")
+def tokenFile = new File(System.getProperty("user.home"), ".codeartifact-token")
+def codeartifactToken = tokenFile.isFile() ? tokenFile.text.trim() : System.getenv("CODEARTIFACT_AUTH_TOKEN")
 
 if (codeartifactUrl && codeartifactToken) {
     def applyRepo = { repositories ->

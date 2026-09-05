@@ -11,14 +11,15 @@ services:
     env_file:
       - .env
     environment:
-      # Ingest a single organization from repos.csv; unset ingests everything.
+      # Ingest a single organization from the store's repos.csv; unset ingests everything.
       ORGANIZATION: ${ORGANIZATION:-}
+      # Repositories in flight at once (default 1)
+      PARALLEL: ${PARALLEL:-}
     restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
       - data:/var/moderne
-      - ../repos.csv:/app/repos.csv
       # Uncomment to mount git credentials for private repositories
       # - ./.git-credentials:/home/moderne/.git-credentials:ro
       # Or mount SSH keys instead:

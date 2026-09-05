@@ -30,14 +30,9 @@ publish_url = "https://artifactory.example.com/artifactory/moderne-ingest/"
 # git_credentials_secret = "mass-ingest-git-credentials"
 # ssh_credentials_secret = "mass-ingest-ssh-key"
 
-# Repository list — URL or local file path
-# Option A: HTTP/HTTPS URL (recommended — workflow counts repos automatically)
-ingest_csv_file = "https://storage.googleapis.com/your-bucket/repos.csv"
-
-# Option B: Local file baked into container image (requires total_repos)
-# ingest_csv_file = "repos.csv"
-# total_repos     = 1000
-
-# ingest_chunk_size = 10
-# schedule          = "0 0 * * *"
-# max_retry_count   = 0
+# Ingestion settings
+# organizations            = ["Payments", "Claims"]  # one Batch task each; empty = one task for everything
+# parallel                 = 2                       # repositories in flight per task
+# max_run_duration_seconds = 86400
+# schedule                 = "0 0 * * *"
+# max_retry_count          = 0

@@ -19,7 +19,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Syntax check shell scripts
-      run: bash -n publish.sh 3-scalability/aws-batch/chunk.sh 3-scalability/gcp-batch/task.sh
+      run: bash -n publish.sh 3-scalability/gcp-batch/task.sh
     - name: shellcheck
       uses: ludeeus/action-shellcheck@2.0.0
       with:

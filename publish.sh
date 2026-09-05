@@ -1,244 +1,76 @@
 #!/bin/bash
 
-#set -o errexit   # abort on nonzero exitstatus
 set -o nounset   # abort on unbound variable
 set -o pipefail  # don't hide errors within pipes
 
-# Check for diagnostic mode first (before requiring csv file)
-if [ "${DIAGNOSE:-}" = "true" ]; then
-    echo "Running comprehensive diagnostics..."
-    if [ -f "/app/diagnostics/diagnose.sh" ]; then
-        exec /app/diagnostics/diagnose.sh
-    else
-        echo "Error: diagnostics/diagnose.sh not found"
-        exit 1
-    fi
-fi
-
-# if no argument is provided, print an error message and exit
-if [ $# -eq 0 ]
-  then
-    echo "No repository file supplied. Please provide the path to the csv file."
-    exit 1
-fi
-
 info() {
-  local range="${START_INDEX:-}-${END_INDEX:-}"
-  if [[ -z "${END_INDEX:-}" || -z "${START_INDEX:-}" ]]; then
-    range="all"
-  fi
-  printf "[%s][%s] %s\n" "$INSTANCE_ID" "$range" "$1"
+  printf '%s\n' "$1"
 }
 
 die() {
-  local range="${START_INDEX:-}-${END_INDEX:-}"
-  if [[ -z "${END_INDEX:-}" || -z "${START_INDEX:-}" ]]; then
-    range="all"
-  fi
-  printf "[%s][%s] %s\n" "$INSTANCE_ID" "$range" "$1" >&2
+  printf '%s\n' "$1" >&2
   exit 1
 }
 
 main() {
-  initialize_instance_metadata
-  run_startup_diagnostics
+  : "${DATA_DIR:?DATA_DIR must be set}"
+  mod publish --help | grep -q -- --sync-csv ||
+    die "This Moderne CLI has no 'mod publish --sync-csv'; rebuild the image with a release that ships it"
 
-  # read the first positional argument as the source csv file
-  csv_file=$1
-  if [[ "$csv_file" == "s3://"* ]]; then
-    S3_CP_CMD=(aws s3 cp "$csv_file" "repos.csv")
-    if [ -n "${S3_PROFILE:-}" ]; then
-      S3_CP_CMD+=(--profile "${S3_PROFILE}")
-    fi
-    if [ -n "${S3_REGION:-}" ]; then
-      S3_CP_CMD+=(--region "${S3_REGION}")
-    fi
-    if [ -n "${S3_ENDPOINT:-}" ]; then
-      S3_CP_CMD+=(--endpoint-url "${S3_ENDPOINT}")
-    fi
-    "${S3_CP_CMD[@]}" || die "Could not download '$csv_file'"
-    local_csv_file="repos.csv"
-  elif [[ "$csv_file" == "http://"* || "$csv_file" == "https://"* ]]; then
-    curl "$csv_file" -o "repos.csv"
-    local_csv_file="repos.csv"
-  elif [[ -f "$csv_file" ]]; then
-    local_csv_file="$csv_file"
-  else
-    die "File '$csv_file' does not exist"
-  fi
-
-  # shift the arguments to read the next positional argument as the index
-  shift
-  # all other arguments should be read as flags with getopts
-  while [[ $# -ne 0 ]]; do
-    arg="$1"
-    case "$arg" in
-      --end)
-        END_INDEX="$2"
-        ;;
-      -o|--organization)
-        ORGANIZATION="$2"
-        ;;
-      --start)
-        START_INDEX="$2"
-        ;;
-      --timeout)
-        BUILD_TIMEOUT="$2"
-        ;;
-      *)
-        die "Invalid option: $arg"
-        ;;
-    esac
-    shift 2
-  done
-
-  verify_central_repos_csv "$csv_file"
-
-  # build/ingest all repos
-  ingest_repos "$local_csv_file"
-}
-
-# When publishing to blob storage (s3://), the Moderne platform reads the repository catalog
-# from $PUBLISH_URL/repos-lock.csv, and `mod publish` only removes entries from that catalog
-# when the full intended repository list is present at $PUBLISH_URL/repos.csv. Without that
-# file, catalog updates are additive: repositories added to the ingest appear on the platform,
-# but repositories removed from the ingest never disappear. Fail fast on setups where that
-# would happen, instead of letting removals silently stop propagating.
-verify_central_repos_csv() {
-  local csv_arg=$1  # the csv argument as supplied (local path, s3:// or http(s):// URI)
-
-  if [[ "${PUBLISH_URL:-}" != "s3://"* ]]; then
-    warn_central_repos_csv_maven
-    return 0
-  fi
-
-  local central_uri="${PUBLISH_URL%/}/repos.csv"
-  if [ "${csv_arg%/}" = "$central_uri" ]; then
-    # canonical setup: the ingest list and the catalog's source of truth are the same object
-    return 0
-  fi
-
-  local s3_cmd=(aws s3 cp "$central_uri" -)
-  if [ -n "${S3_PROFILE:-}" ]; then
-    s3_cmd+=(--profile "${S3_PROFILE}")
-  fi
-  if [ -n "${S3_REGION:-}" ]; then
-    s3_cmd+=(--region "${S3_REGION}")
-  fi
-  if [ -n "${S3_ENDPOINT:-}" ]; then
-    s3_cmd+=(--endpoint-url "${S3_ENDPOINT}")
-  fi
-  local cp_err
-  if ! cp_err=$("${s3_cmd[@]}" 2>&1 > /dev/null); then
-    if grep -q -i -e "NoSuchKey" -e "(404)" -e "does not exist" -e "Not Found" <<< "$cp_err"; then
-      die "No repository list found at $central_uri.
-When publishing to blob storage, the platform reads the repository catalog from ${PUBLISH_URL%/}/repos-lock.csv, and repositories are only removed from that catalog when the full intended repository list is present at $central_uri. Without it, repositories removed from '$csv_arg' would keep appearing on the platform indefinitely.
-Fix: upload your full repository list to $central_uri and keep maintaining it there. The simplest setup is to pass $central_uri as the argument to this script. To ingest a subset of that list, keep $central_uri complete and pass the subset csv as the argument."
-    fi
-    die "Could not read $central_uri, which must exist and stay maintained as the full repository list: repositories are only removed from the platform catalog (${PUBLISH_URL%/}/repos-lock.csv) when they are removed from it.
-$cp_err"
-  fi
-}
-
-# Maven/Artifactory publish targets may still serve a lock-mode connector (an organization
-# source without a poll: block), and then the same repos.csv requirement applies, but poll-mode
-# tenants do not need the file and the connector's mode is not knowable from here. So for these
-# targets only warn when the central repos.csv is absent, at the location `mod publish` reads
-# for the configured store type: the repository root for Artifactory (PUBLISH_TOKEN), a
-# synthetic Maven coordinate for Maven repositories (PUBLISH_USER/PUBLISH_PASSWORD).
-# CodeArtifact is excluded: its immutable assets need the re-ingest workflow described in the
-# README's Known limitations instead.
-warn_central_repos_csv_maven() {
-  local curl_cmd central_uri
-  if [ -z "${PUBLISH_URL:-}" ] || [ -n "${CODEARTIFACT_DOMAIN:-}" ]; then
-    return 0
-  elif [ -n "${PUBLISH_USER:-}" ] && [ -n "${PUBLISH_PASSWORD:-}" ]; then
-    central_uri="${PUBLISH_URL%/}/io/moderne/organization/sources/repos/1.0.0/repos-1.0.0.csv"
-    curl_cmd=(curl -s -f --insecure -o /dev/null -u "$PUBLISH_USER:$PUBLISH_PASSWORD" "$central_uri")
-  elif [ -n "${PUBLISH_TOKEN:-}" ]; then
-    central_uri="${PUBLISH_URL%/}/repos.csv"
-    curl_cmd=(curl -s -f --insecure -o /dev/null -H "Authorization: Bearer $PUBLISH_TOKEN" "$central_uri")
-  else
-    return 0
-  fi
-
-  if ! "${curl_cmd[@]}"; then
-    info "WARNING: no repository list found at $central_uri. If the Moderne connector reads this repository's catalog in lock mode (an organization source without a poll: block), repositories removed from the ingest csv will never disappear from the platform until the full intended repository list is maintained at that location. Poll-mode tenants can ignore this."
-  fi
-}
-
-ingest_repos() {
-  csv_file="$1"
+  # turn off color output and cursor movement in the CLI
+  export NO_COLOR=true TERM=dumb
 
   configure_credentials
-  prepare_environment
-  start_monitoring
-  if [ -n "${ORGANIZATION:-}" ]; then
-    local clone_dir="$DATA_DIR/$ORGANIZATION"
-    printf "Organization: %s\n" "$ORGANIZATION"
-    mkdir -p "$clone_dir"
-    mod git sync csv "$clone_dir" "$csv_file" --organization "$ORGANIZATION" --with-sources
-    mod log syncs add "$clone_dir" "$DATA_DIR/syncs.zip" --last-sync
-    mod git pull "$clone_dir"
-    refresh_codeartifact_token || info "Token refresh failed; continuing with the existing token"
-    mod build "$clone_dir" --no-download
-    mod publish "$clone_dir"
-    finalize_codeartifact_versions "$csv_file" || info "Some CodeArtifact versions could not be finalized"
-    mod log builds add "$clone_dir" "$DATA_DIR/log.zip" --last-build
-    send_logs "org-$ORGANIZATION"
-  else
-    select_repositories "$csv_file"
-    split_into_batches "$DATA_DIR/selected-repos.csv"
+  # The Dockerfile symlinks the CLI's type-table store here so it lands on the data volume
+  mkdir -p "$DATA_DIR/.types"
 
-    for batch_file in "$DATA_DIR/batches/"*; do
-      local partition_name
-      partition_name=$(basename "$batch_file" .csv)
-
-      if ! build_and_upload_repos "$partition_name" "$batch_file"; then
-        info "Error building and uploading repositories from $partition_name"
-      else
-        info "Successfully built and uploaded repositories from $partition_name"
-      fi
-
-      rm -rf "${DATA_DIR:?}/${partition_name:?}"
-    done
-    rm -rf "$DATA_DIR/batches"
-
-    # Upload results
-    if [[ -z "${END_INDEX:-}" || -z "${START_INDEX:-}" ]]; then
-      send_logs "all"
-    else
-      send_logs "$START_INDEX-$END_INDEX"
-    fi
+  if [ "${DIAGNOSE:-}" = "true" ]; then
+    exec mod doctor "$DATA_DIR" --sync-csv
   fi
-  stop_monitoring
-}
-
-# Initialize instance if running on AWS EC2 (batch mode)
-initialize_instance_metadata() {
-  TOKEN=$(curl --connect-timeout 2 -sf -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null)
-  INSTANCE_ID=$(curl --connect-timeout 2 -sf -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "localhost")
-  export INSTANCE_ID
-}
-
-# Run startup diagnostics if enabled
-run_startup_diagnostics() {
   if [ "${DIAGNOSE_ON_START:-}" = "true" ]; then
-    info "Running startup diagnostics"
-
-    if [ -f "/app/diagnostics/diagnose.sh" ]; then
-      /app/diagnostics/diagnose.sh || info "Diagnostic issues detected (see above)"
-    fi
+    mod doctor "$DATA_DIR" --sync-csv || true
   fi
+
+  start_monitoring
+  start_codeartifact_refresher
+  publish
+  local ret=$?
+  finalize_codeartifact_versions || info "Some CodeArtifact versions could not be finalized"
+  stop_codeartifact_refresher
+  stop_monitoring
+  exit "$ret"
+}
+
+# Works through the store's repos.csv one repository at a time: clone, build, publish, record
+# in the store's repos-lock.csv, delete. Rows whose lock entry already matches are skipped.
+publish() {
+  local cmd=(mod publish "$DATA_DIR" --sync-csv)
+  if [ -n "${ORGANIZATION:-}" ]; then
+    cmd+=(--organization "$ORGANIZATION")
+  fi
+  if [ -n "${PARALLEL:-}" ]; then
+    cmd+=(--parallel "$PARALLEL")
+  fi
+  info "Running: ${cmd[*]}"
+
+  # Backgrounded so TERM/INT (docker stop, a batch timeout) can be forwarded: the CLI then
+  # flushes the central repos-lock.csv from its shutdown hook before exiting.
+  "${cmd[@]}" &
+  local pid=$! ret
+  trap 'kill -TERM "$pid" 2>/dev/null' TERM INT
+  wait "$pid"
+  ret=$?
+  while kill -0 "$pid" 2>/dev/null; do  # wait returns early when a trapped signal arrives
+    wait "$pid"
+    ret=$?
+  done
+  trap - TERM INT
+  return "$ret"
 }
 
 # Configure credentials at runtime (passed via environment variables)
 configure_credentials() {
   info "Configuring credentials"
-
-  if [ -n "${BATCH_SIZE:-}" ] && ! [[ "${BATCH_SIZE}" =~ ^[0-9]+$ ]]; then
-    die "BATCH_SIZE must be a non-negative integer, not '${BATCH_SIZE}'"
-  fi
 
   # Configure Moderne tenant if token provided
   if [ -n "${MODERNE_TOKEN:-}" ] && [ -n "${MODERNE_TENANT:-}" ]; then
@@ -265,33 +97,21 @@ configure_credentials() {
     configure_codeartifact
   elif [[ "${PUBLISH_URL:-}" == "s3://"* ]]; then
     info "Configuring S3 artifact repository: ${PUBLISH_URL}"
-
-    # Build the command with proper quoting
-    S3_CONFIG_CMD=(mod config lsts artifacts s3 edit "${PUBLISH_URL}")
-
-    # Add endpoint if provided (for S3-compatible services)
+    local s3_cmd=(mod config lsts artifacts s3 edit "${PUBLISH_URL}")
     if [ -n "${S3_ENDPOINT:-}" ]; then
-      S3_CONFIG_CMD+=(--endpoint-url "${S3_ENDPOINT}")
+      s3_cmd+=(--endpoint-url "${S3_ENDPOINT}")
     fi
-
-    # Add AWS profile if provided
     if [ -n "${S3_PROFILE:-}" ]; then
-      S3_CONFIG_CMD+=(--profile "${S3_PROFILE}")
+      s3_cmd+=(--profile "${S3_PROFILE}")
     fi
-
-    # Add region if provided (for cross-region access)
     if [ -n "${S3_REGION:-}" ]; then
-      S3_CONFIG_CMD+=(--region "${S3_REGION}")
+      s3_cmd+=(--region "${S3_REGION}")
     fi
-
-    # Execute the command
-    info "Running: ${S3_CONFIG_CMD[*]}"
-    "${S3_CONFIG_CMD[@]}" || die "Failed to configure the S3 artifact repository; publishing would fall through to whatever was configured before"
-  # Maven repository configuration
+    info "Running: ${s3_cmd[*]}"
+    "${s3_cmd[@]}" || die "Failed to configure the S3 artifact repository; publishing would fall through to whatever was configured before"
   elif [ -n "${PUBLISH_URL:-}" ] && [ -n "${PUBLISH_USER:-}" ] && [ -n "${PUBLISH_PASSWORD:-}" ]; then
     info "Configuring Maven artifact repository with username/password"
     mod config lsts artifacts maven add "${PUBLISH_URL}" --user "${PUBLISH_USER}" --password "${PUBLISH_PASSWORD}"
-  # Artifactory configuration
   elif [ -n "${PUBLISH_URL:-}" ] && [ -n "${PUBLISH_TOKEN:-}" ]; then
     info "Configuring Artifactory artifact repository with API token"
     mod config lsts artifacts artifactory add "${PUBLISH_URL}" --jfrog-api-token "${PUBLISH_TOKEN}"
@@ -300,10 +120,8 @@ configure_credentials() {
   fi
 }
 
-# CodeArtifact's Basic-auth token expires within 12h, so it is minted at runtime and
-# refreshed before every batch; the same token reaches the build through
-# maven/settings-codeartifact.xml and gradle/init-codeartifact.gradle, which both read
-# ${CODEARTIFACT_AUTH_TOKEN}.
+# CodeArtifact's Basic-auth token expires within 12h, so it is minted at runtime and refreshed
+# in the background while the CLI runs (see start_codeartifact_refresher).
 configure_codeartifact() {
   if [ -z "${PUBLISH_URL:-}" ]; then
     die "PUBLISH_URL must point at the CodeArtifact Maven endpoint when CODEARTIFACT_DOMAIN is set (e.g. https://<domain>-<owner>.d.codeartifact.<region>.amazonaws.com/maven/<repository>/)"
@@ -321,28 +139,22 @@ configure_codeartifact() {
     export CODEARTIFACT_REGION="${CODEARTIFACT_REGION:-${BASH_REMATCH[2]}}"
   fi
 
-  # Register the Maven settings at runtime, only when CodeArtifact is selected: its catch-all
-  # mirror reads ${env.PUBLISH_URL}, so baking it in would break Maven builds in a
+  refresh_codeartifact_token || die "Unable to configure the CodeArtifact publish target"
+
+  # Only registered on a CodeArtifact run: the catch-all mirror would break Maven builds in a
   # non-CodeArtifact run of the same image. A user-provided $HOME/.m2/settings.xml (the
   # "Custom Maven settings" Dockerfile section) takes precedence.
-  if [ ! -f "$HOME/.m2/settings.xml" ] && [ -f /app/maven/settings-codeartifact.xml ]; then
-    mod config build maven settings edit /app/maven/settings-codeartifact.xml
+  if [ ! -f "$HOME/.m2/settings.xml" ] && [ -f "$HOME/.m2/settings-codeartifact.xml" ]; then
+    mod config build maven settings edit "$HOME/.m2/settings-codeartifact.xml"
   fi
 
   if [ ! -f "$HOME/.m2/settings.xml" ] && [ ! -f /app/maven/settings-codeartifact.xml ] && [ ! -f /app/gradle/init-codeartifact.gradle ]; then
     info "WARNING: CodeArtifact is configured for publishing, but no build dependency configuration was found. Uncomment the CodeArtifact build-tool lines in the Dockerfile so dependencies resolve from CodeArtifact rather than public repositories."
   fi
-
-  if [ -n "${ORGANIZATION:-}" ]; then
-    info "WARNING: org mode mints the CodeArtifact token once for the whole org. A build/publish that runs past the token lifetime will fail; raise CODEARTIFACT_TOKEN_DURATION or split the org if it is large."
-  elif [[ "${BATCH_SIZE:-0}" -le 0 ]]; then
-    info "WARNING: CodeArtifact tokens expire within 12h and are refreshed once per batch. Set BATCH_SIZE so each batch completes inside the token lifetime for long runs."
-  fi
-
-  refresh_codeartifact_token || die "Unable to configure the CodeArtifact publish target"
 }
 
-# No-op when CodeArtifact is not in use. transient failure mid-run does not discard the remaining batches.
+# Mints a token and writes it everywhere the running CLI and the build tools read it from
+# disk, because an environment variable cannot reach an already-running process.
 refresh_codeartifact_token() {
   [ -n "${CODEARTIFACT_DOMAIN:-}" ] || return 0
 
@@ -376,7 +188,42 @@ refresh_codeartifact_token() {
     return 1
   fi
 
+  (
+    umask 077
+    # gradle/init-codeartifact.gradle reads the token file; Maven gets it rendered into its settings
+    printf '%s' "$token" > "$HOME/.codeartifact-token"
+    if [ -f /app/maven/settings-codeartifact.xml ]; then
+      mkdir -p "$HOME/.m2"
+      sed "s|\${env.CODEARTIFACT_AUTH_TOKEN}|$token|" /app/maven/settings-codeartifact.xml > "$HOME/.m2/settings-codeartifact.xml"
+    fi
+  )
   export CODEARTIFACT_AUTH_TOKEN="$token"
+}
+
+start_codeartifact_refresher() {
+  [ -n "${CODEARTIFACT_DOMAIN:-}" ] || return 0
+
+  local lifetime="${CODEARTIFACT_TOKEN_DURATION:-43200}"
+  # 0 ties the token to the role session, whose minimum is 15 minutes
+  [ "$lifetime" -gt 0 ] || lifetime=900
+  (
+    next=$(( lifetime * 3 / 4 ))
+    while sleep "$next"; do
+      if refresh_codeartifact_token; then
+        next=$(( lifetime * 3 / 4 ))
+      else
+        info "CodeArtifact token refresh failed; retrying in 5 minutes"
+        next=300
+      fi
+    done
+  ) &
+  REFRESHER_PID=$!
+}
+
+stop_codeartifact_refresher() {
+  if [ -n "${REFRESHER_PID:-}" ]; then
+    kill "$REFRESHER_PID" 2>/dev/null
+  fi
 }
 
 # CodeArtifact marks versions uploaded without a maven-metadata.xml as Unfinished, and its
@@ -387,7 +234,6 @@ refresh_codeartifact_token() {
 finalize_codeartifact_versions() {
   [ -n "${CODEARTIFACT_DOMAIN:-}" ] || return 0
 
-  local csv_file=$1
   info "Finalizing CodeArtifact package versions to Published status"
 
   # <domain>-<owner>.d.codeartifact.<region>.amazonaws.com/maven/<repository>/
@@ -406,33 +252,15 @@ finalize_codeartifact_versions() {
     aws_args+=(--region "${CODEARTIFACT_REGION}")
   fi
 
-  local path_column
-  path_column=$(head -n 1 "$csv_file" | tr -d '\r' | tr ',' '\n' | grep -n -x -i 'path' | cut -d: -f1)
-  if [ -z "$path_column" ]; then
-    info "No path column found in $csv_file; only finalizing the organization catalog packages"
-  fi
-
-  local coordinates
-  coordinates=$(
-    if [ -n "$path_column" ]; then
-      tail -n +2 "$csv_file" | cut -d, -f"$path_column" | tr -d '\r' | while IFS= read -r path; do
-        path="${path%/}"
-        if [[ "$path" == */* ]]; then
-          printf '%s %s\n' "$(dirname "$path" | tr '/' '.')" "$(basename "$path")"
-        fi
-      done
-    fi
-    # the organization catalog packages mod publish maintains alongside the LSTs
-    printf 'io.moderne.organization.sources repos\n'
-    printf 'io.moderne.organization.sources repos-lock\n'
-  )
+  # No local csv survives the run, so the coordinates come from the repository itself
+  local packages
+  packages=$(aws codeartifact list-packages "${aws_args[@]}" \
+    --query 'packages[].[namespace,package]' --output text) || return 1
 
   local failed=0
   local namespace package versions
   while read -r namespace package; do
     [ -n "$package" ] || continue
-    # a package is absent when its repository failed to build, or on the catalog packages
-    # before the first successful publish; both are expected, so a failed listing is skipped
     # shellcheck disable=SC2016 # backticks are JMESPath literals, not command substitution
     versions=$(aws codeartifact list-package-versions "${aws_args[@]}" \
       --namespace "$namespace" --package "$package" --status Unfinished \
@@ -449,230 +277,20 @@ finalize_codeartifact_versions() {
       info "Failed to finalize ${namespace}:${package} version(s) ${versions}; they stay hidden from the Maven endpoint until published manually"
       failed=1
     fi
-  done <<< "$coordinates"
+  done <<< "$packages"
 
   return $failed
-}
-
-# Clean any existing files
-prepare_environment() {
-  info "Preparing environment"
-  mkdir -p "$DATA_DIR"
-  rm -rf "${DATA_DIR:?}"/*
-  mkdir -p "$HOME/.moderne/cli/metrics/"
-  rm -rf "$HOME/.moderne/cli/metrics"/*
 }
 
 start_monitoring() {
   info "Starting monitoring"
   nohup mod monitor --port 8080 > /dev/null 2>&1 &
-  echo $! > "$DATA_DIR/monitor.pid"
+  MONITOR_PID=$!
 }
 
 stop_monitoring() {
   info "Cleaning up monitoring"
-  if [ -f "$DATA_DIR/monitor.pid" ]; then
-    kill -9 "$(cat "$DATA_DIR/monitor.pid")"
-    rm "$DATA_DIR/monitor.pid"
-  fi
-}
-
-select_repositories() {
-  local csv_file=$1
-
-  if [ ! -f "$csv_file" ]; then
-    die "File $csv_file does not exist"
-  fi
-
-  if [[ -n "${START_INDEX:-}" && -n "${END_INDEX:-}" ]]; then
-    info "Selecting repositories from $csv_file starting at $START_INDEX and ending at $END_INDEX"
-
-    header=$(head -n 1 "$csv_file")
-
-    # select the lines from start_line to end_line from $csv_file
-    selected_lines=$(tail -n +2 "$csv_file" | sed -n "${START_INDEX},${END_INDEX}p")
-
-    ( echo "$header"; echo "$selected_lines" ) > "$DATA_DIR/selected-repos.csv"
-  else
-    info "Selected all repositories from $csv_file"
-
-    cp "$csv_file" "$DATA_DIR/selected-repos.csv"
-  fi
-}
-
-# Split a CSV into batch files under $DATA_DIR/batches/.
-# When BATCH_SIZE is set, each file contains at most BATCH_SIZE rows.
-# Without BATCH_SIZE the entire CSV is used as a single batch.
-split_into_batches() {
-  local csv_file=$1
-  local batch_dir="$DATA_DIR/batches"
-  mkdir -p "$batch_dir"
-
-  local batch_size="${BATCH_SIZE:-0}"
-  if [[ "$batch_size" -gt 0 ]]; then
-    local header
-    header=$(head -n 1 "$csv_file")
-
-    # split data rows (skip header) into chunk files
-    tail -n +2 "$csv_file" | split -l "$batch_size" - "$batch_dir/batch-"
-
-    # prepend the header to each chunk
-    for file in "$batch_dir"/batch-*; do
-      ( echo "$header"; cat "$file" ) > "$file.csv"
-      rm "$file"
-    done
-
-    local batch_count
-    batch_count=$(find "$batch_dir" -maxdepth 1 -name '*.csv' | wc -l | tr -d ' ')
-    info "Split $(( $(wc -l < "$csv_file") - 1 )) repositories into $batch_count batches of $batch_size"
-  else
-    cp "$csv_file" "$batch_dir/all.csv"
-  fi
-}
-
-build_and_upload_repos() {
-  local clone_dir="$DATA_DIR/$1"
-  local partition_file=$2
-  info "Building and uploading repositories into $clone_dir from $partition_file"
-
-  # turn off color output and cursor movement in the CLI
-  export NO_COLOR=true
-  export TERM=dumb
-
-  mod git sync csv "$clone_dir" "$partition_file" --with-sources
-  mod log syncs add "$clone_dir" "$DATA_DIR/syncs.zip" --last-sync
-
-  refresh_codeartifact_token || info "Token refresh failed; continuing with the existing token"
-
-  # kill a build if it takes too long assuming it's hung indefinitely
-  # defaults to 2700 seconds (45 minutes)
-  local build_timeout="${BUILD_TIMEOUT:-2700}"
-  timeout "$build_timeout" mod build "$clone_dir" --no-download
-  ret=$?
-  if [ $ret -eq 124 ]; then
-    printf "\n* Build timed out after %s seconds\n\n" "$build_timeout"
-  fi
-
-  mod publish "$clone_dir"
-  finalize_codeartifact_versions "$partition_file" || info "Some CodeArtifact versions could not be finalized"
-  mod log builds add "$clone_dir" "$DATA_DIR/log.zip" --last-build
-  return $ret
-}
-
-send_logs() {
-  local index=$1
-  local timestamp
-  timestamp=$(date +"%Y%m%d%H%M")
-
-  if [ -n "${CODEARTIFACT_DOMAIN:-}" ]; then
-    info "Skipping build-log upload: AWS CodeArtifact does not accept non-Maven log artifacts"
-    return 0
-  fi
-
-  # Upload logs to S3
-  if [[ "${PUBLISH_URL:-}" == "s3://"* ]]; then
-    # Construct S3 path for build logs
-    logs_path="${PUBLISH_URL}/.logs/$index/$timestamp/ingest-log-cli-$timestamp-$index.zip"
-    info "Uploading logs to $logs_path"
-
-    # Build AWS S3 command with optional parameters
-    S3_CMD=(aws s3 cp "$DATA_DIR/log.zip" "$logs_path")
-
-    # Add profile if specified
-    if [ -n "${S3_PROFILE:-}" ]; then
-      S3_CMD+=(--profile "${S3_PROFILE}")
-    fi
-
-    # Add region if specified
-    if [ -n "${S3_REGION:-}" ]; then
-      S3_CMD+=(--region "${S3_REGION}")
-    fi
-
-    # Add endpoint if specified (for S3-compatible services)
-    if [ -n "${S3_ENDPOINT:-}" ]; then
-      S3_CMD+=(--endpoint-url "${S3_ENDPOINT}")
-    fi
-
-    # Execute the upload
-    if ! "${S3_CMD[@]}"; then
-      info "Failed to upload logs to S3"
-    fi
-
-    # Upload sync logs to S3 (if they exist)
-    if [ -f "$DATA_DIR/syncs.zip" ]; then
-      sync_logs_path="${PUBLISH_URL}/.logs/$index/$timestamp/ingest-sync-log-cli-$timestamp-$index.zip"
-      info "Uploading sync logs to $sync_logs_path"
-
-      S3_CMD=(aws s3 cp "$DATA_DIR/syncs.zip" "$sync_logs_path")
-
-      if [ -n "${S3_PROFILE:-}" ]; then
-        S3_CMD+=(--profile "${S3_PROFILE}")
-      fi
-      if [ -n "${S3_REGION:-}" ]; then
-        S3_CMD+=(--region "${S3_REGION}")
-      fi
-      if [ -n "${S3_ENDPOINT:-}" ]; then
-        S3_CMD+=(--endpoint-url "${S3_ENDPOINT}")
-      fi
-
-      if ! "${S3_CMD[@]}"; then
-        info "Failed to upload sync logs to S3"
-      fi
-    fi
-  # if PUBLISH_USER and PUBLISH_PASSWORD are set, or PUBLISH_TOKEN is set, publish logs
-  elif [[ -n "${PUBLISH_USER:-}" && -n "${PUBLISH_PASSWORD:-}" ]]; then
-    logs_url=$PUBLISH_URL/io/moderne/ingest-log/$index/$timestamp/ingest-log-cli-$timestamp-$index.zip
-    info "Uploading logs to $logs_url"
-    log_response=$(curl -s -S --insecure -w "\n%{http_code}" -u "$PUBLISH_USER":"$PUBLISH_PASSWORD" -X PUT "$logs_url" -T "$DATA_DIR/log.zip" 2>&1)
-    log_http_code=$(echo "$log_response" | tail -1)
-    log_body=$(echo "$log_response" | sed '$d')
-    if [[ "$log_http_code" -ge 200 && "$log_http_code" -lt 300 ]]; then
-      info "Successfully published logs (HTTP $log_http_code)"
-    else
-      info "Failed to publish logs (HTTP $log_http_code): $log_body"
-    fi
-
-    # Upload sync logs (if they exist)
-    if [ -f "$DATA_DIR/syncs.zip" ]; then
-      sync_logs_url=$PUBLISH_URL/io/moderne/ingest-sync-log/$index/$timestamp/ingest-sync-log-cli-$timestamp-$index.zip
-      info "Uploading sync logs to $sync_logs_url"
-      sync_response=$(curl -s -S --insecure -w "\n%{http_code}" -u "$PUBLISH_USER":"$PUBLISH_PASSWORD" -X PUT "$sync_logs_url" -T "$DATA_DIR/syncs.zip" 2>&1)
-      sync_http_code=$(echo "$sync_response" | tail -1)
-      sync_body=$(echo "$sync_response" | sed '$d')
-      if [[ "$sync_http_code" -ge 200 && "$sync_http_code" -lt 300 ]]; then
-        info "Successfully published sync logs (HTTP $sync_http_code)"
-      else
-        info "Failed to publish sync logs (HTTP $sync_http_code): $sync_body"
-      fi
-    fi
-  elif [[ -n "${PUBLISH_TOKEN:-}" ]]; then
-    logs_url=$PUBLISH_URL/io/moderne/ingest-log/$index/$timestamp/ingest-log-cli-$timestamp-$index.zip
-    info "Uploading logs to $logs_url"
-    log_response=$(curl -s -S --insecure -w "\n%{http_code}" -H "Authorization: Bearer $PUBLISH_TOKEN" -X PUT "$logs_url" -T "$DATA_DIR/log.zip" 2>&1)
-    log_http_code=$(echo "$log_response" | tail -1)
-    log_body=$(echo "$log_response" | sed '$d')
-    if [[ "$log_http_code" -ge 200 && "$log_http_code" -lt 300 ]]; then
-      info "Successfully published logs (HTTP $log_http_code)"
-    else
-      info "Failed to publish logs (HTTP $log_http_code): $log_body"
-    fi
-
-    # Upload sync logs (if they exist)
-    if [ -f "$DATA_DIR/syncs.zip" ]; then
-      sync_logs_url=$PUBLISH_URL/io/moderne/ingest-sync-log/$index/$timestamp/ingest-sync-log-cli-$timestamp-$index.zip
-      info "Uploading sync logs to $sync_logs_url"
-      sync_response=$(curl -s -S --insecure -w "\n%{http_code}" -H "Authorization: Bearer $PUBLISH_TOKEN" -X PUT "$sync_logs_url" -T "$DATA_DIR/syncs.zip" 2>&1)
-      sync_http_code=$(echo "$sync_response" | tail -1)
-      sync_body=$(echo "$sync_response" | sed '$d')
-      if [[ "$sync_http_code" -ge 200 && "$sync_http_code" -lt 300 ]]; then
-        info "Successfully published sync logs (HTTP $sync_http_code)"
-      else
-        info "Failed to publish sync logs (HTTP $sync_http_code): $sync_body"
-      fi
-    fi
-  else
-    info "No log publishing credentials provided"
-  fi
+  kill "$MONITOR_PID" 2>/dev/null
 }
 
 main "$@"

@@ -143,109 +143,6 @@ resource "aws_batch_job_queue" "job_queue" {
   tags = var.default_tags
 }
 
-# Mass Ingest - Chunk
-resource "aws_iam_role" "chunk_task_role" {
-  name = "${var.name}-chunk-task-role"
-  path = "/"
-
-  assume_role_policy = jsonencode({
-    "Version": "2012-10-17",
-    "Statement": [
-      {
-        "Effect": "Allow",
-        "Action": "sts:AssumeRole",
-        "Principal": {
-          "Service": "ecs-tasks.amazonaws.com"
-        },
-      }
-    ]
-  })
-
-  tags = var.default_tags
-}
-
-resource "aws_iam_role_policy_attachment" "chunk_ecs_task_execution_policy" {
-  role       = aws_iam_role.chunk_task_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-}
-
-resource "aws_iam_role_policy" "chunk_batch_access" {
-  name = "secrets-access"
-  role = aws_iam_role.chunk_task_role.name
-
-  policy = jsonencode({
-    "Version": "2012-10-17",
-    "Statement": [
-      {
-        "Effect": "Allow",
-        "Action": "batch:SubmitJob",
-        "Resource": [
-          aws_batch_job_queue.job_queue.arn,
-          aws_batch_job_definition.chunk_job_definition.arn,
-        ]
-      },
-    ]
-  })
-}
-
-# S3 read access policy for chunk task role (for reading repos.csv from S3)
-resource "aws_iam_role_policy" "chunk_s3_access" {
-  count = var.moderne_s3_bucket_name != "" ? 1 : 0
-  name  = "s3-read-access"
-  role  = aws_iam_role.chunk_task_role.name
-
-  policy = jsonencode({
-    "Version": "2012-10-17",
-    "Statement": [
-      {
-        "Effect": "Allow",
-        "Action": [
-          "s3:GetObject"
-        ],
-        "Resource": [
-          "arn:aws:s3:::${var.moderne_s3_bucket_name}/*"
-        ]
-      }
-    ]
-  })
-}
-
-resource "aws_batch_job_definition" "chunk_job_definition" {
-  name = "${var.name}-chunk-job-definition"
-  type = "container"
-  container_properties = jsonencode({
-    image = "${var.image_registry}:${var.image_tag}"
-    command = ["./chunk.sh", var.ingest_csv_file, var.ingest_chunk_size],
-    resourceRequirements = [
-      {
-        type = "VCPU",
-        value = "1",
-      },
-      {
-        type = "MEMORY",
-        value = "64"
-      }
-    ],
-    executionRoleArn = aws_iam_role.chunk_task_role.arn,
-    environment = [
-      {
-        name = "JOB_NAME",
-        value = aws_batch_job_definition.chunk_job_definition.name,
-      },
-      {
-        name = "JOB_QUEUE",
-        value = aws_batch_job_queue.job_queue.arn
-      },
-      {
-        name = "JOB_DEFINITION",
-        value = aws_batch_job_definition.processor_job_definition.arn
-      },
-    ]
-  })
-
-  tags = var.default_tags
-}
-
 # Mass Ingest - Processor
 resource "aws_iam_role" "processor_task_role" {
   name = "${var.name}-processor-task-role"
@@ -293,7 +190,8 @@ resource "aws_iam_role_policy" "processor_secrets_access" {
   })
 }
 
-# S3 access policy for processor task role (for S3-based artifact storage)
+# S3 access policy for processor task role (for S3-based artifact storage).
+# `mod publish --sync-csv` reads repos.csv and repos-lock.csv from the bucket as well as writing to it.
 resource "aws_iam_role_policy" "processor_s3_access" {
   count = var.moderne_s3_bucket_name != "" ? 1 : 0
   name  = "s3-access"
@@ -305,11 +203,17 @@ resource "aws_iam_role_policy" "processor_s3_access" {
       {
         "Effect": "Allow",
         "Action": [
+          "s3:GetObject",
           "s3:PutObject"
         ],
         "Resource": [
           "arn:aws:s3:::${var.moderne_s3_bucket_name}/*"
         ]
+      },
+      {
+        "Effect": "Allow",
+        "Action": "s3:ListBucket",
+        "Resource": "arn:aws:s3:::${var.moderne_s3_bucket_name}"
       }
     ]
   })
@@ -320,7 +224,7 @@ resource "aws_batch_job_definition" "processor_job_definition" {
   type = "container"
   container_properties = jsonencode({
     image = "${var.image_registry}:${var.image_tag}",
-    command = ["./publish.sh", var.ingest_csv_file, "--start", "Ref::Start", "--end", "Ref::End"],
+    command = ["./publish.sh"],
     resourceRequirements = [
       {
         type = "VCPU",
@@ -353,6 +257,12 @@ resource "aws_batch_job_definition" "processor_job_definition" {
         {
           name = "S3_REGION",
           value = var.moderne_s3_region,
+        },
+      ] : [],
+      var.parallel > 0 ? [
+        {
+          name = "PARALLEL",
+          value = tostring(var.parallel),
         },
       ] : [],
     ),
@@ -396,7 +306,7 @@ resource "aws_batch_job_definition" "processor_job_definition" {
     )
   })
   timeout {
-    attempt_duration_seconds = 3600
+    attempt_duration_seconds = var.job_timeout_seconds
   }
 
   tags = var.default_tags
@@ -435,16 +345,25 @@ resource "aws_iam_role_policy" "scheduler_batch_access" {
         "Action": "batch:SubmitJob",
         "Resource": [
           aws_batch_job_queue.job_queue.arn,
-          aws_batch_job_definition.chunk_job_definition.arn,
+          aws_batch_job_definition.processor_job_definition.arn,
         ]
       },
     ]
   })
 }
 
-# Schedules
-resource "aws_scheduler_schedule" "daily_trigger" {
-  name = "${var.name}-daily-trigger"
+# Schedules: one job per organization, or a single job over the whole repos.csv.
+# (An array job would need at least two children, hence a schedule each.)
+locals {
+  schedules = length(var.organizations) > 0 ? {
+    for org in var.organizations : replace(org, "/[^A-Za-z0-9_-]/", "-") => org
+  } : { all = "" }
+}
+
+resource "aws_scheduler_schedule" "trigger" {
+  for_each = local.schedules
+
+  name = "${var.name}-${each.key}"
   schedule_expression = var.schedule_expression
   flexible_time_window {
     mode = "OFF"
@@ -454,9 +373,17 @@ resource "aws_scheduler_schedule" "daily_trigger" {
     role_arn = aws_iam_role.scheduler_role.arn
 
     input = jsonencode({
-      "JobDefinition": aws_batch_job_definition.chunk_job_definition.arn,
-      "JobName": aws_batch_job_definition.chunk_job_definition.name,
+      "JobDefinition": aws_batch_job_definition.processor_job_definition.arn,
+      "JobName": "${var.name}-${each.key}",
       "JobQueue": aws_batch_job_queue.job_queue.arn,
+      "ContainerOverrides": {
+        "Environment": each.value == "" ? [] : [
+          {
+            "Name": "ORGANIZATION",
+            "Value": each.value,
+          },
+        ]
+      },
     })
   }
 }
