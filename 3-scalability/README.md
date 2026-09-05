@@ -1,47 +1,13 @@
-# Scalability: scale to production
+# Scalability
 
-Production-scale deployment using cloud-native batch services for parallel repository processing. Choose the example that matches your cloud provider.
-
-## Choose your platform
+A cloud batch service runs one ingest container per organization on a schedule: the scheduler submits a job for each name in `organizations`, every job runs `publish.sh` with its `ORGANIZATION`, the jobs work through their slice of the store's `repos.csv` side by side and flush their rows into the shared `repos-lock.csv`, and the compute scales back to zero when they finish. Nothing partitions by row count and nothing counts the csv: the CLI skips what is already published, so a daily run costs what changed.
 
 | Cloud provider | Service | Compute | Guide |
 |---|---|---|---|
 | **AWS** | [AWS Batch](https://aws.amazon.com/batch/) | EC2 instances | [aws-batch/](./aws-batch/) |
 | **GCP** | [Google Cloud Batch](https://cloud.google.com/batch) | Compute Engine VMs | [gcp-batch/](./gcp-batch/) |
 
-Both examples implement the same architecture — only the infrastructure-as-code and cloud-specific tooling differ.
-
-## Architecture
-
-All platforms follow the same pattern:
-
-1. **Scheduled trigger** (daily/weekly cron) starts the orchestration
-2. **Orchestrator** determines partitions from the repo list and creates N parallel tasks
-3. **Tasks** each process a slice of the CSV (`--start N --end M`) using the shared `publish.sh` script
-4. **Workers shut down** when their slice is complete — compute scales to zero
-5. **Next trigger** repeats the cycle
-
-> [!NOTE]
-> The exact orchestration differs by platform. AWS uses a separate chunk job that submits processor jobs. GCP uses a Cloud Workflow that computes task count and creates a single Batch job with N parallel tasks.
-
-```
-┌─────────────┐     ┌──────────────┐     ┌──────────────┐
-│  Scheduler  │────>│ Orchestrator │────>│ Processor #1 │──> publish.sh --start 1  --end 10
-│  (cron)     │     │              │     │ Processor #2 │──> publish.sh --start 11 --end 20
-└─────────────┘     └──────────────┘     │ Processor #3 │──> publish.sh --start 21 --end 30
-                                         │     ...      │
-                                         │ Processor #N │──> publish.sh --start X  --end Y
-                                         └──────────────┘
-```
-
-### Shared components
-
-These files are shared across all platforms and live at the repository root:
-
-- `publish.sh` — main ingestion script, already supports `--start`/`--end` for partitioning
-- `Dockerfile` / `Dockerfile.fips` — container image definition
-- `repos.csv` — repository list (can be baked into the image or hosted at a URL)
-- `diagnostics/` — pre-ingestion validation
+Both use the root `Dockerfile` and `publish.sh`; only the Terraform differs. [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) covers both.
 
 ## Why VM-based batch services (not Kubernetes)
 

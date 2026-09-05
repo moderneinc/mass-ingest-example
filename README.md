@@ -1,685 +1,79 @@
 # Mass ingest
 
-Production-ready examples for ingesting large numbers of repositories into Moderne using the [Moderne CLI](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro).
+Ingest a large number of repositories into Moderne with the [Moderne CLI](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro). One container works through a list of repositories: clone, build the LST, publish it to your artifact store, record the result, delete the clone, next.
 
-## Choose your deployment stage
+## 1. Put `repos.csv` in the artifact store
 
-This repository provides three progressive deployment examples. Each stage is **completely independent** and self-contained - you can start at any stage based on your needs.
-
-### 1-quickstart: Get started quickly
-
-**Best for:**
-- Quick proof of concept
-- Small repository counts (< 1.000 repos)
-- Development and testing
-- Learning how mass-ingest works
-
-**What's included:**
-- Single Docker container
-- Manual docker commands
-- Basic monitoring via CLI metrics endpoint
-
-**Resources needed:**
-- 2 CPU cores
-- 16 GB RAM
-- 32+ GB disk
-
-[→ Start with 1-quickstart](./1-quickstart/)
-
----
-
-### 2-observability: Add monitoring and visibility
-
-**Best for:**
-- Production use on a single host
-- Small repository counts (< 1.000 repos)
-- Medium repository count with manual scaling (<10.000 repos)
-- Need for operational visibility
-- Continuous ingestion workflows
-
-**What's included:**
-- Docker Compose orchestration
-- Integrated Grafana dashboards
-- Prometheus metrics collection
-- Automated restarts and scheduling
-
-**Resources needed:**
-- 3 CPU cores (2 for mass-ingest, 1 for monitoring)
-- 18 GB RAM (16 for mass-ingest, 2 for monitoring)
-- 50+ GB disk
-
-[→ Start with 2-observability](./2-observability/)
-
----
-
-### 3-scalability: Scale to production
-
-**Best for:**
-- Large repository counts (>10.000 repos)
-- Parallel processing requirements
-- Production deployment with automatic scaling
-- Enterprise environments
-
-**What's included:**
-- Cloud-native batch services (AWS Batch, GCP Batch)
-- Terraform infrastructure as code
-- Scheduled automation (daily/weekly)
-- Auto-scaling compute — scales to zero when idle
-- Production monitoring and cost optimization
-
-**Resources needed:**
-- Cloud account (AWS or GCP)
-- Terraform >= 1.0
-- VPC with internet access
-- Configurable compute (scales from 0 to 256+ vCPUs)
-
-[→ Start with 3-scalability](./3-scalability/)
-
----
-
-## Repository structure
-
-```
-mass-ingest-example/
-├── Dockerfile            # Container image definition (used by all stages)
-├── Dockerfile.fips       # FIPS 140-2/140-3 compliant variant (UBI 9)
-├── publish.sh            # Main ingestion script
-├── publish.ps1           # PowerShell version (native Windows, no Docker — see "Windows / PowerShell")
-├── repos.csv             # Example repository list
-│
-├── 1-quickstart/         # Single container deployment
-│   └── README.md
-│
-├── 2-observability/      # Docker Compose with monitoring
-│   ├── docker-compose.yml
-│   ├── .env.example
-│   ├── observability/    # Grafana and Prometheus configs
-│   └── README.md
-│
-├── 3-scalability/        # Cloud-native batch deployment (multi-cloud)
-│   ├── README.md          # Platform comparison and architecture overview
-│   ├── aws-batch/         # AWS Batch + EventBridge + Secrets Manager
-│   │   ├── chunk.sh
-│   │   ├── terraform/
-│   │   └── README.md
-│   ├── gcp-batch/         # GCP Batch + Cloud Scheduler + Secret Manager
-│   │   ├── task.sh
-│   │   ├── terraform/
-│   │   └── README.md
-│
-└── diagnostics/          # Comprehensive diagnostic system
-    ├── diagnose.sh       # Main orchestration script
-    ├── lib/              # Shared libraries
-    │   ├── core.sh       # Colors, output formatting, utilities
-    │   └── latency.sh    # Latency and throughput testing
-    └── checks/           # Modular check scripts
-        ├── system.sh     # CPUs, memory, disk space
-        ├── tools.sh      # git, curl, jq, etc.
-        ├── docker.sh     # Container detection, CPU arch, emulation
-        ├── threads.sh    # Cgroup PID limits, ulimit, kernel threads-max
-        ├── java.sh       # JDKs, JAVA_HOME
-        ├── cli.sh        # mod CLI version, config
-        ├── config.sh     # Env vars, credentials
-        ├── repos-csv.sh  # File validation, columns, origins
-        ├── network.sh    # Connectivity to all hosts
-        ├── ssl.sh        # SSL handshakes, cert expiry
-        ├── auth-publish.sh # Write/read/delete test
-        ├── auth-scm.sh   # .git-credentials validation
-        ├── publish-latency.sh # Publish URL latency and throttling
-        ├── maven-repos.sh # Maven repos from settings.xml
-        ├── dependency-repos.sh # User-specified repos (Gradle, etc.)
-        └── scm-repos.sh  # SCM connectivity per origin
-```
-
-## Prerequisites (all stages)
-
-Before starting with any stage, you'll need:
-
-1. **Repository list**: Create `repos.csv` with repositories to ingest
-   ```csv
-   cloneUrl,branch,origin,path
-   https://github.com/org/repo1,main,github.com,org/repo1
-   https://github.com/org/repo2,main,github.com,org/repo2
-   ```
-
-2. **Artifact repository**: Maven-formatted repository for publishing LSTs
-   - Artifactory, Nexus, or similar
-   - Dedicated repository recommended (separate from other artifacts)
-   - Credentials with publish permissions
-
-3. **Source control access**: If repositories require authentication
-   - Service account with read access to all repositories
-   - Personal access token or credentials
-
-4. **Docker**: Installed and running (for stages 1 and 2)
-
-5. **Bash**: Required in the container image (Alpine users: `apk add bash`)
-
-6. **Cloud account**: AWS or GCP account (required only for stage 3)
-
-## Quick comparison
-
-| Feature | 1-quickstart | 2-observability | 3-scalability |
-|---------|---------|-----------|---------|
-| **Deployment** | Single container | Docker Compose | Cloud-native batch + Terraform |
-| **Monitoring** | CLI metrics endpoint | Grafana + Prometheus | Cloud-native logging + optional Grafana |
-| **Scaling** | Manual | Single host | Auto-scaling parallel workers |
-| **Scheduling** | Manual/cron | Docker restart policy | Cloud-native scheduler |
-| **Cost** | Lowest | Low | Scales with usage |
-| **Setup time** | 15 minutes | 30 minutes | 1-2 hours |
-| **Ideal repo count** | < 100 | 100-1000 | 1000+ |
-| **Parallel processing** | No | No | Yes |
-
-## Common configuration
-
-All stages share the same core configuration needs:
-
-### Environment variables
-
-- `PUBLISH_URL` - Artifact repository URL (e.g., `https://artifactory.example.com/artifactory/moderne-ingest/`)
-- `PUBLISH_USER` - Repository username
-- `PUBLISH_PASSWORD` - Repository password
-- `PUBLISH_TOKEN` - Alternative to user/password for JFrog
-- `MODERNE_TENANT` - Your Moderne tenant url (optional)
-- `MODERNE_TOKEN` - Moderne API token (optional)
-
-For AWS CodeArtifact, set `CODEARTIFACT_DOMAIN` (and `PUBLISH_URL` to the CodeArtifact Maven endpoint) instead of `PUBLISH_USER`/`PUBLISH_PASSWORD`. See [Using AWS CodeArtifact](#using-aws-codeartifact).
-
-### Repository authentication
-
-For private repositories, credentials are mounted at runtime (never baked into images):
-- `.git-credentials` file for HTTPS
-- `.ssh` directory for SSH
-
-See each stage's README for specific mounting instructions.
-
-### Non-root user
-
-Both Dockerfiles produce images that run as a dedicated non-root user (`moderne`, UID 1000, GID 0), so no extra configuration is needed to satisfy policies that forbid root containers (for example Kubernetes `runAsNonRoot: true` pod security settings). CLI configuration and credentials live in `/home/moderne`, and the writable directories (`/home/moderne`, `/var/moderne`, `/app`) are group-writable by GID 0 so the images also work on platforms that assign an arbitrary UID at runtime (such as OpenShift).
-
-Two practical consequences:
-- Host directories bind-mounted at `/var/moderne` must be writable by UID 1000 (pre-create them as your regular user rather than letting Docker create them as root).
-- Credential files mounted into `/home/moderne` must be readable by UID 1000.
-
-### Repository list format
-The `repos.csv` file columns:
-- `cloneUrl` (required) - Full git clone URL
-- `origin` (required) - Source identifier (e.g., `github.com`)
-- `path` (required) - Repository path/identifier
-- `branch` (optional) - Branch to build (uses remote default if not specified)
-- `gradleVersion` (optional) - Selects a specific Gradle version for repos without a wrapper (must match an installation registered via `mod config build gradle installation edit`)
-
-See [repos.csv documentation](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv) for advanced options.
-
-### Publishing to S3: keep `repos.csv` in the bucket
-
-When `PUBLISH_URL` is S3, `mod publish` rebuilds the platform's repository catalog
-(`$PUBLISH_URL/repos-lock.csv`) from the list at `$PUBLISH_URL/repos.csv`; without that file,
-catalog updates are additive only and removed repositories never disappear from the platform.
-Maintain your full list there and pass that URI as the `publish.sh` argument (a subset csv is
-fine for partial re-runs). The script fails fast when the file is missing.
-For Maven/Artifactory targets the connector usually discovers LSTs by polling and no such file
-is needed, so the script only warns when it is absent from the location `mod publish` reads
-(the repository root for Artifactory token setups, the
-`io/moderne/organization/sources/repos` Maven coordinate for user/password setups).
-
-### Dependency repositories (optional)
-
-Create `dependency-repos.csv` to test connectivity to Maven/Gradle dependency repositories during diagnostics:
+Upload the list of repositories to the artifact store the LSTs will go to: `repos.csv` at the bucket or repository root for S3 and Artifactory, or at the Maven coordinate `io/moderne/organization/sources/repos/1.0.0/repos-1.0.0.csv` for Nexus and other Maven repositories that enforce a strict layout.
 
 ```csv
-url,username,password,token
-https://nexus.example.com/releases,${NEXUS_USER},${NEXUS_PASSWORD},
-https://artifactory.example.com/libs,,,${ARTIFACTORY_TOKEN}
-https://repo.spring.io/release,,,
+cloneUrl,branch,origin,path,org1
+https://github.com/acme/billing,main,github.com,acme/billing,Payments
+https://github.com/acme/claims-api,,github.com,acme/claims-api,Claims
 ```
 
-- Use `username` + `password` for basic auth
-- Use `token` for bearer auth (leave username/password empty)
-- Leave all auth fields empty for anonymous access
-- Use `${ENV_VAR}` syntax to reference environment variables
+`cloneUrl`, `origin` and `path` are required; `branch` defaults to the remote's default branch; `org1`, `org2`, ... place the repository in an organization, innermost first. The [repos.csv reference](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv) lists the other columns, and [repository-fetchers](https://github.com/moderneinc/repository-fetchers) generates the file from GitHub, GitLab, Bitbucket and more.
 
-See `dependency-repos.csv.example` for a template.
+The store holds two files. `repos.csv` is the input: whatever produces it overwrites the whole file whenever membership changes and never touches `repos-lock.csv`. `repos-lock.csv` is the output: `mod publish` rebuilds it from `repos.csv`, decorating every row with what was published, and nothing else writes it.
 
-### Code Genome Project
-
-The Moderne CLI is published to the [Code Genome Project](https://docs.moderne.io/administrator-documentation/moderne-platform/how-to-guides/accessing-the-code-genome-project/)
-(CGP) Maven repository at `https://artifacts.codegenomeproject.org/maven`, which is where these
-images download it from: both the `modw` wrapper and the CLI distribution it installs. CGP serves
-the CLI anonymously, so the build needs no credentials.
-
-The build resolves a concrete CLI version and pins it in `moderne-wrapper.properties`, together
-with the URL the distribution came from, so the running container does not re-resolve the CLI.
-Rebuild the image to pick up a new release. Two things follow from that:
-
-- **Snapshots (`MODERNE_CLI_STAGE=snapshot`) re-resolve on every run**, because the newest
-  snapshot build changes. Snapshots are served anonymously too.
-- **CGP serves only `org.openrewrite` and `io.moderne`.** Anything else 404s, which is by
-  design: place CGP below your internal repositories and above Maven Central in a virtual
-  repository so foreign coordinates fall through cheaply. The Maven and Gradle distributions
-  installed by these images still come from their own upstreams (`MAVEN_REPO_URL`,
-  `GRADLE_DIST_URL`), as do the dependencies of the repositories you ingest.
-
-Anonymous access covers the CLI only. Recipe artifacts and the other `io.moderne` coordinates
-still need the username and download token Moderne issued you, which is what the CGP row in
-`dependency-repos.csv.example` is for.
-
-### Build arguments
-
-All Dockerfiles support:
-
-| Argument                     | Default                                                     | Description                                                       |
-|------------------------------|-------------------------------------------------------------|-------------------------------------------------------------------|
-| `MODERNE_CLI_VERSION`        | *(latest release)*                                          | Specific CLI version                                              |
-| `MODERNE_CLI_STAGE`          | `release`                                                   | `release` for latest release, `snapshot` for latest snapshot      |
-| `MODERNE_CLI_RELEASES_REPO`  | `https://artifacts.codegenomeproject.org/maven`             | Maven repository for release CLI artifacts                        |
-| `MODERNE_CLI_SNAPSHOTS_REPO` | `https://artifacts.codegenomeproject.org/maven`             | Maven repository for snapshot CLI artifacts                       |
-| `MAVEN_REPO_URL`             | `https://repo1.maven.org/maven2`                            | Maven repository the Maven distribution is downloaded from        |
-| `GRADLE_DIST_URL`            | `https://services.gradle.org/distributions`                 | Gradle distribution download URL                                  |
-| `GRADLE_VERSION`             | `8.14`                                                      | Primary Gradle version to install                                 |
-| `GRADLE_EXTRA_VERSIONS`      | *(empty)*                                                   | Comma-separated additional Gradle versions (e.g., `6.9.4,5.6.4`)  |
-| `MAVEN_VERSION`              | `3.9.11`                                                    | Maven version to install                                          |
-
-**Using internal mirrors:**
-
-In an egress-blocked environment, point every download at internal mirrors instead of editing the Dockerfile. The Gradle distributions and the Maven distribution come from `GRADLE_DIST_URL` and `MAVEN_REPO_URL`; the CLI itself comes from `MODERNE_CLI_RELEASES_REPO` (or `MODERNE_CLI_SNAPSHOTS_REPO`), which by default is the Code Genome Project. Mirror `io.moderne:moderne-cli` and the `moderne-cli-linux-{x64,aarch64}` distributions into your own repository manager and point the build at that instead:
+## 2. Build the image
 
 ```bash
-docker build \
-  --build-arg GRADLE_DIST_URL=https://artifactory.internal/artifactory/data-local/gradle \
-  --build-arg MAVEN_REPO_URL=https://artifactory.internal/artifactory/maven-central \
-  --build-arg MODERNE_CLI_RELEASES_REPO=https://artifactory.internal/artifactory/moderne \
-  -t mass-ingest .
+docker build -t mass-ingest .
 ```
 
-`GRADLE_DIST_URL` is used as `${GRADLE_DIST_URL}/gradle-<version>-bin.zip`, and `MAVEN_REPO_URL` as `${MAVEN_REPO_URL}/org/apache/maven/apache-maven/<version>/apache-maven-<version>-bin.tar.gz`, so the mirror must serve those layouts. The base images (`eclipse-temurin`, or `registry.access.redhat.com/ubi9/ubi` for FIPS) are pulled by the Docker daemon, so mirror those through your registry configuration rather than a build argument.
+The image ships JDKs 8 to 25, Maven, Gradle and the latest CLI release. [Building the image](docs/image.md) covers pinning the CLI version, internal mirrors, other languages, self-signed certificates and the FIPS variant.
 
-### FIPS-compliant image
-
-A separate `Dockerfile.fips` is provided for environments that require FIPS 140-2/140-3 compliance. It uses Red Hat UBI 9 with the FIPS crypto policy enabled, which restricts all cryptographic operations to FIPS-approved algorithms.
-
-**Build:**
-```bash
-docker build -f Dockerfile.fips -t mass-ingest:fips .
-```
-
-**Build arguments:** the same set as the standard image (see [Build arguments](#build-arguments) above).
-
-**Using internal mirrors:**
-
-Public download servers (the Code Genome Project, Gradle services, Maven Central) may not support FIPS-compliant TLS cipher suites. The Dockerfile uses a separate download stage without FIPS restrictions to handle this, with one exception: `modw` downloads the CLI distribution from the FIPS-enabled stage, so that download negotiates under the FIPS crypto policy. To make the entire build FIPS-compliant end to end, point the download URLs at internal mirrors that support FIPS-compliant TLS:
+## 3. Run it
 
 ```bash
-docker build -f Dockerfile.fips \
-  --build-arg MAVEN_REPO_URL=https://nexus.internal/repository/maven-central \
-  --build-arg GRADLE_DIST_URL=https://nexus.internal/repository/gradle-dist \
-  -t mass-ingest:fips .
-```
-
-When using internal mirrors, you can remove the `downloader` stage from the Dockerfile and move its `ARG` and `RUN` commands into the `base` stage (after the `dnf install` that provides `curl`). This makes the entire build FIPS-compliant.
-
-**Run:** All `docker run` commands from the stage READMEs work unchanged — just substitute the image name:
-```bash
-docker run --rm \
-  -p 8080:8080 \
-  -v $(pwd)/data:/var/moderne \
-  -e PUBLISH_URL=https://your-artifactory.com/artifactory/moderne-ingest/ \
-  -e PUBLISH_USER=your-username \
-  -e PUBLISH_PASSWORD=your-password \
-  mass-ingest:fips
-```
-
-**JDK 8 and 11 TLS 1.3 workaround:**
-
-RHEL 9 backported TLS 1.3 into JDK 8 and 11, but the backported `P11AEADCipher` has a bug in AES-GCM decryption that causes TLS 1.3 handshakes to fail with `CKR_ENCRYPTED_DATA_INVALID` when running through NSS in FIPS mode. JDK 17+ has the fix. The Dockerfile disables TLS 1.3 for JDK 8 and 11, forcing them to use TLS 1.2 which works correctly. This is strictly more restrictive than stock FIPS — same algorithm restrictions plus TLS 1.3 disabled. JDK 17+ is unaffected and uses TLS 1.3 normally.
-
-**Key differences from the standard image:**
-
-| Aspect          | Standard (`Dockerfile`)        | FIPS (`Dockerfile.fips`)              |
-|-----------------|--------------------------------|---------------------------------------|
-| Base image      | Eclipse Temurin (Ubuntu)       | Red Hat UBI 9                         |
-| JDK provider    | Adoptium Temurin               | Red Hat OpenJDK                       |
-| JDK versions    | 8, 11, 17, 21, 25              | 8, 11, 17, 21, 25                     |
-| Crypto policy   | Default (unrestricted)         | FIPS (`update-crypto-policies --set`) |
-| Certificate mgmt| Per-JDK keytool                | System trust store (`update-ca-trust`)|
-| Package manager | apt-get                        | dnf                                   |
-
-> [!NOTE]
-> For full kernel-level FIPS compliance, the host OS must also be running in FIPS mode. The container enforces FIPS-approved algorithms at the userspace level (OpenSSL, Java security providers) regardless of host configuration.
-
-## Using AWS CodeArtifact
-
-AWS CodeArtifact is a standard Basic-auth Maven repository, but its password is a short-lived token (minted with `aws codeartifact get-authorization-token`, expires within 12h), not a static secret. The examples handle this by minting the token at runtime and refreshing it before every batch, so a long-running or scheduled ingest never goes stale. The same token is reused for dependency resolution during the build. After each publish, the uploaded package versions are finalized to `Published` status: CodeArtifact marks versions uploaded without a `maven-metadata.xml` as `Unfinished` and its Maven endpoint returns 404 for them, which would otherwise make the LSTs and the `repos-lock.csv` catalog invisible to the Moderne platform.
-
-### Authentication
-
-Authenticate with an IAM role attached to the compute (AWS Batch job role, ECS task role, or EC2 instance profile) rather than static access keys. The AWS CLI in the container picks up the role automatically. If you must use static keys, pass them as `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` environment variables.
-
-The IAM principal needs
-* `codeartifact:GetAuthorizationToken`
-* `codeartifact:ListPackageVersions`
-* `codeartifact:PublishPackageVersion`
-* `codeartifact:PutPackageMetadata`
-* `codeartifact:ReadFromRepository`
-* `codeartifact:UpdatePackageVersionsStatus`
-* `sts:GetServiceBearerToken`
-
-### Image setup
-
-In the `Dockerfile`, uncomment the AWS CLI install block, then uncomment the lines in the "OPTIONAL: AWS CodeArtifact" section for the build tool(s) your repositories use:
-
-- Maven: `COPY maven/settings-codeartifact.xml /app/maven/settings-codeartifact.xml` (publish.sh registers it at runtime, only when CodeArtifact is selected, so the same image still builds Maven projects in S3/Artifactory runs)
-- Gradle: `COPY gradle/init-codeartifact.gradle /app/gradle/init-codeartifact.gradle` (+ the `mod config build gradle arguments edit` line; the init script no-ops when CodeArtifact is not in use)
-
-Gradle ignores `settings.xml` for credentials, so it needs the init script; Maven needs the settings file. Configure CodeArtifact for every build tool your portfolio uses — an unconfigured tool cannot reach CodeArtifact and resolves entirely from public repositories. If you set `CODEARTIFACT_DOMAIN` but configure neither tool, publish.sh logs a warning.
-
-### Dependency resolution
-
-Both tools resolve only what CodeArtifact serves: `PUBLISH_URL` plus its upstream chain. Public repositories need an external connection, which must come from CodeArtifact's fixed, AWS-managed list (Maven Central, Google Android, Gradle Plugin Portal, CommonsWare, Clojars) — you cannot proxy an arbitrary remote (e.g. Sonatype snapshots) as you would in Nexus or Artifactory. Internal artifacts already in the domain resolve through the upstream chain with the same token; a different domain or account is out of reach, since the token is domain-scoped.
-
-#### Maven
-
-publish.sh registers `settings-codeartifact.xml` only on a CodeArtifact run, so the same image still builds S3/Artifactory runs. It ships with a catch-all mirror (`<mirrorOf>*</mirrorOf>`), so all Maven resolution goes through CodeArtifact and anything it cannot reach fails the build; narrow the `<mirrorOf>` to let those repositories resolve from their original source instead. A `/home/moderne/.m2/settings.xml` you supply yourself is left untouched — merge the `<server>`/`<mirror>` in.
-
-#### Gradle
-
-The init script adds CodeArtifact as an additional repository, so resolution stays additive: a Gradle build keeps its own repositories and falls back to them, and is correspondingly not forced through CodeArtifact. To isolate a Gradle build to CodeArtifact, remove the other repositories from the project.
-
-### Environment variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `PUBLISH_URL` | yes | CodeArtifact Maven HTTPS endpoint, e.g. `https://my-domain-111122223333.d.codeartifact.us-east-1.amazonaws.com/maven/my-repo/` |
-| `CODEARTIFACT_DOMAIN` | yes | CodeArtifact domain name. Setting this selects the CodeArtifact path. |
-| `CODEARTIFACT_DOMAIN_OWNER` | optional | AWS account ID that owns the domain. Derived from `PUBLISH_URL` when unset; set it explicitly if your endpoint host does not follow the standard format. |
-| `CODEARTIFACT_REGION` | optional | AWS region of the domain. Derived from `PUBLISH_URL` when unset. |
-| `CODEARTIFACT_TOKEN_DURATION` | optional | Token lifetime in seconds (default 12h; `0` ties it to the role session, which can be shorter than 12h under a capped assumed-role session). |
-
-Do not set `PUBLISH_USER`/`PUBLISH_PASSWORD` for CodeArtifact; the script authenticates the publish target with `aws` and the current token directly. Set `BATCH_SIZE` so each batch completes inside the token lifetime: the token is refreshed once per batch, so an unbatched run (the default) or org mode (`-o`) mints it only once and a build/publish that runs past the expiry will fail.
-
-### Known limitations
-
-- **Only the first publish updates the organization catalog.** `mod publish` maintains the `repos-lock.csv` catalog at a fixed coordinate by re-uploading it, but CodeArtifact assets are immutable, so every publish after the first returns HTTP 409 and the catalog keeps only the first publish's repos. LST JARs use unique coordinates and are unaffected. If your tenant reads its org structure from this catalog (`moderne.organization.sources.*`), do a single unbatched or org-mode run, and delete the `repos-lock` version (`aws codeartifact delete-package-versions`) before re-ingesting.
-- **Build logs are not stored in CodeArtifact.** Its Maven endpoint rejects non-Maven log artifact paths, so the ingest scripts skip the log upload (the logs remain in the local `log.zip`/`syncs.zip`).
-- **The platform must read the published catalog directly, not poll the repository.** CodeArtifact provides neither a Maven Indexer index nor an Artifactory-style query API, so the connector cannot discover LSTs by polling it. The tenant's artifact source must be configured without a `poll:` block ("lock mode"), so it reads the `repos-lock.csv` this ingest publishes.
-- This CodeArtifact path is implemented in both `publish.sh` (bash) and `publish.ps1` (PowerShell). On Windows, register the Maven settings/Gradle init wiring so build dependencies resolve from CodeArtifact (the script looks for `maven/settings-codeartifact.xml` and `gradle/init-codeartifact.gradle` next to `publish.ps1`, and skips a user-provided `%USERPROFILE%\.m2\settings.xml`).
-
-### Example
-
-```bash
-docker run --rm \
-  -p 8080:8080 \
-  -v $(pwd)/data:/var/moderne \
-  -e PUBLISH_URL=https://my-domain-111122223333.d.codeartifact.us-east-1.amazonaws.com/maven/my-repo/ \
-  -e CODEARTIFACT_DOMAIN=my-domain \
-  -e CODEARTIFACT_DOMAIN_OWNER=111122223333 \
-  -e CODEARTIFACT_REGION=us-east-1 \
-  -e BATCH_SIZE=50 \
+mkdir -p data
+docker run --rm -p 8080:8080 -v "$(pwd)/data:/var/moderne" \
+  -e PUBLISH_URL=https://artifactory.example.com/artifactory/moderne-ingest/ \
+  -e PUBLISH_USER=svc-moderne -e PUBLISH_PASSWORD=... \
   mass-ingest
 ```
 
-## Windows / PowerShell
+The container runs `mod publish /var/moderne --sync-csv`. For every row it compares the remote HEAD with the row's `repos-lock.csv` entry: a repository already published from that commit, by this CLI version, from a reproducible build is skipped; anything else is cloned, built, published and recorded, and its clone is deleted before the next one starts. Disk use stays at one repository, a rerun only touches what changed, and the lock is flushed to the store every 25 repositories, every 10 minutes, and when the container is stopped.
 
-The Docker stages above run the bash `publish.sh`. `publish.ps1` is a PowerShell port of the
-same ingest flow that runs **directly on a Windows host, without Docker**. The most common
-reason to use it is building **.NET (C#) repositories**: on Windows these build natively with
-just the NuGet CLI (no Mono), so a single host can produce both .NET Framework and .NET Core
-LSTs cleanly.
+| Variable | |
+|---|---|
+| `PUBLISH_URL` | The artifact store: an `https://` Maven repository or Artifactory, or `s3://bucket` ([S3 rules](docs/s3.md)). |
+| `PUBLISH_USER` + `PUBLISH_PASSWORD` | Maven repository credentials; `PUBLISH_TOKEN` instead for an Artifactory API token. |
+| `ORGANIZATION` | Ingest one organization from `repos.csv`. One container per organization spreads the work. |
+| `PARALLEL` | Repositories in flight inside one container (default 1). |
+| `MODERNE_TENANT` + `MODERNE_TOKEN` | Optional: the Moderne tenant to register with the CLI. |
+| `GIT_CREDENTIALS` / `GIT_SSH_CREDENTIALS` | Inline credentials for private repositories (see below). |
 
-`publish.ps1` mirrors `publish.sh` — configure credentials, sync repos, build LSTs
-(`mod build`), publish, and upload logs — including CSV batching, per-batch build timeouts,
-S3 / Maven / Artifactory / AWS CodeArtifact publish targets, and CSV sources from a local
-path, `s3://`, or `http(s)://`.
+### Private repositories
 
-### Prerequisites
-
-- **Windows** with PowerShell 5.1+ (or PowerShell 7+).
-- **Moderne CLI** (`mod`) on `PATH`. Building .NET requires CLI **4.1.9+**. See the
-  [CLI install guide](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro).
-- **Java toolchain** for the JVM repos you build — one or more JDKs (registered with the
-  `mod config java jdk` commands) plus Maven/Gradle as needed.
-- **AWS CLI** if you publish to S3 or CodeArtifact, or read a `repos.csv` from `s3://`.
-- **For .NET builds:** .NET SDK **10.0+** and the NuGet CLI (`nuget.exe`) on `PATH` — that is
-  all Windows needs. Keep the `dotnet` build step in `moderne.yml` (enabled by
-  default). See the ".NET / C# builds" notes in `.env.example` and the private-feed template
-  in `nuget/nuget.config`.
-
-### Configuration
-
-`publish.ps1` reads the same environment variables as the bash flow, set as PowerShell env
-vars before running. `DATA_DIR` (the working directory for clones, logs, and artifacts) is
-required; the rest match [Environment variables](#environment-variables),
-[Repository authentication](#repository-authentication) (`GIT_CREDENTIALS` /
-`GIT_SSH_CREDENTIALS`), the S3/CodeArtifact settings, and the tuning knobs (`BATCH_SIZE`,
-`BUILD_TIMEOUT`). One is specific to the .NET build path:
-
-- `NUGET_CONFIG_FILE` — path to a `nuget.config` applied to `%APPDATA%\NuGet\NuGet.Config`
-  so a private feed is used during restore (template in `nuget/nuget.config`). Building .NET
-  itself needs no flag — it is driven by the `dotnet` step in `moderne.yml`.
-
-### Running
-
-```powershell
-$env:DATA_DIR = "C:\moderne\data"
-$env:PUBLISH_URL = "https://artifactory.example.com/artifactory/moderne-ingest/"
-$env:PUBLISH_USER = "your-username"
-$env:PUBLISH_PASSWORD = "your-password"
-
-# Build and publish every repository in repos.csv
-.\publish.ps1 -SourceCsv repos.csv
-
-# Process a slice of the CSV (1-based, inclusive) — useful for splitting work across hosts
-.\publish.ps1 -SourceCsv repos.csv -StartIndex 1 -EndIndex 100
-
-# Ingest a single organization
-.\publish.ps1 -SourceCsv repos.csv -Organization my-org
-```
-
-For long runs, set `$env:BATCH_SIZE` so each batch completes inside your credential/token
-lifetime (required for CodeArtifact — see [Using AWS CodeArtifact](#using-aws-codeartifact)).
-
-### Differences from the Docker/bash flow
-
-- **No container.** The script runs on the host, so you install and register the toolchain
-  yourself (JDKs, Maven/Gradle, .NET SDK, NuGet CLI) rather than through the Dockerfile.
-- **Diagnostics are bash-only.** `DIAGNOSE` / `DIAGNOSE_ON_START` and the `diagnostics/`
-  system have no PowerShell port yet; run them from the Docker/bash flow.
-
-## Generating repository lists
-
-We provide scripts to generate `repos.csv` from various sources:
-- [Repository Fetchers](https://github.com/moderneinc/repository-fetchers) - Scripts for GitHub, GitLab, Bitbucket, and more
-
-## Diagnostics
-
-The `diagnostics/` directory contains a comprehensive diagnostic system to validate your mass-ingest setup before starting ingestion.
-
-### Diagnostic mode (full validation)
-
-Run comprehensive diagnostics without starting ingestion:
+Mount a `.git-credentials` file (one `https://user:token@host` line per host) or an `.ssh` directory into `/home/moderne`, readable by UID 1000, or pass the same content inline:
 
 ```bash
-DIAGNOSE=true docker compose up
+docker run --rm -v "$(pwd)/.git-credentials:/home/moderne/.git-credentials:ro" ... mass-ingest
+docker run --rm -e GIT_SSH_CREDENTIALS="$(cat ~/.ssh/id_ed25519)" ... mass-ingest
 ```
 
-This validates the entire setup and produces a detailed report:
-- System (CPUs, memory, disk space)
-- Required tools (git, curl, jq, unzip, tar)
-- Runtime environment (container detection, CPU architecture, emulation)
-- Thread/process limits (cgroup PID limits, ulimit, kernel threads-max)
-- Java/JDKs (available JDKs, JAVA_HOME)
-- Moderne CLI (version, build config, proxy, trust store, tenant)
-- Configuration (env vars, credentials, git credentials)
-- repos.csv (file validation, columns, origins, sample entries)
-- Network (Maven Central, Gradle plugins, publish URL, SCM hosts)
-- SSL/Certificates (handshakes, expiry warnings)
-- Authentication (publish write/read/delete test, SCM credentials validation)
-- Publish latency (throughput testing, rate limit detection)
-- Maven repositories (dependency repo connectivity from settings.xml)
-- Dependency repositories (user-specified repos from dependency-repos.csv)
-- SCM repositories (connectivity testing per origin from repos.csv)
+### Check it worked
 
-The container exits with code 0 if all checks pass, or 1 if any failures are detected.
+- `docker run --rm -e DIAGNOSE=true ... mass-ingest` runs `mod doctor` instead of the ingest: host resources, toolchains, git credentials, the store, the tenant and every SCM origin in `repos.csv`, read-only, with a fix suggested for each failing row and a non-zero exit when anything fails. `DIAGNOSE_ON_START=true` runs it and then ingests regardless.
+- The store's `repos-lock.csv` has a row per repository with the published LST's location, `changeset`, `cliVersion` and `reproducible`.
+- `data/.moderne/{sync,build,publish}/<command id>/trace.csv` record every clone, build and publish, and `data/.moderne/publish/<command id>/publish.log` keeps the failure stack traces. Nothing else survives in `data`.
+- `curl localhost:8080/prometheus` while it runs; [2-observability](2-observability/) puts that in Grafana.
 
-**Use cases:**
-- Initial setup validation before first real run
-- After configuration changes before deploying
-- Troubleshooting when something stops working
-- Generating diagnostic output to send to Moderne support
+## Going further
 
-### Diagnostics at startup
+- [Publishing to S3](docs/s3.md): credential providers, the IMDSv2 hop limit on EC2, S3-compatible stores.
+- [AWS CodeArtifact](docs/codeartifact.md): publishing with a rotating token.
+- [2-observability](2-observability/): Docker Compose with Prometheus and Grafana, one service per organization.
+- [3-scalability](3-scalability/): AWS Batch or GCP Batch from Terraform, one scheduled job per organization.
+- [Windows](docs/windows.md): `publish.ps1` runs the same flow on a Windows host without Docker, .NET builds included.
+- [Troubleshooting](3-scalability/TROUBLESHOOTING.md).
+- [Building the image](docs/image.md): build arguments, internal mirrors, the FIPS image, the non-root user.
 
-Set `DIAGNOSE_ON_START=true` to run diagnostics before ingestion starts:
-
-```bash
-docker run -e DIAGNOSE_ON_START=true ...
-```
-
-This runs all diagnostic checks and then proceeds to normal ingestion regardless of the results. Use this to capture diagnostic output in your logs while still attempting ingestion.
-
-### Running diagnostics directly
-
-You can run the main diagnostic script or individual checks:
-
-```bash
-# Full diagnostics
-./diagnostics/diagnose.sh
-
-# Individual checks can be run directly
-./diagnostics/checks/docker.sh
-./diagnostics/checks/network.sh
-./diagnostics/checks/auth-publish.sh
-```
-
-### Example output
-
-```
-Mass-ingest Diagnostics
-Generated: 2025-01-20 14:32 UTC
-
-=== System ===
-[PASS] CPUs: 4
-[PASS] Memory: 12.5GB / 16.0GB available
-[PASS] Disk (data): 45.2GB / 100.0GB available
-
-=== Required tools ===
-[PASS] git: 2.39.3
-[PASS] curl: 8.4.0
-[PASS] jq: 1.7
-[PASS] unzip: 6.00
-[PASS] tar: 1.35
-
-=== Runtime environment ===
-[PASS] Running inside Docker
-       Base image: Ubuntu 24.04.1 LTS
-[PASS] Architecture: x86_64 (no emulation detected)
-
-=== Thread and process limits ===
-       Java builds use many threads. Low PID/thread limits cause 'pthread_create' errors.
-       Expect: unlimited or 8192+ for cgroup PID limit and ulimit.
-[PASS] Cgroup PID limit: unlimited (3 currently used)
-[PASS] Max user processes (ulimit -u): unlimited
-       Kernel threads-max: 127733
-
-=== Java/JDKs ===
-[PASS] JAVA_HOME: /opt/java/openjdk
-       Detected JDKs (mod config java jdk list):
-         21.0.1-tem   $JAVA_HOME     /opt/java/openjdk
-         17.0.9-tem   OS directory   /usr/lib/jvm/temurin-17
-[PASS] 5 JDK(s) available in /usr/lib/jvm/
-
-=== Moderne CLI ===
-[PASS] CLI installed: v3.56.0
-       Configuration:
-         Trust store: default JVM
-         Proxy: not configured
-         LST artifacts: Maven (https://artifactory.company.com/moderne)
-         Build timeouts: default
-
-=== Configuration ===
-[PASS] DATA_DIR: /var/moderne (writable)
-[PASS] PUBLISH_URL: https://artifactory.company.com/moderne
-[PASS] Publish credentials: PUBLISH_USER/PASSWORD set
-       Git credentials:
-[PASS] HTTPS credentials: /home/moderne/.git-credentials (2 entries)
-
-=== repos.csv ===
-[PASS] File: /app/repos.csv (exists)
-[PASS] Repositories: 427
-[PASS] Required columns: cloneUrl, origin, path (present)
-[PASS] Additional column: branch (present)
-       Repositories by origin:
-         github.com: 412 repos
-         gitlab.internal.com: 15 repos
-       Sample entries (first 3):
-         https://github.com/company/repo-one (main)
-         https://github.com/company/repo-two (main)
-
-=== Network ===
-[PASS] Maven Central: reachable (45ms)
-[PASS] Gradle plugins: reachable (52ms)
-[PASS] PUBLISH_URL: reachable (23ms)
-[PASS] github.com: reachable (31ms)
-[FAIL] gitlab.internal.com: unreachable
-
-=== SSL/Certificates ===
-[PASS] artifactory.company.com: SSL OK (expires in 285 days)
-[PASS] github.com: SSL OK (expires in 180 days)
-[PASS] repo1.maven.org: SSL OK (expires in 340 days)
-
-=== Authentication - Publish ===
-[PASS] Write test: succeeded (HTTP 201)
-[PASS] Read test: succeeded (HTTP 200)
-[PASS] Overwrite test: succeeded (HTTP 201)
-[PASS] Delete test: succeeded (HTTP 204)
-
-=== SCM credentials ===
-[PASS] .git-credentials: found 2 credential(s)
-[PASS] credential.helper: get-only wrapper (erase requests ignored)
-
-=== Publish latency ===
-       Testing PUBLISH_URL (10 sequential requests)...
-       Sequential: min=23ms avg=45ms max=89ms
-[PASS] PUBLISH_URL: average latency 45ms
-       Testing PUBLISH_URL (3 × 20 concurrent)...
-       Parallel batches: 850ms, 820ms, 890ms
-[PASS] PUBLISH_URL: parallel throughput 42ms/request
-
-=== Maven repositories ===
-       Using: /home/moderne/.m2/settings.xml
-       Testing central (10 sequential requests)...
-       Sequential: min=38ms avg=42ms max=67ms
-[PASS] central: average latency 42ms
-       Testing central (3 × 20 concurrent)...
-       Parallel batches: 920ms, 880ms, 950ms
-[PASS] central: parallel throughput 45ms/request
-       Testing internal-nexus (via mirror: nexus-mirror) (10 sequential requests)...
-       Sequential: min=15ms avg=18ms max=24ms
-[PASS] internal-nexus (via mirror: nexus-mirror): average latency 18ms
-       Testing internal-nexus (via mirror: nexus-mirror) (3 × 20 concurrent)...
-       Parallel batches: 380ms, 350ms, 390ms
-[PASS] internal-nexus (via mirror: nexus-mirror): parallel throughput 18ms/request
-
-=== Dependency repositories ===
-       Using: ./dependency-repos.csv
-       Testing nexus.example.com (10 sequential requests)...
-       Sequential: min=19ms avg=23ms max=31ms
-[PASS] nexus.example.com: average latency 23ms
-       Testing nexus.example.com (3 × 20 concurrent)...
-       Parallel batches: 480ms, 450ms, 510ms
-[PASS] nexus.example.com: parallel throughput 24ms/request
-
-========================================
-RESULT: 1 failure(s), 0 warning(s), 24 passed
-========================================
-```
-
-## Support and documentation
+## Support
 
 - [Moderne CLI documentation](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro)
-- [repos.csv reference](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv)
 - [Report issues](https://github.com/moderneinc/mass-ingest-example/issues)
-
-## License
 
 This example code is provided as-is for use with Moderne products.
