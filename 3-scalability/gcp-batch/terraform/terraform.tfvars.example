@@ -32,7 +32,6 @@ publish_url = "https://artifactory.example.com/artifactory/moderne-ingest/"
 
 # Ingestion settings
 # organizations            = ["Payments", "Claims"]  # one Batch task each; empty = one task for everything
-# parallel                 = 2                       # repositories in flight per task
 # max_run_duration_seconds = 86400
 # schedule                 = "0 0 * * *"
 # max_retry_count          = 0

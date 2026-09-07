@@ -50,7 +50,6 @@ function Ingest-Repos() {
 function Publish-Repos() {
   $PublishArgs = @("publish", $env:DATA_DIR, "--sync-csv")
   if ($env:ORGANIZATION) { $PublishArgs += @("--organization", $env:ORGANIZATION) }
-  if ($env:PARALLEL) { $PublishArgs += @("--parallel", $env:PARALLEL) }
   Write-Info "Running: mod $($PublishArgs -join ' ')"
   & mod @PublishArgs
   return $LASTEXITCODE

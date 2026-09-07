@@ -259,12 +259,6 @@ resource "aws_batch_job_definition" "processor_job_definition" {
           value = var.moderne_s3_region,
         },
       ] : [],
-      var.parallel > 0 ? [
-        {
-          name = "PARALLEL",
-          value = tostring(var.parallel),
-        },
-      ] : [],
     ),
     secrets = concat(
       var.moderne_token != "" ? [

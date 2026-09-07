@@ -109,12 +109,6 @@ variable "organizations" {
   description = "Organizations from the store's repos.csv to ingest, one Batch task each. Empty ingests the whole file in one task."
 }
 
-variable "parallel" {
-  type        = number
-  default     = 0
-  description = "Repositories a task works through at once (mod publish --parallel). 0 keeps the CLI default of 1."
-}
-
 variable "max_run_duration_seconds" {
   type        = number
   default     = 86400

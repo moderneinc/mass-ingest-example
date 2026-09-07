@@ -45,9 +45,6 @@ publish() {
   if [ -n "${ORGANIZATION:-}" ]; then
     cmd+=(--organization "$ORGANIZATION")
   fi
-  if [ -n "${PARALLEL:-}" ]; then
-    cmd+=(--parallel "$PARALLEL")
-  fi
   info "Running: ${cmd[*]}"
 
   # Backgrounded so TERM/INT (docker stop, a batch timeout) can be forwarded: the CLI then

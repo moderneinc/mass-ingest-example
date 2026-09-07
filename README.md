@@ -41,7 +41,6 @@ The container runs `mod publish /var/moderne --sync-csv`. For every row it compa
 | `PUBLISH_URL` | The artifact store: an `https://` Maven repository or Artifactory, or `s3://bucket` ([S3 rules](docs/s3.md)). |
 | `PUBLISH_USER` + `PUBLISH_PASSWORD` | Maven repository credentials; `PUBLISH_TOKEN` instead for an Artifactory API token. |
 | `ORGANIZATION` | Ingest one organization from `repos.csv`. One container per organization spreads the work. |
-| `PARALLEL` | Repositories in flight inside one container (default 1). |
 | `MODERNE_TENANT` + `MODERNE_TOKEN` | Optional: the Moderne tenant to register with the CLI. |
 | `GIT_CREDENTIALS` / `GIT_SSH_CREDENTIALS` | Inline credentials for private repositories (see below). |
 

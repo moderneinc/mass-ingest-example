@@ -159,7 +159,6 @@ locals {
                 PUBLISH_URL    = var.publish_url
                 ORGANIZATIONS  = join(",", var.organizations)
               },
-              var.parallel > 0 ? { PARALLEL = tostring(var.parallel) } : {},
               var.s3_endpoint != "" ? { S3_ENDPOINT = var.s3_endpoint } : {},
               var.s3_region != "" ? { S3_REGION = var.s3_region } : {},
             )

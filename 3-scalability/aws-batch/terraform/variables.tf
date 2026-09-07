@@ -92,12 +92,6 @@ variable "organizations" {
   description = "Organizations from the store's repos.csv to ingest, one scheduled job each. Empty ingests the whole file in one job."
 }
 
-variable "parallel" {
-  type        = number
-  default     = 0
-  description = "Repositories a job works through at once (mod publish --parallel). 0 keeps the CLI default of 1."
-}
-
 variable "job_timeout_seconds" {
   type        = number
   default     = 86400

@@ -57,7 +57,6 @@ gcloud logging read 'logName:"batch_task_logs"' --limit=100 --format='value(text
 ## Tuning
 
 - `organizations`: one task each. Leave it empty for a single task over the whole `repos.csv`.
-- `parallel`: repositories in flight per task; raise it together with `machine_type` (default `n2-standard-4`, 4 vCPU / 16 GB).
 - `max_run_duration_seconds` (default one day): a run flushes `repos-lock.csv` when it is terminated, so a timeout costs only the repository in flight.
 - `schedule` (default daily at midnight UTC) and `max_retry_count` (default 0; set it together with `provisioningModel = "SPOT"` in `main.tf`, since Spot VMs can be preempted).
 - `boot_disk_size_gb` (default 64) is plenty: a task holds one repository at a time.

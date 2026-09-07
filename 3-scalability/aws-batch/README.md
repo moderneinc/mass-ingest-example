@@ -60,7 +60,6 @@ Follow along with `aws logs tail /aws/batch/job --follow`, or in the Batch conso
 ## Tuning
 
 - `organizations`: one job each. Leave it empty for a single job over the whole `repos.csv`.
-- `parallel`: repositories in flight per job; raise it together with the job's memory (`resourceRequirements` in `main.tf`, 4 vCPU / 15 GB by default).
 - `job_timeout_seconds` (default one day): a run flushes `repos-lock.csv` when it is terminated, so a timeout costs only the repository in flight.
 - `instance_type` (default `m6a.xlarge`) and `max_vcpus` in `main.tf`; `type = "SPOT"` in the compute environment for cheaper instances.
 - `schedule_expression` (default daily at midnight UTC), e.g. `cron(0 */6 * * ? *)` or `rate(12 hours)`.
