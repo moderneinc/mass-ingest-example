@@ -12,7 +12,7 @@ A row is skipped when its `repos-lock.csv` entry already has the remote HEAD as 
 
 ### The run was killed and the lock lost recent rows
 
-The CLI flushes `repos-lock.csv` every 25 repositories, every 10 minutes and from a shutdown hook on SIGTERM. `docker stop`, a Batch timeout and Ctrl+C all deliver SIGTERM and wait for the flush; SIGKILL (`docker kill`, the OOM killer, a VM preemption) does not, and up to 25 repositories of results are then rebuilt on the next run, which is cheap because their LSTs were already published and only the rows are missing. If runs are killed regularly, give the container more memory or lower `PARALLEL`.
+The CLI flushes `repos-lock.csv` once in every 10-minute window, at a turn set by the container's shard and organization so that containers take turns on the file, and from a shutdown hook on SIGTERM. `docker stop`, a Batch timeout and Ctrl+C all deliver SIGTERM and wait for the flush; SIGKILL (`docker kill`, the OOM killer, a VM preemption) does not, and up to 10 minutes of results are then rebuilt on the next run, which is cheap because their LSTs were already published and only the rows are missing. If runs are killed regularly, give the container more memory or lower `PARALLEL`.
 
 ### S3: `Unable to contact EC2 metadata service`
 

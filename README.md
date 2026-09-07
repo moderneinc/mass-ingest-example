@@ -34,7 +34,7 @@ docker run --rm -p 8080:8080 -v "$(pwd)/data:/var/moderne" \
   mass-ingest
 ```
 
-The container runs `mod publish /var/moderne --sync-csv`. For every row it compares the remote HEAD with the row's `repos-lock.csv` entry: a repository already published from that commit, by this CLI version, from a reproducible build is skipped; anything else is cloned, built, published and recorded, and its clone is deleted before the next one starts. Disk use stays at one repository, a rerun only touches what changed, and the lock is flushed to the store every 25 repositories, every 10 minutes, and when the container is stopped.
+The container runs `mod publish /var/moderne --sync-csv`. For every row it compares the remote HEAD with the row's `repos-lock.csv` entry: a repository already published from that commit, by this CLI version, from a reproducible build is skipped; anything else is cloned, built, published and recorded, and its clone is deleted before the next one starts. Disk use stays at one repository, a rerun only touches what changed, and the lock is flushed to the store at the container's own turn in every 10-minute window and when the container is stopped, so containers never queue on the file.
 
 | Variable | |
 |---|---|
