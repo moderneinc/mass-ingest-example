@@ -1,0 +1,29 @@
+name                = "mass-ingest"
+resource_group_name = "your-resource-group"
+location            = "eastus"
+
+# Must be unique within the region (3-24 lowercase letters and digits).
+# batch_account_name = "massingestacme"
+
+vnet_name   = "your-vnet"
+subnet_name = "your-subnet"
+# nsg_name  = "your-subnet-nsg"   # adds an inbound rule for metrics scraping on 8080
+
+image    = "myregistry.azurecr.io/mass-ingest:latest"
+acr_name = "myregistry"
+
+vm_size   = "Standard_D4s_v5"
+max_nodes = 64
+
+moderne_tenant = "https://app.moderne.io"
+key_vault_name = "your-keyvault"
+
+# Maven/Artifactory publish target. Credentials come from Key Vault
+# (publish-user/publish-password or publish-token).
+publish_url = "https://artifactory.example.com/artifactory/moderne-ingest/"
+
+# Ingestion settings
+# csv_file                 = "repos.csv"   # path in the image, or an HTTPS URL (e.g. blob SAS URL)
+# chunk_size               = 10
+# task_max_wall_clock_time = "PT4H"        # a processor task is killed after this long
+# task_max_retry_count     = 0

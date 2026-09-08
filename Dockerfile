@@ -279,8 +279,18 @@ FROM language-support AS runner
 #    rm -rf awscliv2.zip aws/
 
 # Chunk script for AWS Batch parallel processing
-# Uncomment to include the chunk.sh script for 3-scalability:
-# COPY --chmod=755 3-scalability/chunk.sh chunk.sh
+# Uncomment to include the chunk.sh script for 3-scalability/aws-batch:
+# COPY --chmod=755 3-scalability/aws-batch/chunk.sh chunk.sh
+
+################################################################################
+# OPTIONAL: 3-scalability (Azure Batch) setup
+################################################################################
+
+# Orchestrator (chunk.sh) and worker wrapper (task.sh) for Azure Batch. They only
+# need curl and jq (installed above); no Azure CLI is required in the image.
+# Uncomment when building the image for 3-scalability/azure-batch:
+# COPY --chmod=755 3-scalability/azure-batch/chunk.sh chunk.sh
+# COPY --chmod=755 3-scalability/azure-batch/task.sh task.sh
 
 ################################################################################
 # DROP PRIVILEGES
