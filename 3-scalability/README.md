@@ -8,8 +8,9 @@ Production-scale deployment using cloud-native batch services for parallel repos
 |---|---|---|---|
 | **AWS** | [AWS Batch](https://aws.amazon.com/batch/) | EC2 instances | [aws-batch/](./aws-batch/) |
 | **GCP** | [Google Cloud Batch](https://cloud.google.com/batch) | Compute Engine VMs | [gcp-batch/](./gcp-batch/) |
+| **Azure** | [Azure Batch](https://azure.microsoft.com/products/batch) | Azure VMs | [azure-batch/](./azure-batch/) |
 
-Both examples implement the same architecture — only the infrastructure-as-code and cloud-specific tooling differ.
+All three examples implement the same architecture — only the infrastructure-as-code and cloud-specific tooling differ.
 
 ## Architecture
 
@@ -22,7 +23,7 @@ All platforms follow the same pattern:
 5. **Next trigger** repeats the cycle
 
 > [!NOTE]
-> The exact orchestration differs by platform. AWS uses a separate chunk job that submits processor jobs. GCP uses a Cloud Workflow that computes task count and creates a single Batch job with N parallel tasks.
+> The exact orchestration differs by platform. AWS uses a separate chunk job that submits processor jobs. GCP uses a Cloud Workflow that computes task count and creates a single Batch job with N parallel tasks. Azure uses an Automation runbook that creates a Batch job with a chunk task, which then adds the processor tasks to the same job.
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌──────────────┐
@@ -45,7 +46,7 @@ These files are shared across all platforms and live at the repository root:
 
 ## Why VM-based batch services (not Kubernetes)
 
-We recommend VM-based batch services (AWS Batch, GCP Batch) over Kubernetes for mass ingestion. This recommendation is based on real-world experience across multiple customer deployments.
+We recommend VM-based batch services (AWS Batch, GCP Batch, Azure Batch) over Kubernetes for mass ingestion. This recommendation is based on real-world experience across multiple customer deployments.
 
 **LST builds are resource-intensive.** Building Lossless Semantic Trees involves cloning repositories, resolving dependencies, and running full Java builds. This requires dedicated CPU and memory — the kind of workload where resource contention causes hard-to-diagnose failures.
 

@@ -1,8 +1,10 @@
 terraform {
+  required_version = ">= 1.5"
+
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = ">= 3.0"
+      version = ">= 4.0"
     }
   }
 }
@@ -16,11 +18,6 @@ data "azurerm_resource_group" "rg" {
   name = var.resource_group_name
 }
 
-data "azurerm_virtual_network" "vnet" {
-  name                = var.vnet_name
-  resource_group_name = var.resource_group_name
-}
-
 data "azurerm_subnet" "subnet" {
   name                 = var.subnet_name
   virtual_network_name = var.vnet_name
@@ -29,10 +26,20 @@ data "azurerm_subnet" "subnet" {
 
 data "azurerm_key_vault" "kv" {
   name                = var.key_vault_name
-  resource_group_name = var.resource_group_name
+  resource_group_name = var.key_vault_resource_group_name != "" ? var.key_vault_resource_group_name : var.resource_group_name
 }
 
-# User Assigned Identity for Batch pool nodes
+data "azurerm_container_registry" "acr" {
+  count               = var.acr_name != "" ? 1 : 0
+  name                = var.acr_name
+  resource_group_name = var.acr_resource_group_name != "" ? var.acr_resource_group_name : var.resource_group_name
+}
+
+locals {
+  batch_account_name = var.batch_account_name != "" ? var.batch_account_name : replace(var.name, "-", "")
+}
+
+# One user-assigned identity shared by the pool nodes and the Automation account.
 resource "azurerm_user_assigned_identity" "batch" {
   name                = "${var.name}-batch-identity"
   resource_group_name = var.resource_group_name
@@ -40,32 +47,43 @@ resource "azurerm_user_assigned_identity" "batch" {
   tags                = var.tags
 }
 
-# Grant identity access to Key Vault secrets
+# Key Vaults use either access policies or Azure RBAC; grant whichever model the vault is configured with.
 resource "azurerm_key_vault_access_policy" "batch" {
+  count = data.azurerm_key_vault.kv.rbac_authorization_enabled ? 0 : 1
+
   key_vault_id = data.azurerm_key_vault.kv.id
   tenant_id    = azurerm_user_assigned_identity.batch.tenant_id
   object_id    = azurerm_user_assigned_identity.batch.principal_id
 
-  secret_permissions = ["Get", "List"]
+  secret_permissions = ["Get"]
 }
 
-# Grant identity access to ACR (if specified)
-data "azurerm_container_registry" "acr" {
-  count               = var.acr_name != "" ? 1 : 0
-  name                = var.acr_name
-  resource_group_name = var.acr_resource_group_name != "" ? var.acr_resource_group_name : var.resource_group_name
+resource "azurerm_role_assignment" "key_vault_secrets_user" {
+  count = data.azurerm_key_vault.kv.rbac_authorization_enabled ? 1 : 0
+
+  scope                = data.azurerm_key_vault.kv.id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.batch.principal_id
 }
 
+# Pull the container image from ACR.
 resource "azurerm_role_assignment" "acr_pull" {
-  count                = var.acr_name != "" ? 1 : 0
+  count = var.acr_name != "" ? 1 : 0
+
   scope                = data.azurerm_container_registry.acr[0].id
   role_definition_name = "AcrPull"
   principal_id         = azurerm_user_assigned_identity.batch.principal_id
 }
 
-# Batch Account
+# Lets the runbook create jobs and chunk.sh add tasks through the Batch data plane with Entra ID.
+resource "azurerm_role_assignment" "batch_data_contributor" {
+  scope                = azurerm_batch_account.batch.id
+  role_definition_name = "Azure Batch Data Contributor"
+  principal_id         = azurerm_user_assigned_identity.batch.principal_id
+}
+
 resource "azurerm_batch_account" "batch" {
-  name                         = replace(var.name, "-", "")
+  name                         = local.batch_account_name
   resource_group_name          = var.resource_group_name
   location                     = var.location
   pool_allocation_mode         = "BatchService"
@@ -79,7 +97,6 @@ resource "azurerm_batch_account" "batch" {
   tags = var.tags
 }
 
-# Batch Pool with container support
 resource "azurerm_batch_pool" "pool" {
   name                = "${var.name}-pool"
   resource_group_name = var.resource_group_name
@@ -87,12 +104,19 @@ resource "azurerm_batch_pool" "pool" {
   vm_size             = var.vm_size
   node_agent_sku_id   = "batch.node.ubuntu 22.04"
 
+  # One task per node: each processor task gets a whole VM.
+  max_tasks_per_node = 1
+
+  # Nodes only need outbound HTTPS to the Batch service (no inbound NSG rules).
+  target_node_communication_mode = "Simplified"
+
+  # One dedicated node per pending task up to max_nodes, zero when idle; nodes leave only after their task finishes.
   auto_scale {
     evaluation_interval = "PT5M"
     formula             = <<-EOT
-      $totalNodes = max($PendingTasks.GetSample(TimeInterval_Minute * 5, 0), $ActiveTasks.GetSample(TimeInterval_Minute * 5, 0));
-      $targetNodes = min($totalNodes, ${var.max_nodes});
-      $TargetDedicatedNodes = $targetNodes;
+      $samples = $PendingTasks.GetSamplePercent(TimeInterval_Minute * 5);
+      $tasks = $samples < 70 ? max(0, $PendingTasks.GetSample(1)) : max($PendingTasks.GetSample(1), avg($PendingTasks.GetSample(TimeInterval_Minute * 5)));
+      $TargetDedicatedNodes = max(0, min($tasks, ${var.max_nodes}));
       $NodeDeallocationOption = taskcompletion;
     EOT
   }
@@ -110,10 +134,11 @@ resource "azurerm_batch_pool" "pool" {
     }
   }
 
+  # Ubuntu 22.04 image with a container runtime, maintained for Batch.
   storage_image_reference {
-    publisher = "microsoft-azure-batch"
-    offer     = "ubuntu-server-container"
-    sku       = "22-04-lts"
+    publisher = "microsoft-dsvm"
+    offer     = "ubuntu-hpc"
+    sku       = "2204"
     version   = "latest"
   }
 
@@ -131,10 +156,12 @@ resource "azurerm_batch_pool" "pool" {
   }
 }
 
-# NSG rule for metrics scraping
+# Allow Prometheus scraping of the CLI metrics endpoint from inside the VNet.
 resource "azurerm_network_security_rule" "metrics" {
+  count = var.nsg_name != "" ? 1 : 0
+
   name                        = "${var.name}-metrics"
-  priority                    = 200
+  priority                    = var.metrics_nsg_rule_priority
   direction                   = "Inbound"
   access                      = "Allow"
   protocol                    = "Tcp"
@@ -146,7 +173,7 @@ resource "azurerm_network_security_rule" "metrics" {
   network_security_group_name = var.nsg_name
 }
 
-# Automation Account for scheduling
+# Scheduling: the runbook creates a Batch job with the chunk task, and chunk.sh adds the processor tasks to it.
 resource "azurerm_automation_account" "automation" {
   name                = "${var.name}-automation"
   location            = var.location
@@ -161,7 +188,6 @@ resource "azurerm_automation_account" "automation" {
   tags = var.tags
 }
 
-# Automation Runbook — creates a Batch job and submits chunk task
 resource "azurerm_automation_runbook" "trigger" {
   name                    = "${var.name}-trigger"
   location                = var.location
@@ -170,63 +196,52 @@ resource "azurerm_automation_runbook" "trigger" {
   log_verbose             = false
   log_progress            = false
   runbook_type            = "PowerShell"
+  description             = "Creates a mass-ingest Batch job and submits its chunk task"
 
   content = <<-PS
-    Connect-AzAccount -Identity
+    $ErrorActionPreference = "Stop"
 
+    # Sign in with the user-assigned identity attached to the Automation account.
+    Connect-AzAccount -Identity -AccountId "${azurerm_user_assigned_identity.batch.client_id}" | Out-Null
+
+    # Get-AzBatchAccount yields a context that authenticates to the Batch data plane with Entra ID.
     $batchContext = Get-AzBatchAccount -AccountName "${azurerm_batch_account.batch.name}" -ResourceGroupName "${var.resource_group_name}"
 
-    # Fetch secrets from Key Vault
-    $moderneToken = (Get-AzKeyVaultSecret -VaultName "${var.key_vault_name}" -Name "moderne-token" -AsPlainText) 2>$null
-    $gitCredentials = (Get-AzKeyVaultSecret -VaultName "${var.key_vault_name}" -Name "git-credentials" -AsPlainText) 2>$null
-    $publishUser = (Get-AzKeyVaultSecret -VaultName "${var.key_vault_name}" -Name "publish-user" -AsPlainText) 2>$null
-    $publishPassword = (Get-AzKeyVaultSecret -VaultName "${var.key_vault_name}" -Name "publish-password" -AsPlainText) 2>$null
-    $publishToken = (Get-AzKeyVaultSecret -VaultName "${var.key_vault_name}" -Name "publish-token" -AsPlainText) 2>$null
-
     $jobId = "${var.name}-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-    New-AzBatchJob -Id $jobId -PoolInformation (New-Object Microsoft.Azure.Commands.Batch.Models.PSPoolInformation -Property @{PoolId="${azurerm_batch_pool.pool.name}"}) -BatchContext $batchContext
+    $poolInformation = New-Object -TypeName "Microsoft.Azure.Commands.Batch.Models.PSPoolInformation"
+    $poolInformation.PoolId = "${azurerm_batch_pool.pool.name}"
+    New-AzBatchJob -Id $jobId -PoolInformation $poolInformation -BatchContext $batchContext
 
-    $taskSettings = New-Object Microsoft.Azure.Commands.Batch.Models.PSTaskContainerSettings -Property @{
-      ImageName = "${var.image}"
+    # Batch replaces the image WORKDIR and user; run in /app as root so the CLI configuration under /home/moderne is writable.
+    $containerSettings = New-Object -TypeName "Microsoft.Azure.Commands.Batch.Models.PSTaskContainerSettings" -ArgumentList "${var.image}", "--workdir /app", $null
+    $autoUser = New-Object -TypeName "Microsoft.Azure.Commands.Batch.Models.PSAutoUserSpecification" -ArgumentList @("Pool", "Admin")
+    $userIdentity = New-Object -TypeName "Microsoft.Azure.Commands.Batch.Models.PSUserIdentity" -ArgumentList $autoUser
+
+    # Only non-secret settings. Credentials are read from Key Vault by the tasks themselves.
+    $environment = @{
+      IMAGE           = "${var.image}"
+      AZURE_CLIENT_ID = "${azurerm_user_assigned_identity.batch.client_id}"
+      KEY_VAULT_URI   = "${data.azurerm_key_vault.kv.vault_uri}"
+      MODERNE_TENANT  = "${var.moderne_tenant}"
+      PUBLISH_URL     = "${var.publish_url}"
     }
 
-    $envVars = @(
-      (New-Object Microsoft.Azure.Commands.Batch.Models.PSEnvironmentSetting -Property @{Name="BATCH_JOB_ID"; Value=$jobId}),
-      (New-Object Microsoft.Azure.Commands.Batch.Models.PSEnvironmentSetting -Property @{Name="BATCH_ACCOUNT_ENDPOINT"; Value="${azurerm_batch_account.batch.name}.${var.location}.batch.azure.com"}),
-      (New-Object Microsoft.Azure.Commands.Batch.Models.PSEnvironmentSetting -Property @{Name="IMAGE"; Value="${var.image}"}),
-      (New-Object Microsoft.Azure.Commands.Batch.Models.PSEnvironmentSetting -Property @{Name="MODERNE_TENANT"; Value="${var.moderne_tenant}"}),
-      (New-Object Microsoft.Azure.Commands.Batch.Models.PSEnvironmentSetting -Property @{Name="PUBLISH_URL"; Value="${var.publish_url}"})
-    )
-
-    # Add secrets as environment variables (only if they exist in Key Vault)
-    if ($moderneToken) { $envVars += (New-Object Microsoft.Azure.Commands.Batch.Models.PSEnvironmentSetting -Property @{Name="MODERNE_TOKEN"; Value=$moderneToken}) }
-    if ($gitCredentials) { $envVars += (New-Object Microsoft.Azure.Commands.Batch.Models.PSEnvironmentSetting -Property @{Name="GIT_CREDENTIALS"; Value=$gitCredentials}) }
-    if ($publishUser) { $envVars += (New-Object Microsoft.Azure.Commands.Batch.Models.PSEnvironmentSetting -Property @{Name="PUBLISH_USER"; Value=$publishUser}) }
-    if ($publishPassword) { $envVars += (New-Object Microsoft.Azure.Commands.Batch.Models.PSEnvironmentSetting -Property @{Name="PUBLISH_PASSWORD"; Value=$publishPassword}) }
-    if ($publishToken) { $envVars += (New-Object Microsoft.Azure.Commands.Batch.Models.PSEnvironmentSetting -Property @{Name="PUBLISH_TOKEN"; Value=$publishToken}) }
-
-    $task = New-Object Microsoft.Azure.Commands.Batch.Models.PSCloudTask -Property @{
-      Id = "chunk"
-      CommandLine = "./chunk.sh ${var.csv_file} ${var.chunk_size}"
-      ContainerSettings = $taskSettings
-      EnvironmentSettings = $envVars
-    }
-
-    New-AzBatchTask -JobId $jobId -Task $task -BatchContext $batchContext
+    New-AzBatchTask -JobId $jobId -Id "chunk" -CommandLine "/app/chunk.sh ${var.csv_file} ${var.chunk_size}" -ContainerSettings $containerSettings -UserIdentity $userIdentity -EnvironmentSettings $environment -BatchContext $batchContext
+    Write-Output "Submitted Batch job $jobId"
   PS
 
   tags = var.tags
 }
 
-# Schedule — daily trigger
 resource "azurerm_automation_schedule" "daily" {
   name                    = "${var.name}-daily"
   resource_group_name     = var.resource_group_name
   automation_account_name = azurerm_automation_account.automation.name
   frequency               = "Day"
   interval                = 1
-  timezone                = "UTC"
+  timezone                = "Etc/UTC"
   start_time              = timeadd(timestamp(), "24h")
+  description             = "Daily mass-ingest run"
 
   lifecycle {
     ignore_changes = [start_time]
