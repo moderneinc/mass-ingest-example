@@ -112,6 +112,33 @@ variable "chunk_size" {
   type        = number
   default     = 10
   description = "Repositories per processor task"
+
+  validation {
+    condition     = var.chunk_size >= 1
+    error_message = "chunk_size must be at least 1."
+  }
+}
+
+variable "task_max_wall_clock_time" {
+  type        = string
+  default     = "PT4H"
+  description = "Maximum run time of one processor task (ISO 8601 duration). Batch terminates the task and frees the node when it is exceeded."
+
+  validation {
+    condition     = can(regex("^P", var.task_max_wall_clock_time))
+    error_message = "task_max_wall_clock_time must be an ISO 8601 duration such as PT4H."
+  }
+}
+
+variable "task_max_retry_count" {
+  type        = number
+  default     = 0
+  description = "Retries for a processor task that exits non-zero. A retry starts the whole slice over."
+
+  validation {
+    condition     = var.task_max_retry_count >= 0
+    error_message = "task_max_retry_count must be 0 or more."
+  }
 }
 
 variable "tags" {

@@ -7,7 +7,7 @@ Start with the task output: **Batch accounts** > your account > **Jobs** > the j
 Look at **Automation accounts** > your account > **Jobs** > the job > **Errors**.
 
 - `Connect-AzAccount` fails: the Automation account must have the user-assigned identity attached (terraform does this) and the runbook must pass its client id with `-AccountId`.
-- `Get-AzBatchAccount` or `New-AzBatchJob` returns 403 / `AuthorizationFailed`: the identity needs `Azure Batch Data Contributor` on the Batch account. Role assignments take a few minutes to propagate after `terraform apply`.
+- `Get-AzBatchAccount` or `New-AzBatchJob` returns 403 / `AuthorizationFailed`: the identity needs `Reader` and `Azure Batch Job Submitter` on the Batch account. Role assignments take a few minutes to propagate after `terraform apply`.
 - `New-AzBatchJob` fails with `PoolNotFound`: the pool name in the runbook does not match; re-run `terraform apply`.
 - Cmdlet not found: the Automation account imports the `Az` modules by default. If yours was created without them, add `Az.Accounts` and `Az.Batch` under **Modules**.
 
@@ -15,7 +15,7 @@ Look at **Automation accounts** > your account > **Jobs** > the job > **Errors**
 
 - `/app/chunk.sh: no such file or directory`: the image was built without the Azure Batch `COPY` lines in the `Dockerfile`.
 - `Could not get a Batch token from IMDS`: the pool has no user-assigned identity, or `AZURE_CLIENT_ID` does not match it. Both come from terraform; check the pool's **Identity** blade.
-- `POST /jobs/.../addtaskcollection failed (HTTP 403)`: the identity lacks `Azure Batch Data Contributor` on the Batch account.
+- `POST /jobs/.../addtaskcollection failed (HTTP 403)`: the identity lacks `Azure Batch Job Submitter` on the Batch account.
 - `Could not download https://...`: the `csv_file` URL must be readable from the nodes without authentication (use a blob SAS URL) and the subnet must have outbound internet access.
 
 ### Processor tasks fail immediately
@@ -31,6 +31,14 @@ Look at **Automation accounts** > your account > **Jobs** > the job > **Errors**
 - The auto-scale formula runs every 5 minutes; the first nodes appear a few minutes after the chunk task adds tasks. **Pools** > the pool > **Auto scale** shows the last evaluation and any formula error.
 - The subnet needs free IP addresses for `max_nodes` VMs.
 - `target_node_communication_mode = "Simplified"` needs outbound HTTPS from the subnet to the `BatchNodeManagement.<region>` and `Storage.<region>` service tags.
+
+### Processor tasks end after the time limit
+
+Batch terminates a processor task that runs longer than `task_max_wall_clock_time` (default 4 hours) and the task shows as failed. Raise the limit for very large repositories, or lower `chunk_size` so each task has fewer repositories to build.
+
+### `terraform apply` fails with `MissingSubscriptionRegistration`
+
+The subscription has not registered a resource provider. A subscription owner runs `az provider register --namespace Microsoft.Batch` (or `Microsoft.Automation`, `Microsoft.ManagedIdentity`) and the apply can be retried once registration completes.
 
 ### Out of memory errors
 

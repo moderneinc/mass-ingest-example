@@ -75,10 +75,17 @@ resource "azurerm_role_assignment" "acr_pull" {
   principal_id         = azurerm_user_assigned_identity.batch.principal_id
 }
 
-# Lets the runbook create jobs and chunk.sh add tasks through the Batch data plane with Entra ID.
-resource "azurerm_role_assignment" "batch_data_contributor" {
+# Lets the runbook create jobs and chunk.sh add tasks through the Batch data plane with Entra ID; no pool or account writes.
+resource "azurerm_role_assignment" "batch_job_submitter" {
   scope                = azurerm_batch_account.batch.id
-  role_definition_name = "Azure Batch Data Contributor"
+  role_definition_name = "Azure Batch Job Submitter"
+  principal_id         = azurerm_user_assigned_identity.batch.principal_id
+}
+
+# Get-AzBatchAccount in the runbook reads the account resource.
+resource "azurerm_role_assignment" "batch_reader" {
+  scope                = azurerm_batch_account.batch.id
+  role_definition_name = "Reader"
   principal_id         = azurerm_user_assigned_identity.batch.principal_id
 }
 
@@ -219,11 +226,13 @@ resource "azurerm_automation_runbook" "trigger" {
 
     # Only non-secret settings. Credentials are read from Key Vault by the tasks themselves.
     $environment = @{
-      IMAGE           = "${var.image}"
-      AZURE_CLIENT_ID = "${azurerm_user_assigned_identity.batch.client_id}"
-      KEY_VAULT_URI   = "${data.azurerm_key_vault.kv.vault_uri}"
-      MODERNE_TENANT  = "${var.moderne_tenant}"
-      PUBLISH_URL     = "${var.publish_url}"
+      IMAGE                    = "${var.image}"
+      AZURE_CLIENT_ID          = "${azurerm_user_assigned_identity.batch.client_id}"
+      KEY_VAULT_URI            = "${data.azurerm_key_vault.kv.vault_uri}"
+      MODERNE_TENANT           = "${var.moderne_tenant}"
+      PUBLISH_URL              = "${var.publish_url}"
+      TASK_MAX_WALL_CLOCK_TIME = "${var.task_max_wall_clock_time}"
+      TASK_MAX_RETRY_COUNT     = "${var.task_max_retry_count}"
     }
 
     New-AzBatchTask -JobId $jobId -Id "chunk" -CommandLine "/app/chunk.sh ${var.csv_file} ${var.chunk_size}" -ContainerSettings $containerSettings -UserIdentity $userIdentity -EnvironmentSettings $environment -BatchContext $batchContext

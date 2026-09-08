@@ -38,9 +38,10 @@ The container image needs no Azure tooling. `chunk.sh` and `task.sh` use `curl` 
 ## Prerequisites
 
 - Azure subscription with **Contributor** on a resource group (creates a Batch account, pool, user-assigned identity and Automation account) and permission to create role assignments on the Batch account, Key Vault and ACR (**User Access Administrator** or **Owner** on those resources)
+- The `Microsoft.Batch`, `Microsoft.Automation` and `Microsoft.ManagedIdentity` resource providers registered on the subscription. Terraform does not register providers here (Contributor on a resource group is not enough to do so); a subscription owner runs `az provider register --namespace Microsoft.Batch` and the same for the other two once
 - Existing virtual network and subnet with outbound internet access for the pool nodes
 - Existing Azure Container Registry (ACR)
-- Existing Azure Key Vault (access-policy or RBAC authorization; terraform detects which)
+- Existing Azure Key Vault (access-policy or RBAC authorization; terraform detects which). Use a vault dedicated to mass ingest: the pool identity gets read access to every secret in it
 - Terraform >= 1.5 and the Azure CLI (`az login`)
 - Docker for building the image
 - A Maven-compatible repository (Artifactory, Nexus, etc.) to publish LSTs to
@@ -79,7 +80,7 @@ COPY --chmod=755 3-scalability/azure-batch/chunk.sh chunk.sh
 COPY --chmod=755 3-scalability/azure-batch/task.sh task.sh
 ```
 
-Then build from the repository root and push to ACR:
+Then build with the repository root as the Docker context (the command below runs from this directory) and push to ACR:
 
 ```bash
 az acr login --name myregistry
@@ -91,16 +92,16 @@ docker push myregistry.azurecr.io/mass-ingest:latest
 
 ### 3. Store secrets in Azure Key Vault
 
-`task.sh` reads these secret names. All are optional; a missing secret is skipped.
+`task.sh` reads these secret names. A missing secret is skipped, so only store what you need. Publishing credentials are required: either `publish-user` and `publish-password`, or `publish-token`. Git credentials are only needed for private repositories.
 
-| Secret name        | Environment variable  | Purpose                                          |
-|--------------------|-----------------------|--------------------------------------------------|
-| `moderne-token`    | `MODERNE_TOKEN`       | Moderne API token                                |
-| `git-credentials`  | `GIT_CREDENTIALS`     | `https://user:token@host` lines for HTTPS clones |
-| `ssh-private-key`  | `GIT_SSH_CREDENTIALS` | Private key for SSH clones                       |
-| `publish-user`     | `PUBLISH_USER`        | Maven repository user                            |
-| `publish-password` | `PUBLISH_PASSWORD`    | Maven repository password                        |
-| `publish-token`    | `PUBLISH_TOKEN`       | Artifactory token (alternative to user/password) |
+| Secret name        | Environment variable  | Purpose                                          | Required                              |
+|--------------------|-----------------------|--------------------------------------------------|---------------------------------------|
+| `moderne-token`    | `MODERNE_TOKEN`       | Moderne API token                                | No                                    |
+| `git-credentials`  | `GIT_CREDENTIALS`     | `https://user:token@host` lines for HTTPS clones | For private repos over HTTPS          |
+| `ssh-private-key`  | `GIT_SSH_CREDENTIALS` | Private key for SSH clones                       | For private repos over SSH            |
+| `publish-user`     | `PUBLISH_USER`        | Maven repository user                            | Yes, with `publish-password`          |
+| `publish-password` | `PUBLISH_PASSWORD`    | Maven repository password                        | Yes, with `publish-user`              |
+| `publish-token`    | `PUBLISH_TOKEN`       | Artifactory token                                | Yes, instead of user and password     |
 
 ```bash
 az keyvault secret set --vault-name your-keyvault --name moderne-token --value "your-moderne-token"
@@ -138,7 +139,7 @@ terraform apply
 ```
 
 This creates:
-- A user-assigned managed identity with `AcrPull` on the registry, secret read access on the Key Vault (access policy or the `Key Vault Secrets User` role, depending on the vault) and `Azure Batch Data Contributor` on the Batch account
+- A user-assigned managed identity with `AcrPull` on the registry, secret read access on the Key Vault (access policy or the `Key Vault Secrets User` role, depending on the vault), and `Azure Batch Job Submitter` plus `Reader` on the Batch account
 - A Batch account (Entra ID authentication only) and an auto-scaling container pool using that identity
 - An Automation account, runbook and daily schedule
 - Optionally, an NSG rule that allows metrics scraping on port 8080 from inside the VNet
@@ -161,12 +162,12 @@ az automation runbook start \
 ### Automation runbook
 1. Signs in with the user-assigned identity (`Connect-AzAccount -Identity -AccountId <client id>`)
 2. Creates a Batch job `mass-ingest-<timestamp>` on the pool
-3. Adds the `chunk` task: the mass-ingest image running `/app/chunk.sh <csv_file> <chunk_size>`, with the non-secret settings (`IMAGE`, `KEY_VAULT_URI`, `AZURE_CLIENT_ID`, `MODERNE_TENANT`, `PUBLISH_URL`) as environment variables
+3. Adds the `chunk` task: the mass-ingest image running `/app/chunk.sh <csv_file> <chunk_size>`, with the non-secret settings (`IMAGE`, `KEY_VAULT_URI`, `AZURE_CLIENT_ID`, `MODERNE_TENANT`, `PUBLISH_URL`, task time limit and retries) as environment variables
 
 ### Chunk task
 1. Downloads `repos.csv` when `csv_file` is a URL, or reads it from the image
 2. Calculates the number of partitions
-3. Gets a Batch token for the pool identity from the Instance Metadata Service and adds the `processor-N` tasks to its own job through the Batch REST API, 100 per request
+3. Gets a Batch token for the pool identity from the Instance Metadata Service and adds the `processor-N` tasks to its own job through the Batch REST API, 100 per request, each limited to `task_max_wall_clock_time` and `task_max_retry_count` retries
 4. Marks the job to terminate once all tasks complete, so finished jobs do not pile up
 
 ### Processor tasks
@@ -208,6 +209,13 @@ max_nodes = 64  # Maximum concurrent VMs (and processor tasks)
 
 ```hcl
 chunk_size = 10  # Repositories per processor task
+```
+
+### Task time limit and retries
+
+```hcl
+task_max_wall_clock_time = "PT4H"  # Batch kills a processor task that runs longer and frees its node
+task_max_retry_count     = 0       # Retries restart the whole slice; keep chunk_size small if you raise this
 ```
 
 ### Schedule
@@ -293,10 +301,10 @@ Azure Blob has no S3-compatible API, and the Moderne CLI publishes LSTs to Maven
 ## Security considerations
 
 - **Secrets**: stored in Key Vault and read by the tasks at runtime with the pool identity. They are not part of any task definition, so they are not visible through the Batch API or portal.
-- **Identity**: one user-assigned managed identity, no keys. It holds `AcrPull`, Key Vault secret read and `Azure Batch Data Contributor` (jobs and tasks on this Batch account only).
+- **Identity**: one user-assigned managed identity, no keys. It holds `AcrPull`, Key Vault secret read, and `Azure Batch Job Submitter` plus `Reader` on the Batch account (jobs and tasks only; it cannot change pools or the account). Every task on the pool can obtain tokens for this identity, so keep the Key Vault dedicated to mass ingest.
 - **Batch account**: Entra ID authentication only; shared keys are disabled.
 - **Network**: nodes need outbound HTTPS only (Batch uses simplified node communication). No inbound rules are required; the optional metrics rule is limited to the VNet.
-- **Tasks**: run as root inside the container (see above), as a non-admin user on the node.
+- **Tasks**: run as the pool's admin auto-user, which makes them root inside the container (see above). Each node runs one task at a time and is discarded when the pool scales down.
 
 ## Cost estimation
 

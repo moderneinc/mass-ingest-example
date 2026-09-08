@@ -38,6 +38,9 @@ batch_request() {
 main() {
   csv_file=${1:?usage: chunk.sh <repos.csv path or https URL> [chunk_size]}
   chunk_size=${2:-10}
+  [[ "$chunk_size" =~ ^[1-9][0-9]*$ ]] || die "chunk_size must be a positive integer, got '$chunk_size'"
+  max_wall_clock_time=${TASK_MAX_WALL_CLOCK_TIME:-PT4H}
+  max_retry_count=${TASK_MAX_RETRY_COUNT:-0}
   : "${IMAGE:?IMAGE must be set to the processor container image}"
   : "${AZ_BATCH_ACCOUNT_URL:?AZ_BATCH_ACCOUNT_URL is set by Azure Batch; run this script as a Batch task}"
   : "${AZ_BATCH_JOB_ID:?AZ_BATCH_JOB_ID is set by Azure Batch; run this script as a Batch task}"
@@ -82,6 +85,8 @@ main() {
       --argjson first "$first" \
       --argjson count "$count" \
       --argjson chunk "$chunk_size" \
+      --arg max_wall_clock_time "$max_wall_clock_time" \
+      --argjson max_retry_count "$max_retry_count" \
       '{
         value: [ range($first; $first + $count) as $n |
           {
@@ -89,6 +94,7 @@ main() {
             commandLine: "/app/task.sh \($csv) --start \($n * $chunk + 1) --end \(($n + 1) * $chunk + 1)",
             containerSettings: { imageName: $image, containerRunOptions: "--workdir /app" },
             userIdentity: { autoUser: { scope: "pool", elevationLevel: "admin" } },
+            constraints: { maxWallClockTime: $max_wall_clock_time, maxTaskRetryCount: $max_retry_count },
             environmentSettings: $env
           }
         ]
