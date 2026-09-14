@@ -1,0 +1,73 @@
+# One run. Fill the ${VARIABLES} with envsubst, as the README shows.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${RUN_NAME}
+  namespace: mass-ingest
+spec:
+  completionMode: Indexed
+  completions: ${SHARDS}
+  parallelism: ${CONCURRENCY}
+  backoffLimitPerIndex: 2
+  # Never fail early: the other indexes' work is already in the lock.
+  maxFailedIndexes: ${SHARDS}
+  podFailurePolicy:
+    rules:
+      # A reclaimed spot node is not one of the index's two tries.
+      - action: Ignore
+        onPodConditions:
+          - type: DisruptionTarget
+  # The bound on a run whose builds hang.
+  activeDeadlineSeconds: 64800
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      annotations:
+        # Nothing voluntary may evict a two-hour build.
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      serviceAccountName: mass-ingest
+      restartPolicy: Never
+      # On EKS, with the node pool in eks/:
+      # nodeSelector:
+      #   karpenter.sh/nodepool: mass-ingest
+      # Long enough for the CLI to flush the lock when the pod is stopped.
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mass-ingest
+          image: ${IMAGE}
+          args: ["mod", "publish", "/var/moderne/ws", "--sync-csv", "--shard", "$(JOB_COMPLETION_INDEX)/${SHARDS}"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          envFrom:
+            - secretRef:
+                name: mass-ingest-store
+            - secretRef:
+                name: mass-ingest-moderne
+                optional: true
+          volumeMounts:
+            - name: git-credentials
+              mountPath: /home/moderne/.git-credentials
+              subPath: credentials
+              readOnly: true
+          # Fits a 4 vCPU 16 GiB node. The memory limit is what the CLI caps each build below.
+          resources:
+            requests:
+              cpu: 3500m
+              memory: 12Gi
+              ephemeral-storage: 150Gi
+            limits:
+              memory: 12Gi
+      volumes:
+        - name: git-credentials
+          secret:
+            secretName: mass-ingest-git
+            optional: true
+            defaultMode: 0444

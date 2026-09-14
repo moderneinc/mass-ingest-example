@@ -1,4 +1,4 @@
-name: Docker Image CI
+name: CI
 
 on:
   push:
@@ -14,11 +14,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  manifests:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: Build the Docker image
+    - name: Validate the Kubernetes manifests
       run: |
-        touch repos.csv
-        docker build . --file Dockerfile --tag mass-ingest:$(date +%s)
+        curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+        export RUN_NAME=ci IMAGE=mass-ingest:ci SHARDS=8 CONCURRENCY=2 CLUSTER_NAME=ci NODE_ROLE=ci
+        for f in k8s/*.yaml k8s/eks/*.yaml; do envsubst < "$f"; echo ---; done |
+          ./kubeconform -strict -summary -ignore-missing-schemas
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: docker/setup-buildx-action@v3
+    - name: Build
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        tags: mass-ingest:ci
+        load: true
+        cache-from: type=gha,scope=mass-ingest
+        cache-to: type=gha,scope=mass-ingest,mode=max
+    - name: mod doctor in a bare container
+      run: |
+        docker run --rm mass-ingest:ci mod doctor /var/moderne --skip-remote --json > doctor.json
+        python3 -m json.tool doctor.json

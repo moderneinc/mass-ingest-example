@@ -1,0 +1,5 @@
+specs: specs.moderne.ai/v1/cli
+maven:
+  settings: /home/moderne/.m2/settings.xml
+telemetry:
+  waitForUpload: true
