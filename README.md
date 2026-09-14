@@ -45,7 +45,7 @@ Once it passes, run the same command without the `mod doctor ...` arguments. The
 
 ## Running every day
 
-A large list finishes sooner split into shards, with each container running `mod publish /var/moderne/ws --sync-csv --shard i/M` for its own `i`. Any scheduler that runs containers can do this. [Running on Kubernetes](docs/kubernetes.md) shows it as a Kubernetes Job, along with sizing and what happens when a build fails.
+A large list finishes sooner split into shards, with each container running `mod publish /var/moderne/ws --sync-csv --shard i/M` for its own `i`. Any scheduler that runs containers can do this. [Running on one machine](docs/docker.md) does it with a short shell script on a single large VM, and [Running on Kubernetes](docs/kubernetes.md) does it with a Kubernetes Job; both cover sizing and what happens when a build fails.
 
 ## Support
 
