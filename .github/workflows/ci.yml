@@ -24,6 +24,8 @@ jobs:
         export RUN_NAME=ci IMAGE=mass-ingest:ci SHARDS=8 CONCURRENCY=2 CLUSTER_NAME=ci NODE_ROLE=ci
         for f in k8s/*.yaml k8s/eks/*.yaml; do envsubst < "$f"; echo ---; done |
           ./kubeconform -strict -summary -ignore-missing-schemas
+    - name: shellcheck
+      run: shellcheck docker/run.sh
 
   image:
     runs-on: ubuntu-latest
