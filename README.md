@@ -1,10 +1,12 @@
 # Mass ingest
 
-Ingest a large number of repositories into Moderne with the [Moderne CLI](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro). One container works through a list of repositories: clone, build the LST, publish it to your artifact store, record the result, delete the clone, next.
+Mass ingest is the pipeline that builds a [Lossless Semantic Tree (LST)](https://docs.moderne.io/user-documentation/recipes/authoring-recipes/concepts/lossless-semantic-trees) for every repository you give it and publishes each one to an artifact repository you control, where Moderne reads them. It usually runs once a day. Building LSTs on a schedule rather than in CI keeps every repository current, including the ones that rarely build and the ones whose code hasn't changed but whose dependencies have; [Mass ingest vs CI builds](https://docs.moderne.io/administrator-documentation/moderne-platform/references/mass-ingest-vs-ci) explains why.
 
-## 1. Put `repos.csv` in the artifact store
+This repository packages mass ingest as a container image, and running it takes three steps.
 
-Upload the list of repositories to the artifact store the LSTs will go to: `repos.csv` at the bucket or repository root for S3 and Artifactory, or at the Maven coordinate `io/moderne/organization/sources/repos/1.0.0/repos-1.0.0.csv` for Nexus and other Maven repositories that enforce a strict layout.
+## 1. List your repositories
+
+Put a `repos.csv` at the root of the artifact repository your LSTs will go to:
 
 ```csv
 cloneUrl,branch,origin,path,org1
@@ -12,66 +14,41 @@ https://github.com/acme/billing,main,github.com,acme/billing,Payments
 https://github.com/acme/claims-api,,github.com,acme/claims-api,Claims
 ```
 
-`cloneUrl`, `origin` and `path` are required; `branch` defaults to the remote's default branch; `org1`, `org2`, ... place the repository in an organization, innermost first. The [repos.csv reference](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv) lists the other columns, and [repository-fetchers](https://github.com/moderneinc/repository-fetchers) generates the file from GitHub, GitLab, Bitbucket and more.
-
-The store holds two files. `repos.csv` is the input: whatever produces it overwrites the whole file whenever membership changes and never touches `repos-lock.csv`. `repos-lock.csv` is the output: `mod publish` rebuilds it from `repos.csv`, decorating every row with what was published, and nothing else writes it.
+Every row needs a `cloneUrl`, `origin` and `path`. A blank `branch` means the default branch, and the optional `org1`, `org2`, ... columns place the repository in your organization. [repository-fetchers](https://github.com/moderneinc/repository-fetchers) can generate this file from GitHub, GitLab or Bitbucket, and the [repos.csv reference](https://docs.moderne.io/user-documentation/moderne-cli/references/repos-csv) describes the other columns.
 
 ## 2. Build the image
 
 ```bash
-docker build -t mass-ingest .
+docker build -t registry.example.com/mass-ingest .
+docker push registry.example.com/mass-ingest
 ```
 
-The image ships JDKs 8 to 25, Maven, Gradle and the latest CLI release. [Building the image](docs/image.md) covers pinning the CLI version, internal mirrors, other languages, self-signed certificates and the FIPS variant.
+The image contains the toolchains your builds might need, from JDKs 8 through 25 to Node.js, Python, .NET and Go, and it installs the newest [Moderne CLI](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro) each time it starts. [Customizing the image](docs/image.md) covers pinning the CLI version, internal mirrors and certificates.
 
 ## 3. Run it
 
-```bash
-mkdir -p data
-docker run --rm -p 8080:8080 -v "$(pwd)/data:/var/moderne" \
-  -e PUBLISH_URL=https://artifactory.example.com/artifactory/moderne-ingest/ \
-  -e PUBLISH_USER=svc-moderne -e PUBLISH_PASSWORD=... \
-  mass-ingest
-```
+A run is configured entirely with environment variables. Tell it where to publish, with the variables for [S3](docs/s3.md) or [Artifactory](docs/artifactory.md), and how to reach Moderne: SaaS customers set `MOD_TENANT_HOST` and `MOD_TENANT_AUTHORIZATION` for their tenant, and Moderne DX customers set their license key in `MOD_LICENSE_KEY` (an air-gapped installation also [installs the CLI into the image](docs/image.md#air-gapped-installations)). For private repositories, mount a `.git-credentials` file at `/home/moderne/.git-credentials`.
 
-The container runs `mod publish /var/moderne --sync-csv`. For every row it compares the remote HEAD with the row's `repos-lock.csv` entry: a repository already published from that commit, by this CLI version, from a reproducible build is skipped; anything else is cloned, built, published and recorded, and its clone is deleted before the next one starts. Disk use stays at one repository, a rerun only touches what changed, and the lock is flushed to the store when the container is stopped and, while it runs, at its own 15-second turn in a round shared with the other containers, five minutes for a handful of them and longer as their number grows, so they never queue on the file.
-
-| Variable | |
-|---|---|
-| `PUBLISH_URL` | The artifact store: an `https://` Maven repository or Artifactory, or `s3://bucket` ([S3 rules](docs/s3.md)). |
-| `PUBLISH_USER` + `PUBLISH_PASSWORD` | Maven repository credentials; `PUBLISH_TOKEN` instead for an Artifactory API token. |
-| `ORGANIZATION` | Ingest one organization from `repos.csv`. One container per organization spreads the work. |
-| `MODERNE_TENANT` + `MODERNE_TOKEN` | Optional: the Moderne tenant to register with the CLI. |
-| `GIT_CREDENTIALS` / `GIT_SSH_CREDENTIALS` | Inline credentials for private repositories (see below). |
-
-### Private repositories
-
-Mount a `.git-credentials` file (one `https://user:token@host` line per host) or an `.ssh` directory into `/home/moderne`, readable by UID 1000, or pass the same content inline:
+Start with `mod doctor`, which checks that everything is in place without changing anything and suggests a fix for anything that isn't:
 
 ```bash
-docker run --rm -v "$(pwd)/.git-credentials:/home/moderne/.git-credentials:ro" ... mass-ingest
-docker run --rm -e GIT_SSH_CREDENTIALS="$(cat ~/.ssh/id_ed25519)" ... mass-ingest
+docker run --rm \
+  -e MOD_LSTS_ARTIFACTS_S3_URL=s3://your-bucket \
+  -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN -e AWS_REGION \
+  -v "$HOME/.git-credentials:/home/moderne/.git-credentials:ro" \
+  registry.example.com/mass-ingest mod doctor /var/moderne --sync-csv
 ```
 
-### Check it worked
+<img src="docs/doctor.png" alt="mod doctor output: host resources, CLI configuration and toolchains, each with a pass, warning or info mark" width="640">
 
-- `docker run --rm -e DIAGNOSE=true ... mass-ingest` runs `mod doctor` instead of the ingest: host resources, toolchains, git credentials, the store, the tenant and every SCM origin in `repos.csv`, read-only, with a fix suggested for each failing row and a non-zero exit when anything fails. `DIAGNOSE_ON_START=true` runs it and then ingests regardless.
-- The store's `repos-lock.csv` has a row per repository with the published LST's location, `changeset`, `cliVersion` and `reproducible`.
-- `data/.moderne/{sync,build,publish}/<command id>/trace.csv` record every clone, build and publish, and `data/.moderne/publish/<command id>/publish.log` keeps the failure stack traces. Nothing else survives in `data`.
-- `curl localhost:8080/prometheus` while it runs; [2-observability](2-observability/) puts that in Grafana.
+Once it passes, run the same command without the `mod doctor ...` arguments. The image runs `mod publish --sync-csv`, which works through `repos.csv` one repository at a time, publishes each LST and records it in a `repos-lock.csv` next to the list. The next run skips every repository that hasn't changed.
 
-## Going further
+## Running every day
 
-- [Publishing to S3](docs/s3.md): credential providers, the IMDSv2 hop limit on EC2, S3-compatible stores.
-- [2-observability](2-observability/): Docker Compose with Prometheus and Grafana, one service per organization.
-- [3-scalability](3-scalability/): AWS Batch or GCP Batch from Terraform, one scheduled job per organization.
-- [Windows](docs/windows.md): `publish.ps1` runs the same flow on a Windows host without Docker, .NET builds included.
-- [Troubleshooting](3-scalability/TROUBLESHOOTING.md).
-- [Building the image](docs/image.md): build arguments, internal mirrors, the FIPS image, the non-root user.
+A large list finishes sooner split into shards, with each container running `mod publish /var/moderne/ws --sync-csv --shard i/M` for its own `i`. Any scheduler that runs containers can do this. [Running on Kubernetes](docs/kubernetes.md) shows it as a Kubernetes Job, along with sizing and what happens when a build fails.
 
 ## Support
 
-- [Moderne CLI documentation](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro)
-- [Report issues](https://github.com/moderneinc/mass-ingest-example/issues)
+The [Moderne CLI documentation](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro) covers the commands used here in more depth, and problems with this example belong in its [issues](https://github.com/moderneinc/mass-ingest-example/issues).
 
 This example code is provided as-is for use with Moderne products.

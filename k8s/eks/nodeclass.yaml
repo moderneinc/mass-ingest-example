@@ -1,0 +1,20 @@
+# EKS Auto Mode picks and patches the node image, so only what it cannot infer is here.
+apiVersion: eks.amazonaws.com/v1
+kind: NodeClass
+metadata:
+  name: mass-ingest
+spec:
+  role: ${NODE_ROLE}
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: ${CLUSTER_NAME}
+  securityGroupSelectorTerms:
+    - tags:
+        aws:eks:cluster-name: ${CLUSTER_NAME}
+  # The image and an index's 150Gi share this disk, and the kubelet evicts at 10% free.
+  ephemeralStorage:
+    size: 300Gi
+  advancedNetworking:
+    # One address per pod rather than a block of sixteen per node, which a run with
+    # one index per node would exhaust its subnets with.
+    ipv4PrefixSize: "32"

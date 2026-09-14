@@ -1,75 +1,62 @@
-# Building the image
+# Customizing the image
 
-```bash
-docker build -t mass-ingest .                                     # latest CLI release
-docker build -t mass-ingest --build-arg MODERNE_CLI_VERSION=4.9.0 .
-docker build -f Dockerfile.fips -t mass-ingest:fips .             # FIPS variant
+The [Dockerfile](../Dockerfile) is mostly a list of toolchains, each copied from its official image in a `FROM ... AS` stage. If your repositories never need one of them, delete its stage and its `COPY --from` lines; nothing else in the image refers to them.
+
+## The CLI version
+
+The image holds the `modw` wrapper rather than the CLI. Each container asks for the newest CLI release when it starts, so a run always has the latest fixes. It also means a new release rebuilds every repository once, because a `repos-lock.csv` row is only skipped when the same CLI version published it. To decide for yourself when that happens, pin the version in the Job's `env`:
+
+```yaml
+- name: MODERNE_WRAPPER_VERSION
+  value: "4.8.3"
 ```
 
-## Build arguments
+## Air-gapped installations
 
-Both Dockerfiles take:
+A Moderne DX installation without internet access can't let `modw` fetch the CLI when a container starts, so the image has to carry the CLI with it. Mirror the `io.moderne` artifacts from the [Code Genome Project](https://artifacts.codegenomeproject.org/maven) into your repository manager, then replace the Dockerfile's `curl https://app.moderne.io/cli` line with an install from that mirror at a pinned version:
 
-| Argument | Default | Description |
-|---|---|---|
-| `MODERNE_CLI_VERSION` | *(latest release)* | CLI version to install |
-| `MODERNE_CLI_STAGE` | `release` | `snapshot` for the latest snapshot; snapshots re-resolve on every run |
-| `MODERNE_CLI_RELEASES_REPO` | `https://artifacts.codegenomeproject.org/maven` | Maven repository for release CLI artifacts |
-| `MODERNE_CLI_SNAPSHOTS_REPO` | `https://artifacts.codegenomeproject.org/maven` | Maven repository for snapshot CLI artifacts |
-| `MAVEN_REPO_URL` | `https://repo1.maven.org/maven2` | Where the Maven distribution is downloaded from |
-| `GRADLE_DIST_URL` | `https://services.gradle.org/distributions` | Where Gradle distributions are downloaded from |
-| `GRADLE_VERSION` | `8.14` | Primary Gradle version |
-| `GRADLE_EXTRA_VERSIONS` | *(empty)* | Comma-separated extra Gradle versions (e.g. `6.9.4,5.6.4`), selected per repository with the `gradleVersion` column |
-| `MAVEN_VERSION` | `3.9.11` | Maven version |
-
-The CLI comes from the [Code Genome Project](https://docs.moderne.io/administrator-documentation/moderne-platform/how-to-guides/accessing-the-code-genome-project/) (CGP), which serves it anonymously: both the `modw` wrapper and the distribution it installs. The build resolves a concrete version and pins it with its download URL in `moderne-wrapper.properties`, so the running container never re-resolves the CLI; rebuild to pick up a new release. CGP serves only `org.openrewrite` and `io.moderne`; the Maven and Gradle distributions and the dependencies of the repositories you ingest come from their own upstreams.
-
-### Internal mirrors
-
-In an egress-blocked environment, mirror `io.moderne:moderne-cli` and the `moderne-cli-linux-{x64,aarch64}` distributions into your repository manager and point every download there:
-
-```bash
-docker build \
-  --build-arg GRADLE_DIST_URL=https://artifactory.internal/artifactory/data-local/gradle \
-  --build-arg MAVEN_REPO_URL=https://artifactory.internal/artifactory/maven-central \
-  --build-arg MODERNE_CLI_RELEASES_REPO=https://artifactory.internal/artifactory/moderne \
-  -t mass-ingest .
+```dockerfile
+ARG MODERNE_CLI_VERSION
+ARG MODERNE_MIRROR=https://repo.example.com/artifactory/moderne
+ENV MODERNE_WRAPPER_VERSION=$MODERNE_CLI_VERSION \
+    MODERNE_WRAPPER_DISTRIBUTION_URL=$MODERNE_MIRROR/io/moderne/moderne-cli-linux-x64/$MODERNE_CLI_VERSION/moderne-cli-linux-x64-$MODERNE_CLI_VERSION.sh
+RUN mkdir -p /home/moderne/.moderne/cli/bin && \
+    curl -fsSL -o /home/moderne/.moderne/cli/bin/modw \
+      "$MODERNE_MIRROR/io/moderne/moderne-cli/$MODERNE_CLI_VERSION/moderne-cli-$MODERNE_CLI_VERSION-modw.sh" && \
+    chmod +x /home/moderne/.moderne/cli/bin/modw && \
+    ln -s modw /home/moderne/.moderne/cli/bin/mod && \
+    mod --version
 ```
 
-`GRADLE_DIST_URL` is used as `${GRADLE_DIST_URL}/gradle-<version>-bin.zip` and `MAVEN_REPO_URL` as `${MAVEN_REPO_URL}/org/apache/maven/apache-maven/<version>/apache-maven-<version>-bin.tar.gz`. The base images (`eclipse-temurin`, or `registry.access.redhat.com/ubi9/ubi` for FIPS) are pulled by the Docker daemon; mirror those through your registry configuration.
+Build it with `--build-arg MODERNE_CLI_VERSION=<version>`. The `mod --version` at the end makes the wrapper download that version into the image, and because a container starts with the same version already installed, it never looks for a newer one. If the mirror requires credentials, `modw` reads them from `MODERNE_WRAPPER_DISTRIBUTION_USERNAME` and `MODERNE_WRAPPER_DISTRIBUTION_PASSWORD`, or `MODERNE_WRAPPER_DISTRIBUTION_TOKEN`.
 
-## Customizing the Dockerfile
+The CLI is only the first download. The base images come from Docker Hub, Microsoft and GitHub's registry, the Android SDK from Google and Bazelisk from GitHub, so each of those `FROM` and `curl` lines needs to point at your own registry or mirror too. The builds themselves resolve dependencies at run time, which the next section covers.
 
-The Dockerfile is organized as commented sections to uncomment:
+## Private package registries
 
-- **Language support**: Node.js, Python, .NET, Bazel, the Android SDK. `moderne.yml` (copied by the "Custom build steps" line) adds the JavaScript and Python build steps.
-- **Self-signed certificates**: a `certs/` directory imported into every JDK trust store. The import runs as root, so it stays above the `USER 1000` switch; the matching `mod config http trust-store edit java-home` runs below it.
-- **Maven settings**: `COPY maven/settings.xml /home/moderne/.m2/settings.xml` plus `mod config build maven settings edit`, in the CLI CONFIGURATION section so it lands in the non-root user's home. `npm/.npmrc` and `python/pip.conf` follow the same pattern.
-- **JVM options**: `mod config java options edit "-Xmx4g -Xss3m"`; raise `-Xmx` if builds run out of memory.
-- **GCP Batch**: `COPY 3-scalability/gcp-batch/task.sh task.sh`.
+Builds resolve dependencies the way each tool normally would, so pointing them at an internal repository manager means giving each tool its usual configuration file. Keep credentials out of those files by having them read environment variables, and put the variables in a secret the Job passes to the container.
 
-## FIPS image
+Maven already reads [`maven/settings.xml`](../maven/settings.xml), which has a commented mirror that takes its username and password from `${env.MAVEN_MIRROR_USERNAME}` and `${env.MAVEN_MIRROR_PASSWORD}`. Gradle reads init scripts from `~/.gradle/init.d/`, and any environment variable named `ORG_GRADLE_PROJECT_<name>` becomes the project property `<name>`, which is how most build files expect repository credentials. npm, yarn and pnpm read `~/.npmrc`, which can refer to `${NPM_TOKEN}`. Python needs no file at all, since pip reads `PIP_INDEX_URL` and uv reads `UV_DEFAULT_INDEX`. NuGet reads `~/.nuget/NuGet/NuGet.Config`, where `%NAME%` in `<packageSourceCredentials>` expands an environment variable.
 
-`Dockerfile.fips` builds on Red Hat UBI 9 with the FIPS crypto policy enabled, restricting all cryptography (OpenSSL, Java) to FIPS-approved algorithms; the host kernel must also run in FIPS mode for full compliance. Same build arguments, same `docker run` invocations.
+Copy any of those files in next to the `maven/settings.xml` line, after `USER moderne`, so they belong to the user the builds run as:
 
-Public download servers may not negotiate FIPS-compliant TLS, so the Dockerfile downloads in a separate non-FIPS stage, except that `modw` fetches the CLI distribution from the FIPS-enabled stage. With internal mirrors that support FIPS-compliant TLS you can fold the `downloader` stage into `base` (after the `dnf install` that provides `curl`) to make the whole build FIPS-compliant.
+```dockerfile
+COPY --chown=moderne npm/.npmrc /home/moderne/.npmrc
+```
 
-RHEL 9 backported TLS 1.3 into JDK 8 and 11 with a `P11AEADCipher` bug that fails AES-GCM decryption under NSS in FIPS mode (`CKR_ENCRYPTED_DATA_INVALID`), so the Dockerfile disables TLS 1.3 for those two JDKs; JDK 17+ is unaffected. Certificates go into the system trust store (`update-ca-trust`) rather than per-JDK keytool imports.
+## Self-signed certificates
 
-| | `Dockerfile` | `Dockerfile.fips` |
-|---|---|---|
-| Base image | Eclipse Temurin (Ubuntu) | Red Hat UBI 9 |
-| JDKs | Temurin 8, 11, 17, 21, 25 | Red Hat OpenJDK 8, 11, 17, 21, 25 |
-| Crypto policy | default | FIPS |
-| Certificates | per-JDK keytool | system trust store |
+A repository manager or Git host with a certificate from your own certificate authority has to be trusted in several places, because git and Python use the system store, the CLI, Maven and Gradle use each JDK's `cacerts`, and Node.js uses neither. Put the `.crt` files in a `certs/` directory and add this above `USER moderne`, where the image still builds as root:
 
-## Non-root user
+```dockerfile
+COPY certs/ /usr/local/share/ca-certificates/
+RUN update-ca-certificates && \
+    for store in $(find /opt/java/openjdk /usr/lib/jvm -name cacerts); do \
+      for cert in /usr/local/share/ca-certificates/*.crt; do \
+        keytool -importcert -noprompt -storepass changeit -alias "$(basename "$cert")" -file "$cert" -keystore "$store"; \
+      done; \
+    done
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+```
 
-Both images run as `moderne` (UID 1000, GID 0), so `runAsNonRoot: true` pod policies need no extra configuration, and the writable directories (`/home/moderne`, `/var/moderne`, `/app`) are group-writable by GID 0 so the images also work where an arbitrary UID is assigned at runtime (OpenShift). Two consequences:
-
-- A host directory bind-mounted at `/var/moderne` must be writable by UID 1000: create it as your regular user (`mkdir data`) before `docker run`, or Docker creates it as root.
-- Credential files mounted into `/home/moderne` must be readable by UID 1000; SSH keys at mode 600 must therefore be owned by UID 1000 on the host.
-
-## Disk
-
-`/var/moderne` holds one repository at a time plus the CLI's trace csvs and its type-table store (symlinked from the CLI home so hard links land on the same filesystem). 32 GB covers most portfolios; the largest single repository sets the floor.
+`mod doctor` reports which trust store the CLI loaded, and fails if it can't load it.

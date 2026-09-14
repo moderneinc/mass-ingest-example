@@ -1,0 +1,33 @@
+# One index per node, so the pool grows to a run's parallelism and empties when it ends.
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: mass-ingest
+spec:
+  template:
+    spec:
+      nodeClassRef:
+        group: eks.amazonaws.com
+        kind: NodeClass
+        name: mass-ingest
+      requirements:
+        # A reclaimed index redoes only what it had not yet recorded in the lock.
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot"]
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+        # Not burstable: a two-hour build runs out of CPU credits.
+        - key: eks.amazonaws.com/instance-category
+          operator: In
+          values: ["m", "r"]
+        - key: eks.amazonaws.com/instance-cpu
+          operator: In
+          values: ["4"]
+  # A ceiling on a runaway run. The Job's parallelism sizes a run.
+  limits:
+    cpu: "400"
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 1m

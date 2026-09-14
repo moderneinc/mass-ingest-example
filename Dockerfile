@@ -1,369 +1,81 @@
-################################################################################
-# CORE SETUP (Required for all stages)
-################################################################################
+# The toolchains the CLI builds repositories with. Nothing run-specific lives here:
+# the store, the tenant and the shard are environment the Job sets.
+FROM eclipse-temurin:8-noble AS jdk8
+FROM eclipse-temurin:11-noble AS jdk11
+FROM eclipse-temurin:17-noble AS jdk17
+FROM eclipse-temurin:21-noble AS jdk21
+FROM gradle:8.14.4-jdk21-noble AS gradle
+FROM maven:3.9-eclipse-temurin-25-noble AS maven
+FROM node:22-bookworm AS node
+FROM golang:1.25-bookworm AS go
+FROM ghcr.io/astral-sh/uv:latest AS uv
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS dotnet8
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS dotnet9
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS dotnet10
 
-FROM eclipse-temurin:8-jdk AS jdk8
-FROM eclipse-temurin:11-jdk AS jdk11
-FROM eclipse-temurin:17-jdk AS jdk17
-FROM eclipse-temurin:21-jdk AS jdk21
-FROM eclipse-temurin:25-jdk AS jdk25
+# The CLI runs on this JDK.
+FROM eclipse-temurin:25-noble
+RUN apt-get update && apt-get install -y curl git unzip
 
-# UNCOMMENT for multiple Node.js versions (JavaScript/TypeScript projects)
-# FROM node:20 AS node20
-# FROM node:22 AS node22
-# FROM node:24 AS node24
-
-# UNCOMMENT if you use a custom maven image with settings
-# FROM <custom docker image> AS maven
-
-# Install dependencies for `mod` cli
-FROM jdk25 AS dependencies
-RUN apt-get -y update && apt-get install -y curl git git-lfs jq libxml2-utils unzip wget zip vim && git lfs install
-
-# Create the non-root user the container runs as. 
-# Ubuntu 24.04 base images ship a default `ubuntu` user; remove it so the`moderne` user can take UID 1000.
-RUN userdel -r ubuntu 2>/dev/null; \
-    useradd --uid 1000 --gid 0 --create-home --shell /bin/bash moderne && \
-    chmod g=u /home/moderne && \
-    install -d -o moderne -g 0 -m 775 /app /var/moderne
-
-# Gather various JDK versions
+# JVM
 COPY --from=jdk8 /opt/java/openjdk /usr/lib/jvm/temurin-8-jdk
 COPY --from=jdk11 /opt/java/openjdk /usr/lib/jvm/temurin-11-jdk
 COPY --from=jdk17 /opt/java/openjdk /usr/lib/jvm/temurin-17-jdk
 COPY --from=jdk21 /opt/java/openjdk /usr/lib/jvm/temurin-21-jdk
-COPY --from=jdk25 /opt/java/openjdk /usr/lib/jvm/temurin-25-jdk
+COPY --from=gradle /opt/gradle /opt/gradle
+COPY --from=maven /usr/share/maven /usr/share/maven
+# For builds that run bare gradle or mvn rather than a wrapper.
+ENV GRADLE_HOME=/opt/gradle MAVEN_HOME=/usr/share/maven
+ENV PATH=$GRADLE_HOME/bin:$MAVEN_HOME/bin:$PATH
 
-################################################################################
-# MODERNE CLI SETUP
-################################################################################
+# Android
+ENV ANDROID_HOME=/opt/android-sdk
+RUN curl -fsSL -o /tmp/cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-12700392_latest.zip && \
+    unzip -q /tmp/cmdline-tools.zip -d /tmp && \
+    yes | /tmp/cmdline-tools/bin/sdkmanager --sdk_root=$ANDROID_HOME --licenses > /dev/null && \
+    /tmp/cmdline-tools/bin/sdkmanager --sdk_root=$ANDROID_HOME "cmdline-tools;latest" $(seq -f 'platforms;android-%g' 25 35) && \
+    rm -rf /tmp/cmdline-tools /tmp/cmdline-tools.zip
 
-FROM dependencies AS modcli
-ARG MODERNE_CLI_STAGE=release
-ARG MODERNE_CLI_VERSION
-# The Moderne CLI is published to the Code Genome Project (CGP), a single flat repository
-# that serves releases and snapshots side by side, and serves the CLI anonymously. Override
-# either to resolve the same coordinates from an internal mirror.
-ARG MODERNE_CLI_RELEASES_REPO=https://artifacts.codegenomeproject.org/maven
-ARG MODERNE_CLI_SNAPSHOTS_REPO=https://artifacts.codegenomeproject.org/maven
+# Bazel
+RUN curl -fsSL -o /usr/local/bin/bazel https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 && \
+    chmod +x /usr/local/bin/bazel
 
-WORKDIR /app
+# JavaScript. The copied yarn symlinks dangle; corepack provides yarn instead.
+COPY --from=node /usr/local /opt/node
+ENV PATH=/opt/node/bin:$PATH
+RUN rm -f /opt/node/bin/yarn /opt/node/bin/yarnpkg && corepack enable
 
-# Download the modw wrapper script and pin what it resolves at runtime.
-# modw is a self-bootstrapping wrapper that handles Java detection, CLI distribution download,
-# and AOT caching. The concrete version and a `distributionUrl` are written into
-# moderne-wrapper.properties, so a MODERNE_CLI_*_REPO override covers the distribution as well
-# as the wrapper, and the container never re-resolves the CLI version at runtime.
-RUN set -e; \
-    if [ -n "${MODERNE_CLI_VERSION}" ]; then \
-        CLI_VERSION="${MODERNE_CLI_VERSION}"; \
-    elif [ "${MODERNE_CLI_STAGE}" = "snapshot" ]; then \
-        SNAPSHOT_INDEX=$(curl -fsSL "$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/maven-metadata.xml"); \
-        CLI_VERSION=$(echo "$SNAPSHOT_INDEX" | sed -n 's/.*<latest>\(.*\)<\/latest>.*/\1/p'); \
-        if [ -z "$CLI_VERSION" ]; then \
-            CLI_VERSION=$(echo "$SNAPSHOT_INDEX" | sed -n 's/.*<version>\(.*-SNAPSHOT\)<\/version>.*/\1/p' | tail -1); \
-        fi; \
-        if [ -z "$CLI_VERSION" ]; then \
-            echo "Failed to resolve latest snapshot version from $MODERNE_CLI_SNAPSHOTS_REPO"; exit 1; \
-        fi; \
-    else \
-        CLI_VERSION=$(curl -fsSL "$MODERNE_CLI_RELEASES_REPO/io/moderne/moderne-cli/maven-metadata.xml" | sed -n 's/.*<release>\(.*\)<\/release>.*/\1/p'); \
-        if [ -z "$CLI_VERSION" ]; then \
-            echo "Failed to resolve latest release version from $MODERNE_CLI_RELEASES_REPO"; exit 1; \
-        fi; \
-    fi; \
-    mkdir -p /home/moderne/.moderne/cli/dist; \
-    case "$CLI_VERSION" in \
-        *-SNAPSHOT) \
-            echo "Downloading modw for snapshot: $CLI_VERSION"; \
-            METADATA_URL="$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/$CLI_VERSION/maven-metadata.xml"; \
-            SNAPSHOT_METADATA=$(curl -fsSL "$METADATA_URL"); \
-            TIMESTAMP=$(echo "$SNAPSHOT_METADATA" | sed -n 's/.*<timestamp>\(.*\)<\/timestamp>.*/\1/p'); \
-            BUILD_NUM=$(echo "$SNAPSHOT_METADATA" | sed -n 's/.*<buildNumber>\(.*\)<\/buildNumber>.*/\1/p'); \
-            if [ -z "$TIMESTAMP" ] || [ -z "$BUILD_NUM" ]; then \
-                echo "Failed to resolve snapshot artifact version"; exit 1; \
-            fi; \
-            ARTIFACT_VERSION="$(echo "$CLI_VERSION" | sed 's/-SNAPSHOT$//')-$TIMESTAMP-$BUILD_NUM"; \
-            curl -fsSL -o /usr/local/bin/modw "$MODERNE_CLI_SNAPSHOTS_REPO/io/moderne/moderne-cli/$CLI_VERSION/moderne-cli-$ARTIFACT_VERSION-modw.sh"; \
-            printf 'version=%s\ndistributionUrlEarlyAccess=%s\n' "$CLI_VERSION" "$MODERNE_CLI_SNAPSHOTS_REPO" > /home/moderne/.moderne/cli/dist/moderne-wrapper.properties; \
-            ;; \
-        *) \
-            echo "Downloading modw for release: $CLI_VERSION"; \
-            curl -fsSL -o /usr/local/bin/modw "$MODERNE_CLI_RELEASES_REPO/io/moderne/moderne-cli/$CLI_VERSION/moderne-cli-$CLI_VERSION-modw.sh"; \
-            case "$(uname -m)" in \
-                x86_64|amd64) CLI_DIST=moderne-cli-linux-x64 ;; \
-                aarch64|arm64) CLI_DIST=moderne-cli-linux-aarch64 ;; \
-                *) echo "Unsupported architecture: $(uname -m)"; exit 1 ;; \
-            esac; \
-            printf 'version=%s\ndistributionUrl=%s/io/moderne/%s/${version}/%s-${version}.${extension}\n' \
-                "$CLI_VERSION" "$MODERNE_CLI_RELEASES_REPO" "$CLI_DIST" "$CLI_DIST" \
-                > /home/moderne/.moderne/cli/dist/moderne-wrapper.properties; \
-            ;; \
-    esac; \
-    chown -R moderne:0 /home/moderne/.moderne && chmod -R g=u /home/moderne/.moderne
+# Python. Noble's interpreter ships without venv and pip; node-gyp wants `python`.
+RUN apt-get update && apt-get install -y \
+    python3 python3-venv python3-dev python3-pip python3-setuptools python-is-python3
+COPY --from=uv /uv /usr/local/bin/uv
 
-# Make modw executable and create mod symlink
-RUN chmod +x /usr/local/bin/modw && ln -sf modw /usr/local/bin/mod
+# .NET
+COPY --from=dotnet8 /usr/share/dotnet /usr/share/dotnet
+COPY --from=dotnet9 /usr/share/dotnet /usr/share/dotnet
+COPY --from=dotnet10 /usr/share/dotnet /usr/share/dotnet
+ENV DOTNET_ROOT=/usr/share/dotnet PATH=/usr/share/dotnet:$PATH
 
-# Credential configuration has been moved to runtime (publish.sh/publish.ps1) to avoid
-# baking sensitive credentials into Docker image layers. Credentials are now passed as
-# environment variables and configured when the container starts.
+# Go
+COPY --from=go /usr/local/go /usr/local/go
+ENV PATH=/usr/local/go/bin:$PATH
 
-################################################################################
-# OPTIONAL: Language Support (uncomment as needed)
-################################################################################
-# Most projects use Maven/Gradle wrappers and don't need these installations.
-# Uncomment only if your repositories specifically require them.
-
-FROM modcli AS language-support
-
-# Artifact locations - override these to point at internal mirrors
-# (e.g. --build-arg GRADLE_DIST_URL=https://artifactory.internal/artifactory/data-local/gradle)
-ARG GRADLE_DIST_URL=https://services.gradle.org/distributions
-ARG MAVEN_REPO_URL=https://repo1.maven.org/maven2
-
-# Gradle (comment if projects don't use Gradle without a wrapper)
-# Install one or more Gradle versions for repos that lack a Gradle wrapper.
-# To add versions for repos with older build scripts, add them to GRADLE_EXTRA_VERSIONS (comma-separated).
-# Then use the `gradleVersion` column in repos.csv to select which version to use per repo.
-ARG GRADLE_VERSION=8.14
-ARG GRADLE_EXTRA_VERSIONS=
-RUN mkdir -p /opt/gradle && \
-    wget --no-check-certificate "${GRADLE_DIST_URL}/gradle-${GRADLE_VERSION}-bin.zip" -O gradle-${GRADLE_VERSION}-bin.zip && \
-    unzip -d /opt/gradle gradle-${GRADLE_VERSION}-bin.zip && \
-    rm gradle-${GRADLE_VERSION}-bin.zip && \
-    for v in $(echo "${GRADLE_EXTRA_VERSIONS}" | tr ',' ' '); do \
-        wget --no-check-certificate "${GRADLE_DIST_URL}/gradle-${v}-bin.zip" -O gradle-${v}-bin.zip && \
-        unzip -d /opt/gradle gradle-${v}-bin.zip && \
-        rm gradle-${v}-bin.zip; \
-    done
-ENV PATH="${PATH}:/opt/gradle/gradle-${GRADLE_VERSION}/bin"
-
-# Maven (comment if projects don't use Maven without a wrapper)
-# NOTE: This version may be out of date as new versions are continually released. Check here for the latest version: https://repo1.maven.org/maven2/org/apache/maven/apache-maven/
-ARG MAVEN_VERSION=3.9.11
-ENV MAVEN_VERSION=${MAVEN_VERSION}
-RUN wget --no-check-certificate "${MAVEN_REPO_URL}/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz" -O apache-maven-${MAVEN_VERSION}-bin.tar.gz && tar xzvf apache-maven-${MAVEN_VERSION}-bin.tar.gz && rm apache-maven-${MAVEN_VERSION}-bin.tar.gz
-RUN mv apache-maven-${MAVEN_VERSION} /opt/apache-maven-${MAVEN_VERSION}
-RUN ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
-
-# Maven wrapper external to projects (uncomment if needed)
-# RUN /usr/local/bin/mvn -N wrapper:wrapper
-# RUN mkdir -p /opt/maven-wrapper/bin
-# RUN mv mvnw mvnw.cmd .mvn /opt/maven-wrapper/bin/
-# ENV PATH="${PATH}:/opt/maven-wrapper/bin"
-
-# Android SDK (uncomment for Android projects)
-# RUN wget --no-check-certificate https://dl.google.com/android/repository/commandlinetools-linux-8512546_latest.zip
-# RUN unzip commandlinetools-linux-8512546_latest.zip
-# RUN mkdir -p /usr/lib/android-sdk/cmdline-tools/latest/
-# RUN cp -R cmdline-tools/* /usr/lib/android-sdk/cmdline-tools/latest/
-# RUN yes | /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses
-# RUN /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-33"
-# RUN /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-32"
-# RUN /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-31"
-# RUN /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-30"
-# RUN /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-29"
-# RUN /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-28"
-# RUN /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-27"
-# RUN /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-26"
-# RUN /usr/lib/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-25"
-# ENV ANDROID_HOME=/usr/lib/android-sdk/cmdline-tools/latest
-# ENV ANDROID_SDK_ROOT=${ANDROID_HOME}
-
-# Bazel (uncomment for Bazel projects)
-# RUN wget --no-check-certificate https://github.com/bazelbuild/bazelisk/releases/download/v1.20.0/bazelisk-linux-amd64
-# RUN cp bazelisk-linux-amd64 /usr/local/bin/bazel
-# RUN chmod +x /usr/local/bin/bazel
-
-# Node.js - multiple versions (uncomment for JavaScript/TypeScript projects)
-# Also uncomment the FROM node:XX lines near the top of this file and the
-# `mod config node installation edit` line in the CLI CONFIGURATION section below.
-# COPY --from=node20 /usr/local /opt/node/node-20
-# COPY --from=node22 /usr/local /opt/node/node-22
-# COPY --from=node24 /usr/local /opt/node/node-24
-# ENV PATH="/opt/node/node-24/bin:${PATH}"
-
-# Python 3.11 (uncomment for Python projects)
-# Install prerequisites and COPY the deadsnakes PPA
-# RUN apt-get update && apt-get install -y \
-#     software-properties-common \
-#     && add-apt-repository ppa:deadsnakes/ppa \
-#     && apt-get update
-
-# # Install Python 3.11 and pip
-# RUN apt-get install -y \
-#     python3.11 \
-#     python3.11-venv \
-#     python3.11-dev \
-#     python3.11-distutils \
-#     && apt-get -y autoremove \
-#     && apt-get clean
-
-# # Set Python 3.11 as the default
-# RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
-#    update-alternatives --config python3
-
-# # Install pip for Python 3.11 using the bundled `ensurepip` and upgrade it
-# RUN python3.11 -m ensurepip --upgrade
-
-# # Update pip to the latest version for the installed Python 3.11
-# RUN python3.11 -m pip install --upgrade pip
-
-# RUN python3.11 -m pip install more-itertools cbor2
-
-# .NET SDK (uncomment for .NET projects)
-# RUN apt-get install -y dotnet-sdk-6.0
-# RUN apt-get install -y dotnet-sdk-8.0
-
-################################################################################
-# RUNTIME CONFIGURATION
-################################################################################
-
-FROM language-support AS runner
-
-################################################################################
-# OPTIONAL: Self-signed Certificates (uncomment if needed)
-################################################################################
-# Only needed if your artifact repository, source control, or Moderne tenant
-# uses self-signed certificates.
-#
-# This section modifies JDK trust stores, so it must stay above the
-# DROP PRIVILEGES switch below (it runs as root).
-
-# Place all .crt files in a certs/ directory next to the Dockerfile, then uncomment:
-# COPY certs/ /opt/certs/
-#
-# Edit this list to match the JDKs installed above:
-# ENV CACERTS_PATHS="\
-#   /usr/lib/jvm/temurin-8-jdk/jre/lib/security/cacerts \
-#   /usr/lib/jvm/temurin-11-jdk/lib/security/cacerts \
-#   /usr/lib/jvm/temurin-17-jdk/lib/security/cacerts \
-#   /usr/lib/jvm/temurin-21-jdk/lib/security/cacerts \
-#   /usr/lib/jvm/temurin-25-jdk/lib/security/cacerts"
-#
-# RUN for cert in /opt/certs/*.crt; do \
-#       alias=$(basename "$cert" .crt); \
-#       for cacerts in $CACERTS_PATHS; do \
-#           keytool -import -noprompt -trustcacerts \
-#             -alias "$alias" \
-#             -storepass changeit \
-#             -file "$cert" \
-#             -keystore "$cacerts"; \
-#       done; \
-#     done
-#
-# Also uncomment the `mod config http trust-store edit java-home` line in the
-# CLI CONFIGURATION section below.
-
-# mvnw scripts in maven projects may attempt to download maven-wrapper jars using wget.
-# If using self-signed certs, UNCOMMENT the following to concatenate them for wget:
-# RUN cat /opt/certs/*.crt > /opt/certs/ca-bundle.crt
-# RUN echo "ca_certificate = /opt/certs/ca-bundle.crt" >> /etc/wgetrc
-
-################################################################################
-# DROP PRIVILEGES
-################################################################################
-# Everything from here on runs as the non-root `moderne` user, and the
-# container itself runs as that user. `mod config ...` commands write to
-# $HOME/.moderne, so they must come after this switch.
-#
-# The numeric UID (rather than the user name) lets Kubernetes verify
-# `runAsNonRoot: true` without additional pod configuration.
-
-USER 1000
+# UID 1000, which noble gives to `ubuntu`. AGP writes missing platforms back to the SDK.
+RUN userdel -r ubuntu 2>/dev/null; \
+    useradd --uid 1000 --create-home moderne && \
+    install -d -o moderne /var/moderne && \
+    chown -R moderne /opt/android-sdk
+USER moderne
 ENV HOME=/home/moderne
 
-################################################################################
-# CLI CONFIGURATION
-################################################################################
-# CLI configuration is stored in the moderne user's home directory, so these
-# commands run after the switch to the non-root user.
+# Installs the modw wrapper, which resolves the newest CLI release each time a container
+# starts. Set MODERNE_WRAPPER_VERSION in the container's environment to pin one.
+RUN curl -fsSL https://app.moderne.io/cli | bash
+ENV PATH=/home/moderne/.moderne/cli/bin:$PATH
 
-# Register all Gradle installations so the CLI can select the right version per repo.
-RUN mod config build gradle installation edit $(find /opt/gradle -maxdepth 1 -mindepth 1 -type d | sort -V)
+COPY --chown=moderne cli/moderne.yml /home/moderne/.moderne/cli/moderne.yml
+COPY --chown=moderne maven/settings.xml /home/moderne/.m2/settings.xml
 
-# V3 type tables are hard-linked into each build, so the store must sit on the same
-# filesystem as the data volume; publish.sh creates the target directory.
-RUN ln -s /var/moderne/.types /home/moderne/.moderne/cli/types
+WORKDIR /var/moderne
 
-# Node.js (uncomment for JavaScript/TypeScript projects, along with the
-# installation in the Language Support section above)
-# RUN mod config node installation edit /opt/node/node-20/bin/node /opt/node/node-22/bin/node # /opt/node/node-24/bin/node
-
-# Custom Maven settings (uncomment if your projects require specific Maven
-# configuration; choose between a settings file within this repo or the docker image variant):
-# COPY --chown=1000:0 maven/settings.xml /home/moderne/.m2/settings.xml
-# RUN cp $MAVEN_CONFIG/settings.xml /home/moderne/.m2/settings.xml # For custom maven docker image
-# COPY --chown=1000:0 maven/settings-security.xml /home/moderne/.m2/settings-security.xml
-# RUN mod config build maven settings edit /home/moderne/.m2/settings.xml
-
-# Custom NPM configuration (uncomment if your JavaScript/TypeScript projects
-# require a custom npm registry or authentication):
-# COPY --chown=1000:0 npm/.npmrc /home/moderne/.npmrc
-
-# Custom Python/pip configuration (uncomment if your Python projects require
-# a private package index or authentication):
-# COPY --chown=1000:0 python/pip.conf /home/moderne/.config/pip/pip.conf
-
-# Custom build steps (uncomment if your repositories include JavaScript or
-# Python projects, so the Moderne CLI parses those languages):
-# COPY --chown=1000:0 moderne.yml /home/moderne/.moderne/cli/moderne.yml
-
-# Self-signed certificates (uncomment along with the certificate section above):
-# RUN mod config http trust-store edit java-home
-
-# OPTIONAL - Customize JVM options
-RUN mod config java options edit "-Xmx4g -Xss3m"
-
-# Disable Maven Central if your environment blocks access to repo.maven.apache.org
-# RUN mod config features no-maven-central
-
-# Git authentication configuration
-# Git credentials are configured at runtime via volume mounts to avoid baking secrets into the image.
-# The helper only implements "get": when a server rejects a credential (HTTP 401), git asks its
-# helpers to erase it, and the standard store helper would wipe the /home/moderne/.git-credentials
-# entry for that whole host, breaking every remaining repository in the run. The trade-off is that a
-# revoked token keeps being offered (and rejected) once per remaining repository on that host,
-# which may count toward the SCM's failed-authentication lockout policy for the account.
-RUN git config --global credential.helper '!f() { if [ "$1" = "get" ]; then git credential-store --file=/home/moderne/.git-credentials get; fi; }; f'
-# Optionally disable SSL verification if needed
-# RUN git config --global http.sslVerify false
-
-# Mount git credentials at runtime with:
-# docker run -v $(pwd)/.git-credentials:/home/moderne/.git-credentials:ro ...
-#
-# .git-credentials format (one line per host):
-# https://<username>:<password>@github.com
-# https://<token-name>:<token>@gitlab.com
-
-# SSH keys for git authentication (if needed instead of https credentials)
-# Mount at runtime to avoid baking secrets into the image:
-# docker run -v $(pwd)/.ssh:/home/moderne/.ssh:ro ...
-#
-# Ensure your .ssh directory contains:
-# - id_rsa (private key with 600 permissions, owned by UID 1000)
-# - known_hosts (with 644 permissions)
-
-################################################################################
-# FINAL SETUP
-################################################################################
-
-# Available ports
-# 8080 - mod CLI monitor
-EXPOSE 8080
-
-# Disables extra formating in the logs
-ENV CUSTOM_CI=true
-
-# Set the data directory for the publish script
-# NOTE: when bind-mounting a host directory here, ensure it is writable by
-# UID 1000 (e.g. `mkdir data` as your regular user before `docker run`).
-ENV DATA_DIR=/var/moderne
-
-COPY --chown=1000:0 --chmod=755 publish.sh publish.sh
-
-# GCP Batch: uncomment so each task maps BATCH_TASK_INDEX to an organization (see 3-scalability/gcp-batch)
-# COPY --chown=1000:0 --chmod=755 3-scalability/gcp-batch/task.sh task.sh
-
-CMD ["./publish.sh"]
+CMD ["mod", "publish", "/var/moderne/ws", "--sync-csv"]

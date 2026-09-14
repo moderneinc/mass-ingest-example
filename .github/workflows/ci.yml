@@ -13,58 +13,31 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# TODO pin MODERNE_CLI_VERSION (a build-arg of both Dockerfiles) to the first CLI release
-# that ships `mod publish --sync-csv` and `mod doctor`; the smoke job fails on older releases.
-
 jobs:
-  lint:
+  manifests:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: Syntax check shell scripts
-      run: bash -n publish.sh 3-scalability/gcp-batch/task.sh
-    - name: shellcheck
-      uses: ludeeus/action-shellcheck@2.0.0
-      with:
-        scandir: .
+    - name: Validate the Kubernetes manifests
+      run: |
+        curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+        export RUN_NAME=ci IMAGE=mass-ingest:ci SHARDS=8 CONCURRENCY=2 CLUSTER_NAME=ci NODE_ROLE=ci
+        for f in k8s/*.yaml k8s/eks/*.yaml; do envsubst < "$f"; echo ---; done |
+          ./kubeconform -strict -summary -ignore-missing-schemas
 
-  build:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - dockerfile: Dockerfile
-            tag: mass-ingest
-          - dockerfile: Dockerfile.fips
-            tag: mass-ingest-fips
-    steps:
-    - uses: actions/checkout@v4
-    - uses: docker/setup-buildx-action@v3
-    - name: Build ${{ matrix.dockerfile }}
-      uses: docker/build-push-action@v6
-      with:
-        context: .
-        file: ${{ matrix.dockerfile }}
-        tags: ${{ matrix.tag }}:ci
-        push: false
-        cache-from: type=gha,scope=${{ matrix.tag }}
-        cache-to: type=gha,scope=${{ matrix.tag }},mode=max
-
-  smoke:
-    needs: build
+  image:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     - uses: docker/setup-buildx-action@v3
-    - name: Load the image from the build job's cache
+    - name: Build
       uses: docker/build-push-action@v6
       with:
         context: .
-        file: Dockerfile
         tags: mass-ingest:ci
         load: true
         cache-from: type=gha,scope=mass-ingest
+        cache-to: type=gha,scope=mass-ingest,mode=max
     - name: mod doctor in a bare container
       run: |
         docker run --rm mass-ingest:ci mod doctor /var/moderne --skip-remote --json > doctor.json
