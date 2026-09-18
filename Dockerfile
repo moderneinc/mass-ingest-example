@@ -68,8 +68,9 @@ RUN userdel -r ubuntu 2>/dev/null; \
 USER moderne
 ENV HOME=/home/moderne
 
-# Installs the modw wrapper, which resolves the newest CLI release each time a container
-# starts. Set MODERNE_WRAPPER_VERSION in the container's environment to pin one.
+# Installs the modw wrapper. The CLI version it downloads when a container starts is set by
+# the MODERNE_WRAPPER_VERSION environment variable in that container. If you don't set it,
+# it defaults to the latest version.
 RUN curl -fsSL https://app.moderne.io/cli | bash
 ENV PATH=/home/moderne/.moderne/cli/bin:$PATH
 
