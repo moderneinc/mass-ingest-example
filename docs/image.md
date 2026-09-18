@@ -4,12 +4,14 @@ The [Dockerfile](../Dockerfile) is mostly a list of toolchains, each copied from
 
 ## The CLI version
 
-The image holds the `modw` wrapper rather than the CLI. Each container asks for the newest CLI release when it starts, so a run always has the latest fixes. It also means a new release rebuilds every repository once, because a `repos-lock.csv` row is only skipped when the same CLI version published it. To decide for yourself when that happens, pin the version in the Job's `env`:
+The image holds the `modw` wrapper rather than the CLI. Each container asks for the newest CLI release when it starts, so a run always has the latest fixes. It also means a new release rebuilds every repository once, because a `repos-lock.csv` row is only skipped when the same CLI version published it. To decide for yourself when that happens, pin the version in the Job's `env` or in the env file when [running on one machine](docker.md#configuration):
 
 ```yaml
 - name: MODERNE_WRAPPER_VERSION
-  value: "4.8.3"
+  value: "4.8.5"
 ```
+
+Do not pin a version prior to 4.8.1 as that's where `mod publish --sync-csv` and `--shard` were first introduced. Also, keep in mind that both of those commands are **incubating** - so they may change over time.
 
 ## Air-gapped installations
 
