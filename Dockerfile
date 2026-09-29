@@ -51,10 +51,15 @@ RUN apt-get update && apt-get install -y \
 COPY --from=uv /uv /usr/local/bin/uv
 
 # .NET
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates libc6 libgcc-s1 libicu74 libssl3t64 libstdc++6 tzdata tzdata-legacy zlib1g
 COPY --from=dotnet8 /usr/share/dotnet /usr/share/dotnet
 COPY --from=dotnet9 /usr/share/dotnet /usr/share/dotnet
 COPY --from=dotnet10 /usr/share/dotnet /usr/share/dotnet
-ENV DOTNET_ROOT=/usr/share/dotnet PATH=/usr/share/dotnet:$PATH
+ENV DOTNET_ROOT=/usr/share/dotnet PATH=/usr/share/dotnet:$PATH \
+    DOTNET_RUNNING_IN_CONTAINER=true DOTNET_NOLOGO=true DOTNET_CLI_TELEMETRY_OPTOUT=true \
+    DOTNET_GENERATE_ASPNET_CERTIFICATE=false DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE=true \
+    NUGET_XMLDOC_MODE=skip
 
 # Go
 COPY --from=go /usr/local/go /usr/local/go
