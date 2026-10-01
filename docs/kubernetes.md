@@ -1,9 +1,9 @@
 # Running on Kubernetes
 
-[`k8s/job.yaml`](../k8s/job.yaml) runs one ingest as an [indexed Job](https://kubernetes.io/docs/concepts/workloads/controllers/job/#completion-mode). Kubernetes creates a pod for each index from 0 to `SHARDS - 1` and sets `JOB_COMPLETION_INDEX` in each one. Every pod runs:
+[`k8s/job.yaml`](../k8s/job.yaml) runs one ingest as an [indexed Job](https://kubernetes.io/docs/concepts/workloads/controllers/job/#completion-mode). Kubernetes creates a pod for each index from 0 to `SHARDS - 1` and sets `JOB_COMPLETION_INDEX` in each one. Shards count from 1, so every pod adds one to its index and runs:
 
 ```
-mod publish /var/moderne/ws --sync-csv --shard $(JOB_COMPLETION_INDEX)/SHARDS
+mod publish /var/moderne/ws --sync-csv --shard $((JOB_COMPLETION_INDEX + 1))/SHARDS
 ```
 
 `CONCURRENCY` caps how many of those pods run at the same time. When one finishes, Kubernetes starts the next index, until every shard has run. 
@@ -62,7 +62,7 @@ RUN_NAME=ingest-$(date -u +%Y%m%d-%H%M) IMAGE=registry.example.com/mass-ingest \
   < k8s/job.yaml | kubectl create -f -
 ```
 
-The quoted `'$RUN_NAME $IMAGE $SHARDS $CONCURRENCY'` argument tells `envsubst` to replace only those four placeholders and nothing else. Kubernetes fills in `$(JOB_COMPLETION_INDEX)` itself when each pod starts. If you only want to ingest a single organization from `repos.csv`, add `"--organization", "<name>"` to the container's `args` before creating the Job.
+The quoted `'$RUN_NAME $IMAGE $SHARDS $CONCURRENCY'` argument tells `envsubst` to replace only those four placeholders and nothing else. The pod's shell works out `$((JOB_COMPLETION_INDEX + 1))` when it starts, from the index Kubernetes gives it. If you only want to ingest a single organization from `repos.csv`, add `--organization "<name>"` to the command in the container's `args` before creating the Job.
 
 To keep your LSTs current, create a Job like this every night from CI or a CronJob.
 

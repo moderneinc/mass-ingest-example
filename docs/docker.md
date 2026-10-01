@@ -25,7 +25,7 @@ The script mounts `~/.git-credentials` read-only into every container so it can 
 SHARDS=16 IMAGE=registry.example.com/mass-ingest ./docker/run.sh
 ```
 
-Each container runs `mod publish /var/moderne/ws --sync-csv --shard i/16` for its own `i`. When the last one finishes, the script prints a line like `shard 3 exited 0` for each. A shard exits 0 even if some of its repositories failed to build, because those failures are recorded in `repos-lock.csv`. A non-zero exit code means the shard stopped before it recorded everything it did. If you run the script again, it will skip what the first run recorded (following the [rule in the README](../README.md#skipping-unchanged-repositories)) before continuing on with the rest.
+Each container runs `mod publish /var/moderne/ws --sync-csv --shard i/16` for its own `i`, from 1 to 16. When the last one finishes, the script prints a line like `shard 3 exited 0` for each. A shard exits 0 even if some of its repositories failed to build, because those failures are recorded in `repos-lock.csv`. A non-zero exit code means the shard stopped before it recorded everything it did. If you run the script again, it will skip what the first run recorded (following the [rule in the README](../README.md#skipping-unchanged-repositories)) before continuing on with the rest.
 
 To stop a run early, stop its containers. Each one gets two minutes to write the lock before Docker kills it.
 
