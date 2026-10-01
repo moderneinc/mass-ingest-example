@@ -23,7 +23,7 @@ docker build -t registry.example.com/mass-ingest .
 docker push registry.example.com/mass-ingest
 ```
 
-The image contains the toolchains your builds might need: every LTS JDK from 8 to 25, plus Node.js, Python, .NET and Go. It also installs the newest [Moderne CLI](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro) each time it starts. Because a build is only reused when the same CLI version made it, every CLI release rebuilds every repository once. Set `MODERNE_WRAPPER_VERSION` to pin a release (don't set it below 4.8.1, though, as that's when `--sync-csv` was added). [Customizing the image](docs/image.md) includes more information about pinning the CLI version. It also covers internal mirrors, air-gapped installations and certificates.
+The image contains the toolchains your builds might need: every LTS JDK from 8 to 25, plus Node.js, Python, .NET and Go. It also installs the newest [Moderne CLI](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro) each time it starts. Because a build is only reused when the same CLI version made it, every CLI release rebuilds every repository once. Set `MODERNE_WRAPPER_VERSION` to pin a release (don't set it below 4.9.0, though, as that's when shards started counting from 1, which the script and manifest here rely on). [Customizing the image](docs/image.md) includes more information about pinning the CLI version. It also covers internal mirrors, air-gapped installations and certificates.
 
 ## 3. Configure and run it
 
@@ -59,7 +59,7 @@ Otherwise, the repository is rebuilt. Bazel repositories are always rebuilt, as 
 
 ## Running every day
 
-A large list finishes sooner if you split it into shards. Each container then runs `mod publish /var/moderne/ws --sync-csv --shard i/M` for its own `i`. Any scheduler that runs containers can do this, and this repository shows two ways. [Running on one machine](docs/docker.md) uses a short shell script on a single large VM. [Running on Kubernetes](docs/kubernetes.md) uses a Kubernetes Job. Both pages cover sizing and what happens when a build fails.
+A large list finishes sooner if you split it into shards. Each container then runs `mod publish /var/moderne/ws --sync-csv --shard i/M` for its own `i`, from 1 to `M`. Any scheduler that runs containers can do this, and this repository shows two ways. [Running on one machine](docs/docker.md) uses a short shell script on a single large VM. [Running on Kubernetes](docs/kubernetes.md) uses a Kubernetes Job. Both pages cover sizing and what happens when a build fails.
 
 ## Support
 

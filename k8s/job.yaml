@@ -41,7 +41,9 @@ spec:
       containers:
         - name: mass-ingest
           image: ${IMAGE}
-          args: ["mod", "publish", "/var/moderne/ws", "--sync-csv", "--shard", "$(JOB_COMPLETION_INDEX)/${SHARDS}"]
+          # Shards count from 1 and the Job's index from 0, so the shell adds one.
+          command: ["sh", "-c"]
+          args: ['exec mod publish /var/moderne/ws --sync-csv --shard "$((JOB_COMPLETION_INDEX + 1))/${SHARDS}"']
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
