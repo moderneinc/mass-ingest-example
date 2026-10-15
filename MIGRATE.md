@@ -163,7 +163,9 @@ Each container now runs `mod publish /var/moderne/ws --sync-csv`, works through 
 
 1. Pick where it runs: a [Kubernetes Job](docs/kubernetes.md), or [one machine with Docker](docs/docker.md). With Docker, every variable from steps 4 to 7 goes in the env file. In Kubernetes, the Job only reads the `mass-ingest-store` and `mass-ingest-moderne` secrets: the step 4 variables go in the first, the step 5 ones in the second, and `GIT_SSH_COMMAND` and the step 7 settings in either, unless you add your own secret to the Job's `envFrom`.
 
-2. Size each container. It builds one repository at a time, so it needs less disk than a batch did: plan for your largest repository. Give it a memory limit equal to its request (12 GiB in the example). The CLI keeps each build below that limit, so a build that runs out of memory fails that one repository rather than the container.
+2. Choose how many containers run at once and how many shards the list is split into; [Running on Kubernetes](docs/kubernetes.md#sizing) explains both. If you used AWS or GCP Batch, start with as many containers as it ran in parallel, but don't copy its number of slices: a few shards per container is enough.
+
+3. Size each container. It builds one repository at a time, so it needs less disk than a batch did: plan for your largest repository. Give it a memory limit equal to its request (12 GiB in the example). The CLI keeps each build below that limit, so a build that runs out of memory fails that one repository rather than the container.
 
 Some old script options have no counterpart: `BATCH_SIZE` (the CLI keeps one repository on disk at a time), `DIAGNOSE=true` and `DIAGNOSE_ON_START=true` (replaced by `mod doctor` in the next step), and uploading build and sync logs to the store (read the container logs instead; `repos-lock.csv` records each repository's result).
 
