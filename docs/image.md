@@ -8,7 +8,7 @@ The image holds the `modw` wrapper rather than the CLI. Each container asks for 
 
 ```yaml
 - name: MODERNE_WRAPPER_VERSION
-  value: "4.9.0"
+  value: "4.9.1"
 ```
 
 Do not pin a version prior to 4.9.0. `mod publish --sync-csv` and `--shard` were first introduced in 4.8.1, but shards counted from 0 until 4.9.0, and the script and manifest here count from 1. Also, keep in mind that both of those commands are **incubating** - so they may change over time.
