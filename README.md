@@ -9,8 +9,8 @@ This repository packages mass ingest as a container image. You can find instruct
 Before you can set up mass ingest, you'll need:
 
 * A Linux VM with Docker (or a Kubernetes namespace) that can reach your SCM, artifact repository, and container registry. For information on how to size it, check out [running on one machine](docs/docker.md#sizing) and [running on Kubernetes](docs/kubernetes.md#sizing).
-* An artifact repository to publish the LSTs to.
-* A service account for that artifact repository. It needs read, deploy, and overwrite permissions.
+* Somewhere to publish the LSTs to. This could be an artifact repository, an S3 bucket, or an S3 compatible store.
+* A service account that can publish there. If you're using an artifact repository, it needs read, deploy, and overwrite permissions. If you're using S3, it needs read, write, and list permissions.
 * An SCM service account with read access to every repository you plan to ingest.
 * The configuration your developers use to reach your internal package registries, along with any internal CA certificates.
 
