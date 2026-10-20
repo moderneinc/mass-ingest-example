@@ -2,7 +2,17 @@
 
 Mass ingest is the pipeline that builds a [Lossless Semantic Tree (LST)](https://docs.moderne.io/user-documentation/recipes/authoring-recipes/concepts/lossless-semantic-trees) for every repository you give it and publishes each one to an artifact repository you control, where Moderne reads them. It usually runs once a day. Building LSTs on a schedule rather than in CI keeps every repository current. That includes the ones that rarely build, and the ones whose code hasn't changed but whose dependencies have. [Mass ingest vs CI builds](https://docs.moderne.io/administrator-documentation/moderne-platform/references/mass-ingest-vs-ci) explains why we recommend this.
 
-This repository packages mass ingest as a container image, and running it takes three steps.
+This repository packages mass ingest as a container image. You can find instructions for how to set this up below.
+
+## What you'll need
+
+Before you can set up mass ingest, you'll need:
+
+* A Linux VM with Docker (or a Kubernetes namespace) that can reach your SCM, artifact repository, and container registry. For information on how to size it, check out [running on one machine](docs/docker.md#sizing) and [running on Kubernetes](docs/kubernetes.md#sizing).
+* An artifact repository to publish the LSTs to.
+* A service account for that artifact repository. It needs read, deploy, and overwrite permissions.
+* An SCM service account with read access to every repository you plan to ingest.
+* The configuration your developers use to reach your internal package registries, along with any internal CA certificates.
 
 ## 1. List your repositories
 
