@@ -85,7 +85,7 @@ kubectl exec -n mass-ingest -it <pod> -- bash
 
 The pod logs are where you'll find out why a build failed. They disappear with the pod, so make sure to read them while the run is going.
 
-If you want to know what a past run did, look at the `repos-lock.csv` file instead. The CLI writes it next to your `repos.csv` in the artifact store and updates it as each repository finishes. Every repository gets a row that records where its LST was published, the commit it was built from, the CLI version, and whether the build was reproducible. A failed build shows up as a row with no publish location. If you're a SaaS customer, you can also see your tenant's record of every clone, build, and publish.
+If you want to know what a past run did, look at the `repos-lock.csv` file instead. The CLI writes it next to your `repos.csv` in the artifact store and updates it as each repository finishes. Every repository gets a row that records where its LST was published, the commit it was built from, the CLI version, and whether the build was reproducible. A failed build leaves its row as it was, so a repository that has never built has no publish location. If you're a SaaS customer, you can also see your tenant's record of every clone, build, and publish.
 
 If a build hangs, a shell in the running pod is the quickest way in. `mod doctor /var/moderne/ws --sync-csv` works there too.
 
