@@ -59,6 +59,9 @@ spec:
               mountPath: /home/moderne/.git-credentials
               subPath: credentials
               readOnly: true
+            - name: gcs-key
+              mountPath: /var/run/secrets/gcs
+              readOnly: true
           # Fits a 4 vCPU 16 GiB node. The memory limit is what the CLI caps each build below.
           resources:
             requests:
@@ -73,3 +76,7 @@ spec:
             secretName: mass-ingest-git
             optional: true
             defaultMode: 0444
+        - name: gcs-key
+          secret:
+            secretName: mass-ingest-gcs
+            optional: true

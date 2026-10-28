@@ -41,7 +41,13 @@ aws ec2 modify-instance-metadata-options --instance-id <instance-id> --http-put-
 MOD_LSTS_ARTIFACTS_GCS_URL=gs://your-bucket
 ```
 
-The CLI uses Application Default Credentials. On GKE, grant the `mass-ingest` service account access through [Workload Identity Federation](https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity) and no key is needed. Elsewhere, mount a service account key and set `MOD_LSTS_ARTIFACTS_GCS_CREDENTIALSFILE` to its path.
+The CLI uses Application Default Credentials. On GKE, grant the `mass-ingest` service account access through [Workload Identity Federation](https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity) and no key is needed. Elsewhere, put a service account key in a `mass-ingest-gcs` secret, which the Job mounts at `/var/run/secrets/gcs`, and set `MOD_LSTS_ARTIFACTS_GCS_CREDENTIALSFILE=/var/run/secrets/gcs/key.json`:
+
+```bash
+kubectl -n mass-ingest create secret generic mass-ingest-gcs --from-file=key.json
+```
+
+With Docker outside Google Cloud, add `-v /path/to/key.json:/var/run/secrets/gcs/key.json:ro` to the `docker run` in [`docker/run.sh`](../docker/run.sh).
 
 That identity needs Storage Object User (`roles/storage.objectUser`) on the bucket. Storage Object Creator is not enough, because Cloud Storage only lets an identity replace an object it is allowed to delete.
 
