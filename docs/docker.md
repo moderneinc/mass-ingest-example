@@ -15,7 +15,7 @@ MOD_TENANT_AUTHORIZATION=<token>
 
 If you're on Moderne DX, replace the two tenant lines with `MOD_LICENSE_KEY=<license key>`.
 
-If the VM reaches S3 through an EC2 instance role, you'll need to raise the metadata service's hop limit. Each container sits one network hop further from it than the VM does. Read [publishing to S3](s3.md#credentials) for an explanation of how to configure this.
+If the VM reaches S3 through an EC2 instance role, you'll need to raise the metadata service's hop limit. Each container sits one network hop further from it than the VM does. [Artifact stores](stores.md#s3) explains how to configure this.
 
 The script mounts `~/.git-credentials` read-only into every container so it can clone private repositories. The file has to exist even if all of your repositories are public. If you don't need it, create an empty one with `touch ~/.git-credentials`.
 
