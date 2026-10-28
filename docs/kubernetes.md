@@ -27,7 +27,7 @@ kubectl -n mass-ingest create secret generic mass-ingest-store \
   --from-literal=MOD_LSTS_ARTIFACTS_S3_URL=s3://your-bucket
 ```
 
-[Publishing to S3](s3.md) has more on S3 credentials and regions. If you're publishing to Artifactory, Nexus, or another Maven repository, [Publishing to Artifactory](artifactory.md) lists what goes in the secret instead.
+[Artifact stores](stores.md) lists what goes in the secret for S3, Google Cloud Storage, Azure Blob Storage, Artifactory, Nexus and other Maven repositories.
 
 If you're a SaaS customer, put your tenant and an access token in `mass-ingest-moderne`. If you're a DX customer, put your license key there instead. Nothing in a DX run contacts Moderne.
 
@@ -117,4 +117,4 @@ CLUSTER_NAME=<cluster> NODE_ROLE=<cluster node role name> \
 kubectl apply -f k8s/eks/nodepool.yaml
 ```
 
-Then uncomment the `nodeSelector` in [`k8s/job.yaml`](../k8s/job.yaml) so the Job's pods land on that pool. Rather than putting AWS keys in the store secret, give the `mass-ingest` service account an IAM role through [Pod Identity](s3.md#credentials).
+Then uncomment the `nodeSelector` in [`k8s/job.yaml`](../k8s/job.yaml) so the Job's pods land on that pool. Rather than putting AWS keys in the store secret, give the `mass-ingest` service account an IAM role through [Pod Identity](stores.md#s3).

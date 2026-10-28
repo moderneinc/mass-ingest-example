@@ -31,17 +31,19 @@ Two other parts of the old example have no direct replacement, but don't block t
 
 ## 2. Put the complete repos.csv in your artifact store
 
-The new flow reads the list only from the artifact store, and the store type (S3, Artifactory, or Maven) decides where: `repos.csv` and `repos-lock.csv` sit side by side, at a location that depends on the type. You'll need to configure the same type in [step 4](#4-configure-the-artifact-store), so that the new mass ingest keeps updating the same `repos-lock.csv`.
+The new flow reads the list only from the artifact store, and the store type (S3, Google Cloud Storage, Azure Blob Storage, Artifactory, or Maven) decides where: `repos.csv` and `repos-lock.csv` sit side by side, at a location that depends on the type. You'll need to configure the same type in [step 4](#4-configure-the-artifact-store), so that the new mass ingest keeps updating the same `repos-lock.csv`.
 
 1. Find your current `repos-lock.csv` in the store. Its location tells you the type:
 
    | Store type | Location of `repos.csv` and `repos-lock.csv` |
    |---|---|
    | S3 | `s3://<bucket>/repos.csv` |
+   | Google Cloud Storage | `gs://<bucket>/repos.csv` |
+   | Azure Blob Storage | `https://<account>.blob.core.windows.net/<container>/repos.csv` |
    | Artifactory | `<repository URL>/repos.csv` |
    | Maven (Nexus, GitLab, or Artifactory configured as a plain Maven store) | `<repository URL>/io/moderne/organization/sources/repos/1.0.0/repos-1.0.0.csv`, with the lock under `.../repos-lock/1.0.0/repos-lock-1.0.0.csv` |
 
-   If there is no `repos-lock.csv` yet, pick the type that matches your store: S3 for a bucket, Artifactory for an Artifactory repository, Maven for Nexus or any other Maven repository. Then upload `repos.csv` to the location the table gives for that type.
+   If there is no `repos-lock.csv` yet, pick the type that matches your store: S3, Google Cloud Storage or Azure Blob Storage for a bucket or container, Artifactory for an Artifactory repository, Maven for Nexus or any other Maven repository. Then upload `repos.csv` to the location the table gives for that type.
 
 2. Upload your complete `repos.csv` next to it, if it isn't there already.
 
@@ -86,12 +88,14 @@ The CLI finds the store through environment variables, which replace whatever se
    | Store type | Variables |
    |---|---|
    | S3 | `MOD_LSTS_ARTIFACTS_S3_URL=s3://<bucket>`, plus `MOD_LSTS_ARTIFACTS_S3_REGION`, `MOD_LSTS_ARTIFACTS_S3_ENDPOINTURL` or `MOD_LSTS_ARTIFACTS_S3_PROFILE` when needed |
+   | Google Cloud Storage | `MOD_LSTS_ARTIFACTS_GCS_URL=gs://<bucket>`, plus `MOD_LSTS_ARTIFACTS_GCS_CREDENTIALSFILE`, `MOD_LSTS_ARTIFACTS_GCS_PROJECT` or `MOD_LSTS_ARTIFACTS_GCS_ENDPOINTURL` when needed |
+   | Azure Blob Storage | `MOD_LSTS_ARTIFACTS_AZUREBLOB_URL=https://<account>.blob.core.windows.net/<container>`, plus `MOD_LSTS_ARTIFACTS_AZUREBLOB_SASTOKEN` or `MOD_LSTS_ARTIFACTS_AZUREBLOB_CONNECTIONSTRING` when not using Microsoft Entra ID |
    | Artifactory | `MOD_LSTS_ARTIFACTS_ARTIFACTORY_0_URL`, with `MOD_LSTS_ARTIFACTS_ARTIFACTORY_0_JFROGAPITOKEN`, or `MOD_LSTS_ARTIFACTS_ARTIFACTORY_0_USERNAME` and `MOD_LSTS_ARTIFACTS_ARTIFACTORY_0_PASSWORD` |
    | Maven | `MOD_LSTS_ARTIFACTS_MAVEN_0_URL`, with `MOD_LSTS_ARTIFACTS_MAVEN_0_USERNAME` and `MOD_LSTS_ARTIFACTS_MAVEN_0_PASSWORD` |
 
 2. For Artifactory and Maven, any other credential goes in `_AUTHORIZATION` instead, set to the whole `Authorization` header value, such as `Bearer <access token>`. An Artifactory API key goes in `_JFROGAPITOKEN` for the Artifactory type, or in `_PASSWORD` with its user name for the Maven type.
 
-The credentials need to overwrite files in the store, since every run replaces `repos-lock.csv`. [Publishing to S3](docs/s3.md) and [Publishing to Artifactory](docs/artifactory.md) cover credentials and permissions in more detail.
+The credentials need to overwrite files in the store, since every run replaces `repos-lock.csv`. [Artifact stores](docs/stores.md) covers credentials and permissions in more detail.
 
 ## 5. Connect to your tenant
 
