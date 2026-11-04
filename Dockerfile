@@ -6,7 +6,8 @@ FROM eclipse-temurin:17-noble AS jdk17
 FROM eclipse-temurin:21-noble AS jdk21
 FROM gradle:8.14.4-jdk21-noble AS gradle
 FROM maven:3.9-eclipse-temurin-25-noble AS maven
-FROM node:26-bookworm AS node
+FROM node:22-bookworm AS node22
+FROM node:26-bookworm AS node26
 FROM golang:1.27-bookworm AS go
 FROM ghcr.io/astral-sh/uv:latest AS uv
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS dotnet8
@@ -40,10 +41,13 @@ RUN curl -fsSL -o /tmp/cmdline-tools.zip https://dl.google.com/android/repositor
 RUN curl -fsSL -o /usr/local/bin/bazel https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 && \
     chmod +x /usr/local/bin/bazel
 
-# JavaScript. Node.js 26 links libatomic and no longer bundles corepack, which provides yarn and pnpm.
-COPY --from=node /usr/local /opt/node
-ENV PATH=/opt/node/bin:$PATH
+# JavaScript. The CLI picks a version per repository from those listed in cli/moderne.yml.
+# Node.js 22's yarn symlinks dangle, and 26 links libatomic and no longer bundles corepack.
+COPY --from=node22 /usr/local /opt/node/22
+COPY --from=node26 /usr/local /opt/node/26
+ENV PATH=/opt/node/26/bin:$PATH
 RUN apt-get update && apt-get install -y --no-install-recommends libatomic1 && \
+    rm -f /opt/node/22/bin/yarn /opt/node/22/bin/yarnpkg && /opt/node/22/bin/corepack enable && \
     npm install -g corepack && corepack enable
 
 # Python. Noble's interpreter ships without venv and pip; node-gyp wants `python`.

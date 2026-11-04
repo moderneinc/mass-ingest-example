@@ -1,4 +1,8 @@
 specs: specs.moderne.ai/v1/cli
+node:
+  installations:
+    - /opt/node/22/bin/node
+    - /opt/node/26/bin/node
 maven:
   settings: /home/moderne/.m2/settings.xml
 telemetry:
