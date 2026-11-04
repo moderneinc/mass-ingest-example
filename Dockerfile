@@ -40,10 +40,11 @@ RUN curl -fsSL -o /tmp/cmdline-tools.zip https://dl.google.com/android/repositor
 RUN curl -fsSL -o /usr/local/bin/bazel https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 && \
     chmod +x /usr/local/bin/bazel
 
-# JavaScript. Node.js stopped bundling corepack, which provides yarn and pnpm, in version 25.
+# JavaScript. Node.js 26 links libatomic and no longer bundles corepack, which provides yarn and pnpm.
 COPY --from=node /usr/local /opt/node
 ENV PATH=/opt/node/bin:$PATH
-RUN npm install -g corepack && corepack enable
+RUN apt-get update && apt-get install -y --no-install-recommends libatomic1 && \
+    npm install -g corepack && corepack enable
 
 # Python. Noble's interpreter ships without venv and pip; node-gyp wants `python`.
 RUN apt-get update && apt-get install -y \
