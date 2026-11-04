@@ -47,7 +47,7 @@ COPY --from=node22 /usr/local /opt/node/22
 COPY --from=node26 /usr/local /opt/node/26
 ENV PATH=/opt/node/26/bin:$PATH
 RUN apt-get update && apt-get install -y --no-install-recommends libatomic1 && \
-    rm -f /opt/node/22/bin/yarn /opt/node/22/bin/yarnpkg && /opt/node/22/bin/corepack enable && \
+    rm -f /opt/node/22/bin/yarn /opt/node/22/bin/yarnpkg && /opt/node/22/bin/corepack enable --install-directory /opt/node/22/bin && \
     npm install -g corepack && corepack enable
 
 # Python. Noble's interpreter ships without venv and pip; node-gyp wants `python`.
