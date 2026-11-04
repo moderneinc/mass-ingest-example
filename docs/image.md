@@ -32,7 +32,7 @@ RUN mkdir -p /home/moderne/.moderne/cli/bin && \
 
 Build it with `--build-arg MODERNE_CLI_VERSION=<version>`. The `mod --version` at the end makes the wrapper download that version into the image, and because a container starts with the same version already installed, it never looks for a newer one. If the mirror requires credentials, `modw` reads them from `MODERNE_WRAPPER_DISTRIBUTION_USERNAME` and `MODERNE_WRAPPER_DISTRIBUTION_PASSWORD`, or `MODERNE_WRAPPER_DISTRIBUTION_TOKEN`.
 
-The CLI installs under `$HOME/.moderne/cli`, and this image keeps that in `/home/moderne`, apart from the `/var/moderne` workspace. Don't point `HOME` or `MODERNE_CLI_HOME` into a volume mounted at run time, such as a large disk for `/var/moderne`. The volume hides the CLI installed at build time, so every container downloads it again when it starts, and fails if the mirror is unreachable.
+Keep `HOME` and `MODERNE_CLI_HOME` out of any volume mounted at run time, such as a large disk for `/var/moderne`. The CLI installs under `$HOME/.moderne/cli`, which this image keeps in `/home/moderne`. A volume over it hides the CLI installed at build time, so every container downloads it again when it starts, and fails if the mirror is unreachable.
 
 The CLI is only the first download. The base images come from Docker Hub, Microsoft and GitHub's registry, the Android SDK from Google and Bazelisk from GitHub, so each of those `FROM` and `curl` lines needs to point at your own registry or mirror too. The builds themselves resolve dependencies at run time, which the next section covers.
 
