@@ -6,8 +6,8 @@ FROM eclipse-temurin:17-noble AS jdk17
 FROM eclipse-temurin:21-noble AS jdk21
 FROM gradle:8.14.4-jdk21-noble AS gradle
 FROM maven:3.9-eclipse-temurin-25-noble AS maven
-FROM node:22-bookworm AS node
-FROM golang:1.25-bookworm AS go
+FROM node:26-bookworm AS node
+FROM golang:1.27-bookworm AS go
 FROM ghcr.io/astral-sh/uv:latest AS uv
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS dotnet8
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS dotnet9
@@ -33,17 +33,17 @@ ENV ANDROID_HOME=/opt/android-sdk
 RUN curl -fsSL -o /tmp/cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-12700392_latest.zip && \
     unzip -q /tmp/cmdline-tools.zip -d /tmp && \
     yes | /tmp/cmdline-tools/bin/sdkmanager --sdk_root=$ANDROID_HOME --licenses > /dev/null && \
-    /tmp/cmdline-tools/bin/sdkmanager --sdk_root=$ANDROID_HOME "cmdline-tools;latest" $(seq -f 'platforms;android-%g' 25 35) && \
+    /tmp/cmdline-tools/bin/sdkmanager --sdk_root=$ANDROID_HOME "cmdline-tools;latest" $(seq -f 'platforms;android-%g' 25 36) 'platforms;android-37.0' && \
     rm -rf /tmp/cmdline-tools /tmp/cmdline-tools.zip
 
 # Bazel
 RUN curl -fsSL -o /usr/local/bin/bazel https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 && \
     chmod +x /usr/local/bin/bazel
 
-# JavaScript. The copied yarn symlinks dangle; corepack provides yarn instead.
+# JavaScript. Node.js stopped bundling corepack, which provides yarn and pnpm, in version 25.
 COPY --from=node /usr/local /opt/node
 ENV PATH=/opt/node/bin:$PATH
-RUN rm -f /opt/node/bin/yarn /opt/node/bin/yarnpkg && corepack enable
+RUN npm install -g corepack && corepack enable
 
 # Python. Noble's interpreter ships without venv and pip; node-gyp wants `python`.
 RUN apt-get update && apt-get install -y \
