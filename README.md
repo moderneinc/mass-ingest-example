@@ -8,7 +8,7 @@ This repository packages mass ingest as a container image. You can find instruct
 
 Before you can set up mass ingest, you'll need:
 
-* A Linux VM with Docker (or a Kubernetes namespace) that can reach your SCM, artifact repository, and container registry. For information on how to size it, check out [running on one machine](docs/docker.md#sizing) and [running on Kubernetes](docs/kubernetes.md#sizing).
+* A Linux VM with Docker (or a Kubernetes namespace, or an AWS account for Amazon ECS) that can reach your SCM, artifact repository, and container registry. For information on how to size it, check out [running on one machine](docs/docker.md#sizing), [running on Kubernetes](docs/kubernetes.md#sizing) and [running on Amazon ECS](docs/ecs.md#sizing).
 * Somewhere to publish the LSTs to. This could be an artifact repository, an S3 bucket (or an S3 compatible store), a Google Cloud Storage bucket, or an Azure Blob Storage container.
 * A service account that can read, write, and overwrite files there. [Artifact stores](docs/stores.md) gives the exact permissions for each store.
 * An SCM service account with read access to every repository you plan to ingest.
@@ -69,7 +69,7 @@ Otherwise, the repository is rebuilt. Bazel repositories are always rebuilt, as 
 
 ## Running every day
 
-A large list finishes sooner if you split it into shards. Each container then runs `mod publish /var/moderne/ws --sync-csv --shard i/M` for its own `i`, from 1 to `M`. Any scheduler that runs containers can do this, and this repository shows two ways. [Running on one machine](docs/docker.md) uses a short shell script on a single large VM. [Running on Kubernetes](docs/kubernetes.md) uses a Kubernetes Job. Both pages cover sizing and what happens when a build fails.
+A large list finishes sooner if you split it into shards. Each container then runs `mod publish /var/moderne/ws --sync-csv --shard i/M` for its own `i`, from 1 to `M`. Any scheduler that runs containers can do this, and this repository shows three ways. [Running on one machine](docs/docker.md) uses a short shell script on a single large VM. [Running on Kubernetes](docs/kubernetes.md) uses a Kubernetes Job. [Running on Amazon ECS](docs/ecs.md) uses Fargate tasks started by a Step Functions state machine. Each page covers sizing and what happens when a build fails.
 
 ## Support
 

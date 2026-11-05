@@ -1,0 +1,380 @@
+# Mass ingest on Fargate: a task definition, and a state machine that runs one task per shard.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Mass ingest on Amazon ECS and AWS Fargate
+
+Parameters:
+  Image:
+    Type: String
+    Description: The mass ingest image, in a registry the tasks can pull from
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  Subnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnets with a route to your SCM, artifact store and image registry
+  AssignPublicIp:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [DISABLED, ENABLED]
+    Description: ENABLED for public subnets, which have no NAT gateway to go through
+  StoreBucket:
+    Type: String
+    Description: The S3 bucket that holds repos.csv and receives the LSTs
+  CapacityProvider:
+    Type: String
+    Default: FARGATE_SPOT
+    AllowedValues: [FARGATE_SPOT, FARGATE]
+  TenantHost:
+    Type: String
+    Default: ""
+    Description: SaaS only. Your tenant's URL, such as https://acme.moderne.io
+  TenantTokenSecretArn:
+    Type: String
+    Default: ""
+    Description: SaaS only. Secrets Manager secret holding a Moderne access token
+  LicenseKeySecretArn:
+    Type: String
+    Default: ""
+    Description: DX only. Secrets Manager secret holding your license key
+  GitCredentialsSecretArn:
+    Type: String
+    Default: ""
+    Description: Secrets Manager secret holding the contents of a .git-credentials file
+  Schedule:
+    Type: String
+    Default: cron(0 1 * * ? *)
+    Description: When the scheduled run starts, in UTC
+  ScheduleState:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [DISABLED, ENABLED]
+  Shards:
+    Type: Number
+    Default: 32
+    Description: How many pieces the scheduled run splits repos.csv into
+  Concurrency:
+    Type: Number
+    Default: 8
+    MaxValue: 40
+    Description: How many tasks the scheduled run keeps going at once
+
+Conditions:
+  HasTenantHost: !Not [!Equals [!Ref TenantHost, ""]]
+  HasTenantToken: !Not [!Equals [!Ref TenantTokenSecretArn, ""]]
+  HasLicenseKey: !Not [!Equals [!Ref LicenseKeySecretArn, ""]]
+  HasGitCredentials: !Not [!Equals [!Ref GitCredentialsSecretArn, ""]]
+  HasSecrets: !Or
+    - !Condition HasTenantToken
+    - !Condition HasLicenseKey
+    - !Condition HasGitCredentials
+
+Resources:
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref AWS::StackName
+      CapacityProviders: [FARGATE, FARGATE_SPOT]
+
+  # Only outbound: nothing connects to a task.
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Mass ingest tasks
+      VpcId: !Ref VpcId
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${AWS::StackName}
+      RetentionInDays: 30
+
+  # What ECS itself uses to start a task: pull the image, read the secrets, write the logs.
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - !If
+          - HasSecrets
+          - PolicyName: read-secrets
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource:
+                    - !If [HasTenantToken, !Ref TenantTokenSecretArn, !Ref AWS::NoValue]
+                    - !If [HasLicenseKey, !Ref LicenseKeySecretArn, !Ref AWS::NoValue]
+                    - !If [HasGitCredentials, !Ref GitCredentialsSecretArn, !Ref AWS::NoValue]
+          - !Ref AWS::NoValue
+
+  # What the CLI runs as: publish to the store, and let ECS Exec open a shell.
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: publish-lsts
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject]
+                Resource: !Sub arn:${AWS::Partition}:s3:::${StoreBucket}/*
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub arn:${AWS::Partition}:s3:::${StoreBucket}
+        - PolicyName: ecs-exec
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref AWS::StackName
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      Cpu: "4096"
+      Memory: "12288"
+      # The most Fargate allows. The image shares this disk with the repository being built.
+      EphemeralStorage:
+        SizeInGiB: 200
+      ContainerDefinitions:
+        - Name: mass-ingest
+          Image: !Ref Image
+          Essential: true
+          # The memory limit is what the CLI caps each build below.
+          Memory: 12288
+          # Long enough for the CLI to flush the lock. Fargate allows no more than 120.
+          StopTimeout: 120
+          LinuxParameters:
+            # Reaps the defunct git processes a build leaves behind.
+            InitProcessEnabled: true
+          # ECS can't mount a secret as a file, so this writes .git-credentials from the variable.
+          EntryPoint:
+            - sh
+            - -c
+            - |
+              if [ -n "$GIT_CREDENTIALS" ]; then
+                (umask 077; printf '%s\n' "$GIT_CREDENTIALS" > "$HOME/.git-credentials")
+              fi
+              unset GIT_CREDENTIALS
+              exec "$@"
+            - sh
+          # Replacing the entry point drops the image's CMD, so it is repeated here.
+          Command: [mod, publish, /var/moderne/ws, --sync-csv]
+          Environment:
+            - Name: MOD_LSTS_ARTIFACTS_S3_URL
+              Value: !Sub s3://${StoreBucket}
+            - !If
+              - HasTenantHost
+              - Name: MOD_TENANT_HOST
+                Value: !Ref TenantHost
+              - !Ref AWS::NoValue
+          # ECS fails to start a task over a secret it can't read, so each one is opt-in.
+          Secrets:
+            - !If
+              - HasTenantToken
+              - Name: MOD_TENANT_AUTHORIZATION
+                ValueFrom: !Ref TenantTokenSecretArn
+              - !Ref AWS::NoValue
+            - !If
+              - HasLicenseKey
+              - Name: MOD_LICENSE_KEY
+                ValueFrom: !Ref LicenseKeySecretArn
+              - !Ref AWS::NoValue
+            - !If
+              - HasGitCredentials
+              - Name: GIT_CREDENTIALS
+                ValueFrom: !Ref GitCredentialsSecretArn
+              - !Ref AWS::NoValue
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: mass-ingest
+
+  StateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: states.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: run-tasks
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecs:RunTask
+                Resource: !Ref TaskDefinition
+              - Effect: Allow
+                Action: [ecs:StopTask, ecs:DescribeTasks]
+                Resource: "*"
+              - Effect: Allow
+                Action: [events:PutTargets, events:PutRule, events:DescribeRule]
+                Resource: !Sub arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/StepFunctionsGetEventsForECSTaskRule
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !GetAtt ExecutionRole.Arn
+                  - !GetAtt TaskRole.Arn
+
+  # One run. Start it with {"shards": 32, "concurrency": 8}.
+  StateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Metadata:
+      # cfn-lint doesn't know that JSONata can set MaxConcurrency.
+      cfn-lint:
+        config:
+          ignore_checks: [E3601]
+    Properties:
+      StateMachineName: !Ref AWS::StackName
+      RoleArn: !GetAtt StateMachineRole.Arn
+      Definition:
+        QueryLanguage: JSONata
+        # The bound on a run whose builds hang.
+        TimeoutSeconds: 64800
+        StartAt: Shards
+        States:
+          Shards:
+            Type: Map
+            Items: "{% [1..$states.input.shards] %}"
+            MaxConcurrency: "{% $states.input.concurrency %}"
+            ItemSelector:
+              shard: "{% $states.context.Map.Item.Value %}"
+              shards: "{% $states.input.shards %}"
+            ItemProcessor:
+              ProcessorConfig:
+                Mode: INLINE
+              StartAt: Publish
+              States:
+                Publish:
+                  Type: Task
+                  Resource: arn:aws:states:::ecs:runTask.sync
+                  Arguments:
+                    Cluster: !Ref Cluster
+                    TaskDefinition: !Ref TaskDefinition
+                    CapacityProviderStrategy:
+                      - CapacityProvider: !Ref CapacityProvider
+                        Weight: 1
+                    EnableExecuteCommand: true
+                    NetworkConfiguration:
+                      AwsvpcConfiguration:
+                        Subnets: !Ref Subnets
+                        SecurityGroups: [!Ref SecurityGroup]
+                        AssignPublicIp: !Ref AssignPublicIp
+                    Overrides:
+                      ContainerOverrides:
+                        - Name: mass-ingest
+                          Command:
+                            - mod
+                            - publish
+                            - /var/moderne/ws
+                            - --sync-csv
+                            - --shard
+                            - "{% $states.input.shard & '/' & $states.input.shards %}"
+                  Output:
+                    shard: "{% $states.input.shard %}"
+                    failed: false
+                  Retry:
+                    # ECS couldn't start the task, as when Spot capacity is short. Nothing ran yet.
+                    - ErrorEquals: [AmazonECS.Unknown, ECS.AmazonECSException]
+                      IntervalSeconds: 300
+                      MaxAttempts: 6
+                      BackoffRate: 1
+                    # The task stopped: a reclaimed Spot task, or a shard that exited non-zero.
+                    - ErrorEquals: [States.ALL]
+                      IntervalSeconds: 60
+                      MaxAttempts: 3
+                      BackoffRate: 2
+                  # An uncaught failure would stop every other shard. Their work is already in the lock.
+                  Catch:
+                    - ErrorEquals: [States.ALL]
+                      Next: ShardFailed
+                      Output:
+                        shard: "{% $states.input.shard %}"
+                        failed: true
+                  End: true
+                ShardFailed:
+                  Type: Pass
+                  End: true
+            Output:
+              failedShards: "{% [$states.result[failed].shard] %}"
+            Next: AnyFailed
+          AnyFailed:
+            Type: Choice
+            Choices:
+              - Condition: "{% $count($states.input.failedShards) > 0 %}"
+                Next: RunFailed
+            Default: RunSucceeded
+          RunFailed:
+            Type: Fail
+            Error: ShardsFailed
+            Cause: "{% 'These shards ran out of retries: ' & $string($states.input.failedShards) %}"
+          RunSucceeded:
+            Type: Succeed
+
+  ScheduleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: scheduler.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: start-run
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: states:StartExecution
+                Resource: !Ref StateMachine
+
+  NightlyRun:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      ScheduleExpression: !Ref Schedule
+      State: !Ref ScheduleState
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      Target:
+        Arn: !Ref StateMachine
+        RoleArn: !GetAtt ScheduleRole.Arn
+        Input: !Sub '{"shards": ${Shards}, "concurrency": ${Concurrency}}'
+
+Outputs:
+  StateMachineArn:
+    Value: !Ref StateMachine
+  SecurityGroup:
+    Value: !Ref SecurityGroup
