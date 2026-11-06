@@ -31,13 +31,8 @@ Parameters:
     Type: String
     Default: ""
     Description: SaaS only. Secrets Manager secret holding a Moderne access token
-  LicenseKeySecretArn:
-    Type: String
-    Default: ""
-    Description: DX only. Secrets Manager secret holding your license key
   GitCredentialsSecretArn:
     Type: String
-    Default: ""
     Description: Secrets Manager secret holding the contents of a .git-credentials file
   Schedule:
     Type: String
@@ -60,12 +55,6 @@ Parameters:
 Conditions:
   HasTenantHost: !Not [!Equals [!Ref TenantHost, ""]]
   HasTenantToken: !Not [!Equals [!Ref TenantTokenSecretArn, ""]]
-  HasLicenseKey: !Not [!Equals [!Ref LicenseKeySecretArn, ""]]
-  HasGitCredentials: !Not [!Equals [!Ref GitCredentialsSecretArn, ""]]
-  HasSecrets: !Or
-    - !Condition HasTenantToken
-    - !Condition HasLicenseKey
-    - !Condition HasGitCredentials
 
 Resources:
   Cluster:
@@ -100,19 +89,15 @@ Resources:
       ManagedPolicyArns:
         - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
       Policies:
-        - !If
-          - HasSecrets
-          - PolicyName: read-secrets
-            PolicyDocument:
-              Version: "2012-10-17"
-              Statement:
-                - Effect: Allow
-                  Action: secretsmanager:GetSecretValue
-                  Resource:
-                    - !If [HasTenantToken, !Ref TenantTokenSecretArn, !Ref AWS::NoValue]
-                    - !If [HasLicenseKey, !Ref LicenseKeySecretArn, !Ref AWS::NoValue]
-                    - !If [HasGitCredentials, !Ref GitCredentialsSecretArn, !Ref AWS::NoValue]
-          - !Ref AWS::NoValue
+        - PolicyName: read-secrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref GitCredentialsSecretArn
+                  - !If [HasTenantToken, !Ref TenantTokenSecretArn, !Ref AWS::NoValue]
 
   # What the CLI runs as: publish to the store, and let ECS Exec open a shell.
   TaskRole:
@@ -195,22 +180,14 @@ Resources:
               - Name: MOD_TENANT_HOST
                 Value: !Ref TenantHost
               - !Ref AWS::NoValue
-          # ECS fails to start a task over a secret it can't read, so each one is opt-in.
+          # ECS fails to start a task over a secret it can't read, so the SaaS one is opt-in.
           Secrets:
+            - Name: GIT_CREDENTIALS
+              ValueFrom: !Ref GitCredentialsSecretArn
             - !If
               - HasTenantToken
               - Name: MOD_TENANT_AUTHORIZATION
                 ValueFrom: !Ref TenantTokenSecretArn
-              - !Ref AWS::NoValue
-            - !If
-              - HasLicenseKey
-              - Name: MOD_LICENSE_KEY
-                ValueFrom: !Ref LicenseKeySecretArn
-              - !Ref AWS::NoValue
-            - !If
-              - HasGitCredentials
-              - Name: GIT_CREDENTIALS
-                ValueFrom: !Ref GitCredentialsSecretArn
               - !Ref AWS::NoValue
           LogConfiguration:
             LogDriver: awslogs

@@ -12,24 +12,20 @@ mod publish /var/moderne/ws --sync-csv --shard i/shards
 
 Push the image to a registry the tasks can pull from, such as Amazon ECR, and put `repos.csv` at the root of your S3 bucket.
 
-The template reads your secrets from Secrets Manager. If you're a SaaS customer, store an access token. If you're a DX customer, store your license key instead. Nothing in a DX run contacts Moderne.
-
-```bash
-# Moderne SaaS
-aws secretsmanager create-secret --name mass-ingest/moderne-token --secret-string <token>
-
-# Moderne DX
-aws secretsmanager create-secret --name mass-ingest/license-key --secret-string <license key>
-```
-
-If any of your repositories are private, store your `.git-credentials` file too. ECS can't mount a secret as a file, so the task writes it to `/home/moderne/.git-credentials` when it starts:
+The template reads your secrets from Secrets Manager. Start with your `.git-credentials` file, which has one `https://<user>:<token>@<host>` line for each host your repositories are on. ECS can't mount a secret as a file, so the task writes it to `/home/moderne/.git-credentials` when it starts:
 
 ```bash
 aws secretsmanager create-secret --name mass-ingest/git-credentials \
   --secret-string file://.git-credentials
 ```
 
-Each of these commands prints the secret's ARN, which is what you pass to the template. They're all optional. If you're just trying mass ingest out on public repositories, you can leave them out.
+If you're a SaaS customer, store an access token too. If you're a DX customer, skip it, since nothing in a DX run contacts Moderne.
+
+```bash
+aws secretsmanager create-secret --name mass-ingest/moderne-token --secret-string <token>
+```
+
+Each of these commands prints the secret's ARN, which is what you pass to the template.
 
 ```bash
 aws cloudformation deploy --stack-name mass-ingest --template-file ecs/mass-ingest.yaml \
@@ -44,7 +40,7 @@ aws cloudformation deploy --stack-name mass-ingest --template-file ecs/mass-inge
 
 If the account has never used ECS, the first deploy can fail with `Unable to assume the service linked role`, because ECS is still creating that role. Delete the rolled-back stack with `aws cloudformation delete-stack --stack-name mass-ingest` and deploy again.
 
-A DX customer replaces the two tenant parameters with `LicenseKeySecretArn=<arn>`. The subnets need a route to your SCM, your artifact store and the image registry, plus wherever the image downloads the Moderne CLI from when it starts. For a public subnet, which has no NAT gateway to go through, add `AssignPublicIp=ENABLED`.
+A DX customer leaves out the two tenant parameters. The subnets need a route to your SCM, your artifact store and the image registry, plus wherever the image downloads the Moderne CLI from when it starts. For a public subnet, which has no NAT gateway to go through, add `AssignPublicIp=ENABLED`.
 
 To change a setting later, such as pinning the CLI with `MODERNE_WRAPPER_VERSION`, add it to the container's `Environment` in the template and deploy again.
 
@@ -71,13 +67,25 @@ aws stepfunctions start-execution --state-machine-arn <arn> \
   --input '{"shards": 32, "concurrency": 8}'
 ```
 
-If you only want to ingest a single organization from `repos.csv`, add `--organization` and its name to the `Command` in the state machine and deploy again.
+If you only want to ingest a single organization from `repos.csv`, add `--organization` and its name to the `Command` in the state machine and deploy again. For the `Payments` organization in the [README's example](../README.md#1-list-your-repositories), the `Command` becomes:
+
+```yaml
+Command:
+  - mod
+  - publish
+  - /var/moderne/ws
+  - --sync-csv
+  - --organization
+  - Payments
+  - --shard
+  - "{% $states.input.shard & '/' & $states.input.shards %}"
+```
 
 To keep your LSTs current, turn on the stack's EventBridge schedule with `ScheduleState=ENABLED`. By default it starts a run at 01:00 UTC every day, using the `Shards` and `Concurrency` parameters. `Schedule` changes the time.
 
 ## When things fail
 
-Most failures in a mass ingest are individual repositories that don't build. These don't fail the run. The CLI records the failure in that repository's row of `repos-lock.csv` and moves on. Once it has worked through its shard, it exits successfully.
+Most failures in a mass ingest are individual repositories that don't build. These don't fail the run. The CLI leaves that repository's row of `repos-lock.csv` as it was and moves on, so a repository that has never built has an empty row. Once it has worked through its shard, it exits successfully.
 
 When a task itself fails, the state machine retries its shard up to three more times, for four attempts in total. The retry skips what the earlier attempt already recorded (following the [rule in the README](../README.md#skipping-unchanged-repositories)), so it mostly repeats the build that was in progress. A task reclaimed by Fargate Spot uses up one of those attempts, because the state machine can't tell it apart from any other failure. A stopping task gets two minutes after `SIGTERM` for the CLI to write the lock.
 
@@ -96,7 +104,9 @@ aws logs tail /ecs/mass-ingest --follow
 aws ecs execute-command --cluster mass-ingest --task <task> --container mass-ingest --interactive --command bash
 ```
 
-The task logs are where you'll find out why a build failed. They stay in CloudWatch Logs for 30 days, in a stream named after each task. The `execute-command` line opens a shell in a running task, which is the quickest way in if a build hangs. It needs the [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) on your machine, and the shell runs as root.
+The task logs show each repository's progress and the first error of a build that failed. They stay in CloudWatch Logs for 30 days, in a stream named after each task. The full record of why a build failed is in the `trace.csv` files the CLI writes for every command. If you're a SaaS customer, each task sends its traces to your tenant before it stops, where Moderne can read them. If you're a DX customer, the traces stay on the task's disk and are gone with the task, so read them during the run under `/var/moderne/ws/.moderne/build/`.
+
+The `execute-command` line opens a shell in a running task, which is how you get to those traces, and the quickest way in if a build hangs. It needs the [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) on your machine, and the shell runs as root.
 
 If you want to know what a past run did, look at the `repos-lock.csv` file instead. [Running on Kubernetes](kubernetes.md#watching-a-run) explains what it records.
 

@@ -29,17 +29,12 @@ kubectl -n mass-ingest create secret generic mass-ingest-store \
 
 [Artifact stores](stores.md) lists what goes in the secret for S3, Google Cloud Storage, Azure Blob Storage, Artifactory, Nexus and other Maven repositories.
 
-If you're a SaaS customer, put your tenant and an access token in `mass-ingest-moderne`. If you're a DX customer, put your license key there instead. Nothing in a DX run contacts Moderne.
+If you're a SaaS customer, put your tenant and an access token in `mass-ingest-moderne`. If you're a DX customer, skip this secret, since nothing in a DX run contacts Moderne.
 
 ```bash
-# Moderne SaaS
 kubectl -n mass-ingest create secret generic mass-ingest-moderne \
   --from-literal=MOD_TENANT_HOST=https://<tenant>.moderne.io \
   --from-literal=MOD_TENANT_AUTHORIZATION=<token>
-
-# Moderne DX
-kubectl -n mass-ingest create secret generic mass-ingest-moderne \
-  --from-literal=MOD_LICENSE_KEY=<license key>
 ```
 
 If any of your repositories are private, you'll need one more secret that holds your `.git-credentials` file. The Job mounts it read-only at `/home/moderne/.git-credentials`:
@@ -68,7 +63,7 @@ To keep your LSTs current, create a Job like this every night from CI or a CronJ
 
 ## When things fail
 
-Most failures in a mass ingest are individual repositories that don't build. These don't fail the Job. The CLI records the failure in that repository's row of `repos-lock.csv` and moves on. Once it has worked through its shard, it exits successfully.
+Most failures in a mass ingest are individual repositories that don't build. These don't fail the Job. The CLI leaves that repository's row of `repos-lock.csv` as it was and moves on, so a repository that has never built has an empty row. Once it has worked through its shard, it exits successfully.
 
 When a pod itself fails, Kubernetes retries its index up to two more times, for three attempts in total. The retry skips what the earlier attempt already recorded (following the [rule in the README](../README.md#skipping-unchanged-repositories)), so it mostly repeats the build that was in progress. A pod lost to a reclaimed spot instance or a drained node doesn't count against those retries. A stopping pod gets two minutes after `SIGTERM` for the CLI to write the lock.
 
@@ -83,7 +78,7 @@ kubectl get job -n mass-ingest <run> -o jsonpath='{.status.completedIndexes} / {
 kubectl exec -n mass-ingest -it <pod> -- bash
 ```
 
-The pod logs are where you'll find out why a build failed. They disappear with the pod, so make sure to read them while the run is going.
+The pod logs show each repository's progress and the first error of a build that failed. The full record of why a build failed is in the `trace.csv` files the CLI writes for every command. If you're a SaaS customer, each pod sends its traces to your tenant before it stops, where Moderne can read them. If you're a DX customer, the traces stay on the pod's disk and are gone with the pod, so read them during the run with `kubectl exec`, under `/var/moderne/ws/.moderne/build/`.
 
 If you want to know what a past run did, look at the `repos-lock.csv` file instead. The CLI writes it next to your `repos.csv` in the artifact store, updating it every few minutes while a shard runs and again when the shard finishes. Every repository gets a row that records where its LST was published, the commit it was built from, the CLI version, and whether the build was reproducible. A failed build leaves its row as it was, so a repository that has never built has no publish location. If you're a SaaS customer, you can also see your tenant's record of every clone, build, and publish.
 

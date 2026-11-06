@@ -40,7 +40,7 @@ The image contains the toolchains your builds might need: every LTS JDK from 8 t
 Before you start a container, it needs to know:
 
 - **Where to publish the LSTs.** This involves setting up environment variables. For details, see [Artifact stores](docs/stores.md).
-- **How to reach Moderne.** If you're a SaaS customer, set `MOD_TENANT_HOST` to your tenant's URL (such as `https://acme.moderne.io`) and `MOD_TENANT_AUTHORIZATION` to a [personal access token](https://docs.moderne.io/user-documentation/moderne-platform/how-to-guides/create-api-access-tokens). If you're a Moderne DX customer, set `MOD_LICENSE_KEY` to your [license key](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/moderne-cli-license) instead. (An air-gapped installation will also need to [install the CLI into the image](docs/image.md#air-gapped-installations).)
+- **How to reach Moderne.** If you're a SaaS customer, set `MOD_TENANT_HOST` to your tenant's URL (such as `https://acme.moderne.io`) and `MOD_TENANT_AUTHORIZATION` to a [personal access token](https://docs.moderne.io/user-documentation/moderne-platform/how-to-guides/create-api-access-tokens), so the CLI can send your tenant a record of every clone, build and publish. If you're a Moderne DX customer, there's nothing to set, since nothing in a DX run contacts Moderne. (An air-gapped installation will still need to [install the CLI into the image](docs/image.md#air-gapped-installations).)
 - **(Optional) How to clone private repositories.** If any of your repositories are private, mount a `.git-credentials` file at `/home/moderne/.git-credentials`.
 
 Start with `mod doctor`, which checks that everything is in place without changing anything and suggests a fix for anything that isn't:

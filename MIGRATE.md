@@ -99,13 +99,13 @@ The credentials need to overwrite files in the store, since every run replaces `
 
 ## 5. Connect to your tenant
 
-The CLI obtains the license it needs to build private repositories from your tenant. The connection used to be set up with `mod config moderne edit` or the `MODERNE_TENANT` and `MODERNE_TOKEN` variables the script read.
+On Moderne SaaS, the CLI sends your tenant a record of every clone, build and publish. The connection used to be set up with `mod config moderne edit` or the `MODERNE_TENANT` and `MODERNE_TOKEN` variables the script read.
 
 1. Set the tenant variables:
    - `MOD_TENANT_HOST=https://<tenant>.moderne.io`
    - `MOD_TENANT_AUTHORIZATION=<token>`
 
-   On Moderne DX, set `MOD_LICENSE_KEY` instead, which replaces `mod config license edit`.
+   On Moderne DX, skip this step. Building and publishing LSTs doesn't need a license key, so `mod config license edit` has no replacement.
 
 ## 6. Give it access to your Git repositories
 
