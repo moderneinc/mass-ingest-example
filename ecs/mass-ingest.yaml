@@ -256,7 +256,7 @@ Resources:
               States:
                 Publish:
                   Type: Task
-                  Resource: arn:aws:states:::ecs:runTask.sync
+                  Resource: !Sub arn:${AWS::Partition}:states:::ecs:runTask.sync
                   Arguments:
                     Cluster: !Ref Cluster
                     TaskDefinition: !Ref TaskDefinition
