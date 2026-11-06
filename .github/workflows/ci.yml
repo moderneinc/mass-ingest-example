@@ -26,6 +26,8 @@ jobs:
           ./kubeconform -strict -summary -ignore-missing-schemas
     - name: shellcheck
       run: shellcheck docker/run.sh
+    - name: Validate the ECS template
+      run: pipx run cfn-lint ecs/mass-ingest.yaml
 
   image:
     runs-on: ubuntu-latest

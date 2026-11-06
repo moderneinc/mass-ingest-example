@@ -8,7 +8,7 @@ This repository packages mass ingest as a container image. You can find instruct
 
 Before you can set up mass ingest, you'll need:
 
-* A Linux VM with Docker (or a Kubernetes namespace) that can reach your SCM, artifact repository, and container registry. For information on how to size it, check out [running on one machine](docs/docker.md#sizing) and [running on Kubernetes](docs/kubernetes.md#sizing).
+* A Linux VM with Docker (or a Kubernetes namespace, or an AWS account for Amazon ECS) that can reach your SCM, artifact repository, and container registry. For information on how to size it, check out [running on one machine](docs/docker.md#sizing), [running on Kubernetes](docs/kubernetes.md#sizing) and [running on Amazon ECS](docs/ecs.md#sizing).
 * Somewhere to publish the LSTs to. This could be an artifact repository, an S3 bucket (or an S3 compatible store), a Google Cloud Storage bucket, or an Azure Blob Storage container.
 * A service account that can read, write, and overwrite files there. [Artifact stores](docs/stores.md) gives the exact permissions for each store.
 * An SCM service account with read access to every repository you plan to ingest.
@@ -40,7 +40,7 @@ The image contains the toolchains your builds might need: every LTS JDK from 8 t
 Before you start a container, it needs to know:
 
 - **Where to publish the LSTs.** This involves setting up environment variables. For details, see [Artifact stores](docs/stores.md).
-- **How to reach Moderne.** If you're a SaaS customer, set `MOD_TENANT_HOST` to your tenant's URL (such as `https://acme.moderne.io`) and `MOD_TENANT_AUTHORIZATION` to a [personal access token](https://docs.moderne.io/user-documentation/moderne-platform/how-to-guides/create-api-access-tokens). If you're a Moderne DX customer, set `MOD_LICENSE_KEY` to your [license key](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/moderne-cli-license) instead. (An air-gapped installation will also need to [install the CLI into the image](docs/image.md#air-gapped-installations).)
+- **How to reach Moderne.** If you're a SaaS customer, set `MOD_TENANT_HOST` to your tenant's URL (such as `https://acme.moderne.io`) and `MOD_TENANT_AUTHORIZATION` to a [personal access token](https://docs.moderne.io/user-documentation/moderne-platform/how-to-guides/create-api-access-tokens), so the CLI can send your tenant a record of every clone, build and publish. If you're a Moderne DX customer, there's nothing to set, since nothing in a DX run contacts Moderne. (An air-gapped installation will still need to [install the CLI into the image](docs/image.md#air-gapped-installations).)
 - **(Optional) How to clone private repositories.** If any of your repositories are private, mount a `.git-credentials` file at `/home/moderne/.git-credentials`.
 
 Start with `mod doctor`, which checks that everything is in place without changing anything and suggests a fix for anything that isn't:
@@ -69,7 +69,7 @@ Otherwise, the repository is rebuilt. Bazel repositories are always rebuilt, as 
 
 ## Running every day
 
-A large list finishes sooner if you split it into shards. Each container then runs `mod publish /var/moderne/ws --sync-csv --shard i/M` for its own `i`, from 1 to `M`. Any scheduler that runs containers can do this, and this repository shows two ways. [Running on one machine](docs/docker.md) uses a short shell script on a single large VM. [Running on Kubernetes](docs/kubernetes.md) uses a Kubernetes Job. Both pages cover sizing and what happens when a build fails.
+A large list finishes sooner if you split it into shards. Each container then runs `mod publish /var/moderne/ws --sync-csv --shard i/M` for its own `i`, from 1 to `M`. Any scheduler that runs containers can do this, and this repository shows three ways. [Running on one machine](docs/docker.md) uses a short shell script on a single large VM. [Running on Kubernetes](docs/kubernetes.md) uses a Kubernetes Job. [Running on Amazon ECS](docs/ecs.md) uses Fargate tasks started by a Step Functions state machine. Each page covers sizing and what happens when a build fails.
 
 ## Support
 

@@ -13,7 +13,7 @@ MOD_TENANT_HOST=https://<tenant>.moderne.io
 MOD_TENANT_AUTHORIZATION=<token>
 ```
 
-If you're on Moderne DX, replace the two tenant lines with `MOD_LICENSE_KEY=<license key>`.
+If you're on Moderne DX, leave out the two tenant lines.
 
 If the VM reaches S3 through an EC2 instance role, you'll need to raise the metadata service's hop limit. Each container sits one network hop further from it than the VM does. [Artifact stores](stores.md#s3) explains how to configure this.
 
