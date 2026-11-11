@@ -1,0 +1,16 @@
+# Apply to ../job.yaml with kubectl patch --local --type=merge.
+spec:
+  template:
+    metadata:
+      annotations:
+        karpenter.sh/do-not-disrupt: null
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+    spec:
+      nodeSelector:
+        cloud.google.com/gke-nodepool: mass-ingest
+        cloud.google.com/gke-spot: "true"
+      tolerations:
+        - key: mass-ingest
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
