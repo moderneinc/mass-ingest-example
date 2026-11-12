@@ -140,5 +140,3 @@ kubectl patch --local --type=merge -f k8s/job.yaml \
 ```
 
 Follow [Starting a run](#starting-a-run), using `/tmp/mass-ingest-gke-job.yaml` instead of `k8s/job.yaml` and your image's registry path for `IMAGE`. Upload `repos.csv` to the bucket before starting the Job. The script enables the GKE metadata server on its new node pool. The patch selects the Spot pool, tolerates its taint, and replaces the EKS disruption annotation with GKE's autoscaler protection annotation.
-
-Each ingest node has 4 vCPUs, 16 GiB of memory, and a 300 GiB boot disk, leaving room for GKE's storage reservations, the image, and the Job's 150 GiB storage request. The pool can scale to zero after the pods finish. Spot reclamation can interrupt a pod with less than its configured 120-second grace period, so retries resume from progress already published to the artifact store.
