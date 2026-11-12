@@ -24,8 +24,12 @@ jobs:
         export RUN_NAME=ci IMAGE=mass-ingest:ci SHARDS=8 CONCURRENCY=2 CLUSTER_NAME=ci NODE_ROLE=ci
         for f in k8s/*.yaml k8s/eks/*.yaml; do envsubst < "$f"; echo ---; done |
           ./kubeconform -strict -summary -ignore-missing-schemas
+        kubectl patch --local --type=merge -f k8s/job.yaml \
+          --patch-file=k8s/gke/job-patch.yaml -o yaml |
+          envsubst '$RUN_NAME $IMAGE $SHARDS $CONCURRENCY' |
+          ./kubeconform -strict -summary
     - name: shellcheck
-      run: shellcheck docker/run.sh
+      run: shellcheck docker/run.sh k8s/gke/create-nodepool.sh
 
   image:
     runs-on: ubuntu-latest

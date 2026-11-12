@@ -75,4 +75,6 @@ A large list finishes sooner if you split it into shards. Each container then ru
 
 The [mass ingest guide](https://docs.moderne.io/administrator-documentation/moderne-platform/how-to-guides/mass-ingest) (or its [Moderne DX version](https://docs.moderne.io/administrator-documentation/moderne-dx/how-to-guides/mass-ingest-dx)) explains how mass ingest works and how to size it. The [Moderne CLI documentation](https://docs.moderne.io/user-documentation/moderne-cli/getting-started/cli-intro) covers the commands used here in more depth. If you run into a problem with this example, please open an [issue](https://github.com/moderneinc/mass-ingest-example/issues).
 
+The Kubernetes guide covers [Amazon EKS](docs/kubernetes.md#amazon-eks) and [Google Kubernetes Engine (GKE)](docs/kubernetes.md#google-kubernetes-engine-gke).
+
 This example code is provided as-is for use with Moderne products.

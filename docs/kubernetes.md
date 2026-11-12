@@ -118,3 +118,27 @@ kubectl apply -f k8s/eks/nodepool.yaml
 ```
 
 Then uncomment the `nodeSelector` in [`k8s/job.yaml`](../k8s/job.yaml) so the Job's pods land on that pool. Rather than putting AWS keys in the store secret, give the `mass-ingest` service account an IAM role through [Pod Identity](stores.md#s3).
+
+## Google Kubernetes Engine (GKE)
+
+[`k8s/gke/`](../k8s/gke) adapts the same indexed Job for GKE Standard. The Google-specific pieces are the Spot node pool, scheduling patch, and Workload Identity Federation for keyless GCS access. The shared namespace, service account, ingest command, sharding, and retry settings stay in `k8s/`.
+
+For an existing GKE Standard cluster, the [node pool script](../k8s/gke/create-nodepool.sh) and [Job patch](../k8s/gke/job-patch.yaml) adapt the shared manifests. Follow the namespace and secret setup in [Setting up the namespace](#setting-up-the-namespace), use [Workload Identity Federation](https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity) for the Kubernetes service account, and configure the store for [Google Cloud Storage](stores.md#google-cloud-storage).
+
+The cluster must already have Workload Identity Federation enabled, and its Kubernetes service account must have access to the bucket. Set `MAX_NODES` to cap the pool and `NODE_SERVICE_ACCOUNT` to use a dedicated node identity. The default cap is eight nodes across all zones. The node identity needs Kubernetes Engine Default Node Service Account (`roles/container.defaultNodeServiceAccount`) in the cluster project and Artifact Registry Reader on the image repository.
+
+```bash
+export PROJECT_ID=your-project CLUSTER_NAME=your-cluster LOCATION=europe-west1
+bash k8s/gke/create-nodepool.sh
+kubectl patch --local --type=merge -f k8s/job.yaml \
+  --patch-file=k8s/gke/job-patch.yaml -o yaml > /tmp/mass-ingest-gke-job.yaml
+RUN_NAME=ingest-$(date -u +%Y%m%d-%H%M) \
+  IMAGE=europe-west1-docker.pkg.dev/your-project/your-repository/mass-ingest \
+  SHARDS=32 CONCURRENCY=8 \
+  envsubst '$RUN_NAME $IMAGE $SHARDS $CONCURRENCY' \
+  < /tmp/mass-ingest-gke-job.yaml | kubectl create -f -
+```
+
+Upload `repos.csv` to the bucket before starting the Job. This route needs Workload Identity enabled on the cluster; the script enables the GKE metadata server on its new node pool. It also requires `envsubst` to render the run variables. The patch selects the Spot pool, tolerates its taint, and replaces the EKS disruption annotation with GKE's autoscaler protection annotation.
+
+Each ingest node has 4 vCPUs, 16 GiB of memory, and a 300 GiB boot disk, leaving room for GKE's storage reservations, the image, and the Job's 150 GiB storage request. The pool can scale to zero after the pods finish. Spot reclamation can interrupt a pod with less than its configured 120-second grace period, so retries resume from progress already published to the artifact store.
