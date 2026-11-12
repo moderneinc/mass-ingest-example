@@ -128,17 +128,17 @@ For an existing GKE Standard cluster, the [node pool script](../k8s/gke/create-n
 The cluster must already have Workload Identity Federation enabled, and its Kubernetes service account must have access to the bucket. Set `MAX_NODES` to cap the pool and `NODE_SERVICE_ACCOUNT` to use a dedicated node identity. The default cap is eight nodes across all zones. The node identity needs Kubernetes Engine Default Node Service Account (`roles/container.defaultNodeServiceAccount`) in the cluster project and Artifact Registry Reader on the image repository.
 
 ```bash
-export PROJECT_ID=your-project CLUSTER_NAME=your-cluster LOCATION=europe-west1
-bash k8s/gke/create-nodepool.sh
-kubectl patch --local --type=merge -f k8s/job.yaml \
-  --patch-file=k8s/gke/job-patch.yaml -o yaml > /tmp/mass-ingest-gke-job.yaml
-RUN_NAME=ingest-$(date -u +%Y%m%d-%H%M) \
-  IMAGE=europe-west1-docker.pkg.dev/your-project/your-repository/mass-ingest \
-  SHARDS=32 CONCURRENCY=8 \
-  envsubst '$RUN_NAME $IMAGE $SHARDS $CONCURRENCY' \
-  < /tmp/mass-ingest-gke-job.yaml | kubectl create -f -
+PROJECT_ID=<project> CLUSTER_NAME=<cluster> LOCATION=europe-west1 \
+  bash k8s/gke/create-nodepool.sh
 ```
 
-Upload `repos.csv` to the bucket before starting the Job. This route needs Workload Identity enabled on the cluster; the script enables the GKE metadata server on its new node pool. It also requires `envsubst` to render the run variables. The patch selects the Spot pool, tolerates its taint, and replaces the EKS disruption annotation with GKE's autoscaler protection annotation.
+Then apply the [Job patch](../k8s/gke/job-patch.yaml) locally so the Job's pods land on that pool:
+
+```bash
+kubectl patch --local --type=merge -f k8s/job.yaml \
+  --patch-file=k8s/gke/job-patch.yaml -o yaml > /tmp/mass-ingest-gke-job.yaml
+```
+
+Follow [Starting a run](#starting-a-run), using `/tmp/mass-ingest-gke-job.yaml` instead of `k8s/job.yaml` and your image's registry path for `IMAGE`. Upload `repos.csv` to the bucket before starting the Job. The script enables the GKE metadata server on its new node pool. The patch selects the Spot pool, tolerates its taint, and replaces the EKS disruption annotation with GKE's autoscaler protection annotation.
 
 Each ingest node has 4 vCPUs, 16 GiB of memory, and a 300 GiB boot disk, leaving room for GKE's storage reservations, the image, and the Job's 150 GiB storage request. The pool can scale to zero after the pods finish. Spot reclamation can interrupt a pod with less than its configured 120-second grace period, so retries resume from progress already published to the artifact store.
