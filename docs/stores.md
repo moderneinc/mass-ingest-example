@@ -6,7 +6,7 @@
 - [Artifactory](#artifactory)
 - [Nexus and other Maven repositories](#nexus-and-other-maven-repositories)
 
-The container learns where to publish from the environment variables of one store below. In Kubernetes they go in the `mass-ingest-store` secret, and with Docker in the [`mass-ingest.env`](docker.md) file that `docker/run.sh` gives every container. The Artifactory and Maven variables carry a `0` because the CLI keeps those stores in numbered lists; keep it at `0`. If several stores are set, the CLI publishes to the first of Maven, Artifactory, S3, Google Cloud Storage and Azure Blob Storage.
+The container learns where to publish from the environment variables of one store below. In Kubernetes they go in the `mass-ingest-store` secret, with Docker in the [`mass-ingest.env`](docker.md) file that `docker/run.sh` gives every container, and on ECS in the [task definition](ecs.md#other-artifact-stores). The Artifactory and Maven variables carry a `0` because the CLI keeps those stores in numbered lists; keep it at `0`. If several stores are set, the CLI publishes to the first of Maven, Artifactory, S3, Google Cloud Storage and Azure Blob Storage.
 
 The CLI reads `repos.csv` from the root of the store and writes `repos-lock.csv` next to it. For S3, Google Cloud Storage and Azure Blob Storage, the URL stops at the bucket or container: `s3://your-bucket` works, `s3://your-bucket/lsts` is rejected. Every run replaces `repos-lock.csv`, so the credentials need to read, write and overwrite. Without overwrite, the first run records its results and every later run fails to.
 
@@ -24,6 +24,8 @@ On EKS, associate an IAM role with the `mass-ingest` service account through [Po
 aws eks create-pod-identity-association --cluster-name <cluster> \
   --namespace mass-ingest --service-account mass-ingest --role-arn <role-arn>
 ```
+
+On ECS, [the template](ecs.md) gives the tasks an IAM role with these permissions, and no key is needed.
 
 Elsewhere, set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_REGION`, or use the output of `aws configure export-credentials --format env`.
 

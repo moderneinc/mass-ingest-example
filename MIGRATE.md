@@ -27,7 +27,7 @@ The new example covers less than the old one did. If you use any of these, [comm
 - The FIPS image (`Dockerfile.fips`).
 - OpenShift, or any platform that runs containers under an arbitrary user ID. The new image doesn't run there yet ([#99](https://github.com/moderneinc/mass-ingest-example/issues/99)).
 
-Two other parts of the old example have no direct replacement, but don't block the migration. Observability (`2-observability/`, `mod monitor`) is no longer needed, since SaaS tenants show every clone, build and publish. AWS Batch and GCP Batch (`3-scalability/`) are replaced by the Kubernetes Job or the single-machine script, set up in [step 8](#8-set-up-how-it-runs).
+Two other parts of the old example have no direct replacement, but don't block the migration. Observability (`2-observability/`, `mod monitor`) is no longer needed, since SaaS tenants show every clone, build and publish. AWS Batch and GCP Batch (`3-scalability/`) are replaced by the Kubernetes Job, the Amazon ECS template or the single-machine script, set up in [step 8](#8-set-up-how-it-runs).
 
 ## 2. Put the complete repos.csv in your artifact store
 
@@ -99,13 +99,13 @@ The credentials need to overwrite files in the store, since every run replaces `
 
 ## 5. Connect to your tenant
 
-The CLI obtains the license it needs to build private repositories from your tenant. The connection used to be set up with `mod config moderne edit` or the `MODERNE_TENANT` and `MODERNE_TOKEN` variables the script read.
+On Moderne SaaS, the CLI sends your tenant a record of every clone, build and publish. The connection used to be set up with `mod config moderne edit` or the `MODERNE_TENANT` and `MODERNE_TOKEN` variables the script read.
 
 1. Set the tenant variables:
    - `MOD_TENANT_HOST=https://<tenant>.moderne.io`
    - `MOD_TENANT_AUTHORIZATION=<token>`
 
-   On Moderne DX, set `MOD_LICENSE_KEY` instead, which replaces `mod config license edit`.
+   On Moderne DX, skip this step. Building and publishing LSTs doesn't need a license key, so `mod config license edit` has no replacement.
 
 ## 6. Give it access to your Git repositories
 
@@ -165,7 +165,7 @@ Carry over the ones you had. The table lists the settings the old example set or
 
 Each container now runs `mod publish /var/moderne/ws --sync-csv`, works through the list one repository at a time, and exits. Parallelism comes from running several containers, each on one shard of the same list.
 
-1. Pick where it runs: a [Kubernetes Job](docs/kubernetes.md), or [one machine with Docker](docs/docker.md). With Docker, every variable from steps 4 to 7 goes in the env file. In Kubernetes, the Job only reads the `mass-ingest-store` and `mass-ingest-moderne` secrets: the step 4 variables go in the first, the step 5 ones in the second, and `GIT_SSH_COMMAND` and the step 7 settings in either, unless you add your own secret to the Job's `envFrom`.
+1. Pick where it runs: a [Kubernetes Job](docs/kubernetes.md), [Amazon ECS](docs/ecs.md), or [one machine with Docker](docs/docker.md). With Docker, every variable from steps 4 to 7 goes in the env file. On ECS, each one goes in the container's `Environment` or `Secrets` in the template. In Kubernetes, the Job only reads the `mass-ingest-store` and `mass-ingest-moderne` secrets: the step 4 variables go in the first, the step 5 ones in the second, and `GIT_SSH_COMMAND` and the step 7 settings in either, unless you add your own secret to the Job's `envFrom`.
 
 2. Choose how many containers run at once and how many shards the list is split into; [Running on Kubernetes](docs/kubernetes.md#sizing) explains both. If you used AWS or GCP Batch, start with as many containers as it ran in parallel, but don't copy its number of slices: a few shards per container is enough.
 
@@ -207,7 +207,7 @@ A run where some repositories fail still exits successfully, so the exit status 
 
 The old script often ran in a loop or in a container that restarted it. The new command finishes when it has worked through the list, so something has to start the next run.
 
-1. Schedule it with a Kubernetes CronJob or a scheduled Job (see [Running on Kubernetes](docs/kubernetes.md)), or with cron on a VM (see [Running on one machine](docs/docker.md#every-day)). A Kubernetes Deployment doesn't fit, since it restarts the pod as soon as it exits.
+1. Schedule it with a Kubernetes CronJob or a scheduled Job (see [Running on Kubernetes](docs/kubernetes.md)), with the ECS stack's [EventBridge schedule](docs/ecs.md#starting-a-run), or with cron on a VM (see [Running on one machine](docs/docker.md#every-day)). A Kubernetes Deployment doesn't fit, since it restarts the pod as soon as it exits.
 2. Retire the old image. If you run a periodic LST cleanup job, keep it: the new flow never deletes LSTs it published before.
 
 ## 14. Point the connector at repos-lock.csv

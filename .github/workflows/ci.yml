@@ -30,6 +30,8 @@ jobs:
           ./kubeconform -strict -summary
     - name: shellcheck
       run: shellcheck docker/run.sh k8s/gke/create-nodepool.sh
+    - name: Validate the ECS template
+      run: pipx run cfn-lint ecs/mass-ingest.yaml
 
   image:
     runs-on: ubuntu-latest
