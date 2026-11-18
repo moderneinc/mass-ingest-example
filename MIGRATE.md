@@ -207,7 +207,7 @@ A run where some repositories fail still exits successfully, so the exit status 
 
 The old script often ran in a loop or in a container that restarted it. The new command finishes when it has worked through the list, so something has to start the next run.
 
-1. Schedule it with a Kubernetes CronJob or a scheduled Job (see [Running on Kubernetes](docs/kubernetes.md)), with the ECS stack's [EventBridge schedule](docs/ecs.md#starting-a-run), or with cron on a VM (see [Running on one machine](docs/docker.md#every-day)). A Kubernetes Deployment doesn't fit, since it restarts the pod as soon as it exits.
+1. Schedule it with a Kubernetes CronJob or a scheduled Job (see [Running on Kubernetes](docs/kubernetes.md)), with the ECS stack's [EventBridge schedule](docs/ecs.md#running-it), or with cron on a VM (see [Running on one machine](docs/docker.md#every-day)). A Kubernetes Deployment doesn't fit, since it restarts the pod as soon as it exits.
 2. Retire the old image. If you run a periodic LST cleanup job, keep it: the new flow never deletes LSTs it published before.
 
 ## 14. Point the connector at repos-lock.csv

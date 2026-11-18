@@ -1,4 +1,4 @@
-# Mass ingest on Fargate: a task definition, and a state machine that runs one task per shard.
+# Mass ingest on Fargate: a task definition, and a schedule that runs it every night.
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Mass ingest on Amazon ECS and AWS Fargate
 
@@ -21,8 +21,9 @@ Parameters:
     Description: The S3 bucket that holds repos.csv and receives the LSTs
   CapacityProvider:
     Type: String
-    Default: FARGATE_SPOT
-    AllowedValues: [FARGATE_SPOT, FARGATE]
+    Default: FARGATE
+    AllowedValues: [FARGATE, FARGATE_SPOT]
+    Description: FARGATE_SPOT costs less, but a reclaimed task waits for the next night to finish
   TenantHost:
     Type: String
     Default: ""
@@ -42,15 +43,6 @@ Parameters:
     Type: String
     Default: DISABLED
     AllowedValues: [DISABLED, ENABLED]
-  Shards:
-    Type: Number
-    Default: 32
-    Description: How many pieces the scheduled run splits repos.csv into
-  Concurrency:
-    Type: Number
-    Default: 8
-    MaxValue: 40
-    Description: How many tasks the scheduled run keeps going at once
 
 Conditions:
   HasTenantHost: !Not [!Equals [!Ref TenantHost, ""]]
@@ -171,7 +163,8 @@ Resources:
               exec "$@"
             - sh
           # Replacing the entry point drops the image's CMD, so it is repeated here.
-          Command: [mod, publish, /var/moderne/ws, --sync-csv]
+          # timeout stops a run whose builds hang. The CLI writes the lock before it exits.
+          Command: [timeout, 18h, mod, publish, /var/moderne/ws, --sync-csv]
           Environment:
             - Name: MOD_LSTS_ARTIFACTS_S3_URL
               Value: !Sub s3://${StoreBucket}
@@ -196,129 +189,6 @@ Resources:
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: mass-ingest
 
-  StateMachineRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal: { Service: states.amazonaws.com }
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: run-tasks
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action: ecs:RunTask
-                Resource: !Ref TaskDefinition
-              - Effect: Allow
-                Action: [ecs:StopTask, ecs:DescribeTasks]
-                Resource: "*"
-              - Effect: Allow
-                Action: [events:PutTargets, events:PutRule, events:DescribeRule]
-                Resource: !Sub arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/StepFunctionsGetEventsForECSTaskRule
-              - Effect: Allow
-                Action: iam:PassRole
-                Resource:
-                  - !GetAtt ExecutionRole.Arn
-                  - !GetAtt TaskRole.Arn
-
-  # One run. Start it with {"shards": 32, "concurrency": 8}.
-  StateMachine:
-    Type: AWS::StepFunctions::StateMachine
-    Metadata:
-      # cfn-lint doesn't know that JSONata can set MaxConcurrency.
-      cfn-lint:
-        config:
-          ignore_checks: [E3601]
-    Properties:
-      StateMachineName: !Ref AWS::StackName
-      RoleArn: !GetAtt StateMachineRole.Arn
-      Definition:
-        QueryLanguage: JSONata
-        # The bound on a run whose builds hang.
-        TimeoutSeconds: 64800
-        StartAt: Shards
-        States:
-          Shards:
-            Type: Map
-            Items: "{% [1..$states.input.shards] %}"
-            MaxConcurrency: "{% $states.input.concurrency %}"
-            ItemSelector:
-              shard: "{% $states.context.Map.Item.Value %}"
-              shards: "{% $states.input.shards %}"
-            ItemProcessor:
-              ProcessorConfig:
-                Mode: INLINE
-              StartAt: Publish
-              States:
-                Publish:
-                  Type: Task
-                  Resource: !Sub arn:${AWS::Partition}:states:::ecs:runTask.sync
-                  Arguments:
-                    Cluster: !Ref Cluster
-                    TaskDefinition: !Ref TaskDefinition
-                    CapacityProviderStrategy:
-                      - CapacityProvider: !Ref CapacityProvider
-                        Weight: 1
-                    EnableExecuteCommand: true
-                    NetworkConfiguration:
-                      AwsvpcConfiguration:
-                        Subnets: !Ref Subnets
-                        SecurityGroups: [!Ref SecurityGroup]
-                        AssignPublicIp: !Ref AssignPublicIp
-                    Overrides:
-                      ContainerOverrides:
-                        - Name: mass-ingest
-                          Command:
-                            - mod
-                            - publish
-                            - /var/moderne/ws
-                            - --sync-csv
-                            - --shard
-                            - "{% $states.input.shard & '/' & $states.input.shards %}"
-                  Output:
-                    shard: "{% $states.input.shard %}"
-                    failed: false
-                  Retry:
-                    # ECS couldn't start the task, as when Spot capacity is short. Nothing ran yet.
-                    - ErrorEquals: [AmazonECS.Unknown, ECS.AmazonECSException]
-                      IntervalSeconds: 300
-                      MaxAttempts: 6
-                      BackoffRate: 1
-                    # The task stopped: a reclaimed Spot task, or a shard that exited non-zero.
-                    - ErrorEquals: [States.ALL]
-                      IntervalSeconds: 60
-                      MaxAttempts: 3
-                      BackoffRate: 2
-                  # An uncaught failure would stop every other shard. Their work is already in the lock.
-                  Catch:
-                    - ErrorEquals: [States.ALL]
-                      Next: ShardFailed
-                      Output:
-                        shard: "{% $states.input.shard %}"
-                        failed: true
-                  End: true
-                ShardFailed:
-                  Type: Pass
-                  End: true
-            Output:
-              failedShards: "{% [$states.result[failed].shard] %}"
-            Next: AnyFailed
-          AnyFailed:
-            Type: Choice
-            Choices:
-              - Condition: "{% $count($states.input.failedShards) > 0 %}"
-                Next: RunFailed
-            Default: RunSucceeded
-          RunFailed:
-            Type: Fail
-            Error: ShardsFailed
-            Cause: "{% 'These shards ran out of retries: ' & $string($states.input.failedShards) %}"
-          RunSucceeded:
-            Type: Succeed
 
   ScheduleRole:
     Type: AWS::IAM::Role
@@ -330,14 +200,20 @@ Resources:
             Principal: { Service: scheduler.amazonaws.com }
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: start-run
+        - PolicyName: run-task
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
-                Action: states:StartExecution
-                Resource: !Ref StateMachine
+                Action: ecs:RunTask
+                Resource: !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${AWS::StackName}:*
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !GetAtt ExecutionRole.Arn
+                  - !GetAtt TaskRole.Arn
 
+  # Starts one task that ingests all of repos.csv.
   NightlyRun:
     Type: AWS::Scheduler::Schedule
     Properties:
@@ -346,12 +222,21 @@ Resources:
       FlexibleTimeWindow:
         Mode: "OFF"
       Target:
-        Arn: !Ref StateMachine
+        Arn: !GetAtt Cluster.Arn
         RoleArn: !GetAtt ScheduleRole.Arn
-        Input: !Sub '{"shards": ${Shards}, "concurrency": ${Concurrency}}'
+        EcsParameters:
+          TaskDefinitionArn: !Ref TaskDefinition
+          TaskCount: 1
+          CapacityProviderStrategy:
+            - CapacityProvider: !Ref CapacityProvider
+              Weight: 1
+          EnableExecuteCommand: true
+          NetworkConfiguration:
+            AwsvpcConfiguration:
+              Subnets: !Ref Subnets
+              SecurityGroups: [!Ref SecurityGroup]
+              AssignPublicIp: !Ref AssignPublicIp
 
 Outputs:
-  StateMachineArn:
-    Value: !Ref StateMachine
   SecurityGroup:
     Value: !Ref SecurityGroup

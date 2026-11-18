@@ -1,6 +1,6 @@
 # Running on Amazon ECS
 
-[`ecs/mass-ingest.yaml`](../ecs/mass-ingest.yaml) is a CloudFormation template that runs mass ingest on Amazon ECS. Every night, EventBridge Scheduler starts a Step Functions state machine, which runs one [Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) task for each shard of `repos.csv`. The tasks publish LSTs to your S3 bucket.
+[`ecs/mass-ingest.yaml`](../ecs/mass-ingest.yaml) is a CloudFormation template that runs mass ingest on Amazon ECS. Every night, EventBridge Scheduler starts one [Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) task, which builds every repository in `repos.csv` and publishes the LSTs to your S3 bucket.
 
 ## Setting it up
 
@@ -38,16 +38,16 @@ Deploy one stack for each bucket and `repos.csv`, with a different stack name fo
 
 ## Running it
 
-To run every night, deploy again with `ScheduleState=ENABLED`. The `Shards`, `Concurrency` and `Schedule` parameters control the nightly run.
+To run every night, deploy again with `ScheduleState=ENABLED`. The run starts at 01:00 UTC. To pick a different time, set `Schedule`.
 
-To run now, start the state machine, whose ARN is in the stack's outputs:
+To run now, start a task with one of your subnets and the security group from the stack's outputs:
 
 ```bash
-aws stepfunctions start-execution --state-machine-arn <arn> \
-  --input '{"shards": 32, "concurrency": 8}'
+aws ecs run-task --cluster mass-ingest --task-definition mass-ingest \
+  --network-configuration 'awsvpcConfiguration={subnets=[<subnet>],securityGroups=[<security group>]}'
 ```
 
-Set `concurrency` to how many builds you want running at once, up to 40. Set `shards` to about four times that.
+A run that's still going after 18 hours is stopped. The next run picks up the repositories it didn't get to.
 
 ## Finding out why a build failed
 
@@ -58,4 +58,4 @@ Read the build's `trace.csv`.
 
 ## Changing other settings
 
-To change anything else, such as the task size or the artifact store ([Artifact stores](stores.md) lists the variables), edit the template and deploy again. For example, to ingest only one organization from `repos.csv`, add `--organization` and its name to the `Command` in the state machine.
+To change anything else, such as the task size or the artifact store ([Artifact stores](stores.md) lists the variables), edit the template and deploy again. For example, to ingest only one organization from `repos.csv`, add `--organization` and its name to the `Command` in the task definition.
